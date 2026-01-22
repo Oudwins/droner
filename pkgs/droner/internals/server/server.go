@@ -51,43 +51,46 @@ func (s *Server) SafeStart() error {
 		}
 	}()
 
-	if s.IsRunning() {
+	if s.waitForStart() {
 		return nil
 	}
 
 	return errors.New("Couldn't start server")
 }
 
+func (s *Server) waitForStart() bool {
+	time.Sleep(2 * time.Second)
+	for i := range 6 {
+		s.Logger.Info("Waiting for server to start", "attempt", i)
+		if isRunning := s.IsRunning(); isRunning {
+			return true
+		}
+		time.Sleep(time.Duration(math.Pow(2, float64(i))) * time.Second)
+	}
+
+	return false
+}
+
 func (s *Server) IsRunning() bool {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	ourVersion := conf.GetConfig().VERSION
-	isRunning := false
-	for i := range 5 {
-		time.Sleep(time.Duration(math.Pow(1, float64(i))) * time.Second)
-		s.Logger.Info("Checking server is running", "attempt", i)
-		resp, err := client.Get(s.Config.BASE_URL + "/version")
-		if err != nil {
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			continue
-		}
-		serverVersion := strings.TrimSpace(string(body))
-		s.Logger.Info("server version", slog.String("server", serverVersion), slog.String("our", ourVersion))
-		resp.Body.Close()
-		isRunning = serverVersion == ourVersion
-		if isRunning {
-			break
-		}
+	resp, err := client.Get(s.Config.BASE_URL + "/version")
+	if err != nil {
+		return false
 	}
 
-	return isRunning
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	serverVersion := strings.TrimSpace(string(body))
+	s.Logger.Info("server version", slog.String("server", serverVersion), slog.String("our", ourVersion))
+	resp.Body.Close()
+	return serverVersion == ourVersion
 }
 
 func (s *Server) Start() error {
