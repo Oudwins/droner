@@ -167,21 +167,21 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	worktreeName := filepath.Base(worktreePath)
-	if sessionID == "" {
-		sessionID = sessionIDFromName(worktreeName)
+	if reqbody.SessionID == "" {
+		reqbody.SessionID = sessionIDFromName(worktreeName)
 	}
 
 	if err := killTmuxSession(worktreeName); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	if err := removeGitWorktree(worktreePath); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
-	respondSession(w, worktreePath, sessionID)
+	RenderJSON(w, r, schemas.SessionDeleteResponse{WorktreePath: worktreePath, SessionID: reqbody.SessionID})
 }
 
 func gitIsInsideWorkTree(repoPath string) error {

@@ -6,6 +6,8 @@
 ## Useful commands
 
 ```bash
+# is server running
+curl -X GET http://localhost:57876/version
 # Create session (auto session_id):
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
