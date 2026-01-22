@@ -33,15 +33,17 @@ func GetEnv() *EnvStruct {
 }
 
 type Config struct {
-	VERSION     string
-	PORT        int
-	LISTEN_ADDR string
-	LISTEN_PROT string
-	BASE_URL    string
+	VERSION      string
+	PORT         int
+	LISTEN_ADDR  string
+	LISTEN_PROT  string
+	BASE_URL     string
+	WORKTREE_DIR string
 }
 
 var ConfigSchema = z.Struct(z.Shape{
-	"PORT": z.Int().Default(57876),
+	"PORT":         z.Int().Default(57876),
+	"WORKTREE_DIR": z.String().Default("~/.droner"),
 })
 var config *Config
 
