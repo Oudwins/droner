@@ -28,7 +28,7 @@ func (s *Server) MiddlewareLogger(next http.Handler) http.Handler {
 
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				logger.Error("panic", slog.Any("error", recovered), slog.String("stack", string(debug.Stack())))
+				_ = logger.Error("panic", slog.Any("error", recovered), slog.String("stack", string(debug.Stack())))
 				if recorder.status == 0 {
 					recorder.WriteHeader(http.StatusInternalServerError)
 				}
@@ -38,8 +38,8 @@ func (s *Server) MiddlewareLogger(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			_ = logger.Info("response", slog.Int("status", status))
-			_ = logger.Info("request latency", slog.Duration("duration", time.Since(start)))
+			logger.Add(slog.Int("status", status))
+			logger.Add(slog.Duration("duration", time.Since(start)))
 
 			payload := logger.Flush()
 			s.Logger.Info("request", payload)

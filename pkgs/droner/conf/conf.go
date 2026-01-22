@@ -13,7 +13,7 @@ type EnvStruct struct {
 	XDG_HOME string `zog:"$XDG_HOME"`
 }
 
-var env *EnvStruct = nil
+var env *EnvStruct = &EnvStruct{}
 
 var EnvSchema = z.Struct(z.Shape{
 	"HOME":     z.String(),
@@ -47,7 +47,7 @@ var ConfigSchema = z.Struct(z.Shape{
 	v.BASE_PATH = "http://localhost:" + strconv.Itoa(v.PORT)
 	return nil
 })
-var config *Config = nil
+var config *Config = &Config{}
 
 func GetConfig() *Config {
 
