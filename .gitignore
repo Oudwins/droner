@@ -1,0 +1,8 @@
+.direnv/
+result
+result-*
+*.exe
+*.out
+*.test
+/pkgs/droner/droner
+/pkgs/droner/bin/
