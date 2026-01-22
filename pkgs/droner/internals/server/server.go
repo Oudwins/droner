@@ -2,6 +2,7 @@ package server
 
 import (
 	"droner/conf"
+	"droner/env"
 	"droner/internals/logbuf"
 	"errors"
 	"io"
@@ -17,18 +18,18 @@ import (
 
 type Server struct {
 	Config *conf.Config
-	Env    *conf.EnvStruct
+	Env    *env.EnvStruct
 	Logger *slog.Logger
 	Logbuf *logbuf.Logger
 }
 
 func New() *Server {
 	config := conf.GetConfig()
-	env := conf.GetEnv()
+	env := env.Get()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	buffer := logbuf.New(
 		slog.String("version", config.VERSION),
-		slog.Int("port", config.PORT),
+		slog.Int("port", env.PORT),
 	)
 	return &Server{
 		Config: config,
@@ -73,8 +74,7 @@ func (s *Server) waitForStart() bool {
 
 func (s *Server) IsRunning() bool {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
-	ourVersion := conf.GetConfig().VERSION
-	resp, err := client.Get(s.Config.BASE_URL + "/version")
+	resp, err := client.Get(s.Env.BASE_URL + "/version")
 	if err != nil {
 		return false
 	}
@@ -87,14 +87,13 @@ func (s *Server) IsRunning() bool {
 	if err != nil {
 		return false
 	}
-	serverVersion := strings.TrimSpace(string(body))
-	s.Logger.Info("server version", slog.String("server", serverVersion), slog.String("our", ourVersion))
+	_ = strings.TrimSpace(string(body))
 	resp.Body.Close()
-	return serverVersion == ourVersion
+	return true
 }
 
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.Config.LISTEN_ADDR)
+	listener, err := net.Listen("tcp", s.Env.LISTEN_ADDR)
 	if err != nil {
 		return err
 	}

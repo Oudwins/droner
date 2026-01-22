@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"droner/conf"
+	"droner/env"
 	"droner/internals/schemas"
 )
 
@@ -33,9 +33,9 @@ func Run(args []string) error {
 		return ErrUsage
 	}
 
-	config := conf.GetConfig()
+	envs := env.Get()
 
-	endpoint := fmt.Sprintf("%s/sum?a=%s&b=%s", config.BASE_URL, args[1], args[2])
+	endpoint := fmt.Sprintf("%s/sum?a=%s&b=%s", envs.BASE_URL, args[1], args[2])
 	resp, err := http.Get(endpoint)
 	if err != nil {
 		return err
