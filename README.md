@@ -1,0 +1,25 @@
+# 
+
+
+
+
+## Useful commands
+
+```bash
+# Create session (auto session_id):
+curl -sS -X POST http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/tmx/projects/droner/"}'
+# Create session (explicit session_id):
+curl -sS -X POST http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/tmx/projects/droner/","session_id":"abc-12"}'
+# Delete session by path:
+curl -sS -X DELETE http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/tmx/projects/droner/"}'
+# Delete session by session_id:
+curl -sS -X DELETE http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"abc-12"}'
+```

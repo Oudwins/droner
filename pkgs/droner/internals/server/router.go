@@ -11,5 +11,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(s.MiddlewareLogger)
 	r.Get("/version", s.HandlerVersion)
 	r.Get("/sum", s.HandlerSum)
+	r.Post("/sessions", s.HandlerCreateSession)
+	r.Delete("/sessions", s.HandlerDeleteSession)
 	return r
 }

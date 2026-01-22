@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -62,7 +63,7 @@ func (s *Server) IsRunning() bool {
 	ourVersion := conf.GetConfig().VERSION
 	isRunning := false
 	for i := range 5 {
-		time.Sleep(time.Duration(i) * time.Second)
+		time.Sleep(time.Duration(math.Pow(1, float64(i))) * time.Second)
 		s.Logger.Info("Checking server is running", "attempt", i)
 		resp, err := client.Get(s.Config.BASE_URL + "/version")
 		if err != nil {

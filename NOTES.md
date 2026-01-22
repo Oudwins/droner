@@ -13,3 +13,11 @@ We can do worktree names as
   It contains gitdir: /path/to/original/.git/worktrees/<name>. You can parse this to get the original.
 - git worktree list --porcelain (run from original repo)  
   Lists all worktrees and their paths, branches, and the main repo.
+
+
+
+  API
+  ```bash
+  dr {x} --message {m} --path {y} --id {z}
+
+  ```
