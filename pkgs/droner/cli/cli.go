@@ -33,7 +33,7 @@ func Run(args []string) error {
 		return ErrUsage
 	}
 
-	endpoint := fmt.Sprintf("http://%s/sum?a=%s&b=%s", server.DefaultAddr, args[1], args[2])
+	endpoint := fmt.Sprintf("http://%s/sum?a=%s&b=%s", server.New().Config.BASE_PATH, args[1], args[2])
 	resp, err := http.Get(endpoint)
 	if err != nil {
 		return err

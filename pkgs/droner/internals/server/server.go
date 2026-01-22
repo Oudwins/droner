@@ -43,9 +43,10 @@ func (s *Server) SafeStart() error {
 	}
 
 	go func() {
+		s.Logger.Info("starting server")
 		err := s.Start()
 		if err != nil {
-			log.Fatal("[Droner] Failed to start server", err)
+			log.Fatal("[Droner] Failed to start server: " + err.Error())
 		}
 	}()
 
@@ -57,23 +58,36 @@ func (s *Server) SafeStart() error {
 }
 
 func (s *Server) IsRunning() bool {
-	client := &http.Client{Timeout: 200 * time.Millisecond}
-	resp, err := client.Get(s.Config.BASE_PATH + "/version")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
+	time.Sleep(2 * time.Second)
+	client := &http.Client{Timeout: 200 * time.Second}
+	ourVersion := conf.GetConfig().VERSION
+	isRunning := false
+	for i := range 5 {
+		time.Sleep(time.Duration(i) * time.Second)
+		s.Logger.Info("Checking server is running", "attempt", i)
+		resp, err := client.Get(s.Config.BASE_PATH + "/version")
+		if err != nil {
+			continue
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return false
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			continue
+		}
+		serverVersion := strings.TrimSpace(string(body))
+		s.Logger.Info("server version", slog.String("server", serverVersion), slog.String("our", ourVersion))
+		resp.Body.Close()
+		isRunning = serverVersion == ourVersion
+		if isRunning {
+			break
+		}
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false
-	}
-
-	return strings.TrimSpace(string(body)) == s.Config.VERSION
+	return isRunning
 }
 
 func (s *Server) Start() error {

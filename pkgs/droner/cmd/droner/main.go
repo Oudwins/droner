@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 
@@ -13,12 +14,11 @@ import (
 func main() {
 	args := os.Args[1:]
 	serverInstance := server.New()
-	err = serverInstance.Start()
+	err := serverInstance.SafeStart()
 
 	if err != nil {
 		log.Fatal("[Droner] CLI Failed to start server. Error: ", err)
 	}
-	// TODO: Deal with the error
 
 	if err := cli.Run(args); err != nil {
 		if errors.Is(err, cli.ErrUsage) {
