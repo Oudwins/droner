@@ -1,90 +1,87 @@
 package logbuf
 
 import (
-	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 )
 
 type Entry struct {
-	Level   string    `json:"level"`
-	Message string    `json:"message"`
-	At      time.Time `json:"at"`
-	Seq     uint64    `json:"seq"`
-}
-
-type Payload struct {
-	ID      string      `json:"id"`
-	StartAt time.Time   `json:"start_at"`
-	EndAt   time.Time   `json:"end_at"`
-	Data    PayloadData `json:"data"`
-}
-
-type PayloadData struct {
-	Logs []Entry `json:"logs"`
+	Level   string
+	Message string
+	At      time.Time
+	Seq     uint64
+	Attrs   []slog.Attr
 }
 
 type Logger struct {
+	mu     sync.Mutex
+	parent *Logger
+	attrs  []slog.Attr
+	buffer *buffer
+}
+
+type buffer struct {
 	mu      sync.Mutex
-	id      string
-	startAt time.Time
 	entries []Entry
 	seq     uint64
 }
 
-var loggerPool = sync.Pool{
-	New: func() any {
-		return &Logger{}
-	},
-}
-
-func New(id string) *Logger {
-	logger := loggerPool.Get().(*Logger)
-	logger.id = id
-	logger.startAt = time.Now()
-	logger.entries = logger.entries[:0]
-	logger.seq = 0
+func New(attrs ...slog.Attr) *Logger {
+	logger := &Logger{}
+	if len(attrs) > 0 {
+		logger.attrs = append(logger.attrs, attrs...)
+	}
 	return logger
 }
 
-func (l *Logger) Emerg(message string) error {
-	l.appendEntry("emerg", message)
+func (l *Logger) With(attrs ...slog.Attr) *Logger {
+	if len(attrs) == 0 {
+		return l
+	}
+	child := &Logger{parent: l, buffer: l.buffer}
+	if child.buffer == nil {
+		child.buffer = &buffer{}
+	}
+	child.attrs = append(child.attrs, attrs...)
+	return child
+}
+
+func (l *Logger) Add(attrs ...slog.Attr) {
+	if len(attrs) == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.attrs = append(l.attrs, attrs...)
+	l.mu.Unlock()
+}
+
+func (l *Logger) Debug(message string, attrs ...slog.Attr) error {
+	l.appendEntry("debug", message, attrs...)
 	return nil
 }
 
-func (l *Logger) Alert(message string) error {
-	l.appendEntry("alert", message)
+func (l *Logger) Info(message string, attrs ...slog.Attr) error {
+	l.appendEntry("info", message, attrs...)
 	return nil
 }
 
-func (l *Logger) Crit(message string) error {
-	l.appendEntry("crit", message)
+func (l *Logger) Warn(message string, attrs ...slog.Attr) error {
+	l.appendEntry("warn", message, attrs...)
 	return nil
 }
 
-func (l *Logger) Err(message string) error {
-	l.appendEntry("err", message)
+func (l *Logger) Error(message string, attrs ...slog.Attr) error {
+	l.appendEntry("error", message, attrs...)
 	return nil
 }
 
-func (l *Logger) Warning(message string) error {
-	l.appendEntry("warning", message)
-	return nil
+func (l *Logger) Warning(message string, attrs ...slog.Attr) error {
+	return l.Warn(message, attrs...)
 }
 
-func (l *Logger) Notice(message string) error {
-	l.appendEntry("notice", message)
-	return nil
-}
-
-func (l *Logger) Info(message string) error {
-	l.appendEntry("info", message)
-	return nil
-}
-
-func (l *Logger) Debug(message string) error {
-	l.appendEntry("debug", message)
-	return nil
+func (l *Logger) Err(message string, attrs ...slog.Attr) error {
+	return l.Error(message, attrs...)
 }
 
 func (l *Logger) Write(p []byte) (int, error) {
@@ -92,42 +89,138 @@ func (l *Logger) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (l *Logger) Flush() (string, error) {
-	l.mu.Lock()
-	entries := make([]Entry, len(l.entries))
-	copy(entries, l.entries)
-	payload := Payload{
-		ID:      l.id,
-		StartAt: l.startAt,
-		EndAt:   time.Now(),
-		Data:    PayloadData{Logs: entries},
+func (l *Logger) Flush() slog.Attr {
+	buf := l.bufferOrAncestor()
+	entries := []Entry{}
+	if buf != nil {
+		buf.mu.Lock()
+		entries = make([]Entry, len(buf.entries))
+		copy(entries, buf.entries)
+		buf.entries = buf.entries[:0]
+		buf.seq = 0
+		buf.mu.Unlock()
 	}
-	l.resetLocked()
-	l.mu.Unlock()
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
+	payloadAttrs := l.collectAttrs()
+	payloadAttrs = append(payloadAttrs, slog.Any("entries", entriesToPayload(entries)))
+	payloadArgs := make([]any, 0, len(payloadAttrs))
+	for _, attr := range payloadAttrs {
+		payloadArgs = append(payloadArgs, attr)
 	}
-	return string(data), nil
+	return slog.Group("", payloadArgs...)
 }
 
-func (l *Logger) appendEntry(level, message string) {
-	l.mu.Lock()
-	l.seq++
-	l.entries = append(l.entries, Entry{
+func (l *Logger) appendEntry(level, message string, attrs ...slog.Attr) {
+	buf := l.bufferOrAncestor()
+	if buf == nil {
+		return
+	}
+	buf.mu.Lock()
+	buf.seq++
+	entry := Entry{
 		Level:   level,
 		Message: message,
 		At:      time.Now(),
-		Seq:     l.seq,
-	})
-	l.mu.Unlock()
+		Seq:     buf.seq,
+	}
+	if len(attrs) > 0 {
+		entry.Attrs = append(entry.Attrs, attrs...)
+	}
+	buf.entries = append(buf.entries, entry)
+	buf.mu.Unlock()
 }
 
-func (l *Logger) resetLocked() {
-	l.id = ""
-	l.startAt = time.Time{}
-	l.entries = l.entries[:0]
-	l.seq = 0
-	loggerPool.Put(l)
+func (l *Logger) bufferOrAncestor() *buffer {
+	if l.buffer != nil {
+		return l.buffer
+	}
+	for current := l.parent; current != nil; current = current.parent {
+		if current.buffer != nil {
+			return current.buffer
+		}
+	}
+	return nil
+}
+
+func (l *Logger) collectAttrs() []slog.Attr {
+	chain := []*Logger{}
+	for current := l; current != nil; current = current.parent {
+		chain = append(chain, current)
+	}
+
+	attrs := make([]slog.Attr, 0)
+	for i := len(chain) - 1; i >= 0; i-- {
+		logger := chain[i]
+		logger.mu.Lock()
+		if len(logger.attrs) > 0 {
+			attrs = append(attrs, logger.attrs...)
+		}
+		logger.mu.Unlock()
+	}
+
+	return attrs
+}
+
+func entriesToPayload(entries []Entry) []map[string]any {
+	payload := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		entryPayload := map[string]any{
+			"message": entry.Message,
+			"level":   entry.Level,
+			"at":      entry.At,
+			"seq":     entry.Seq,
+		}
+		if len(entry.Attrs) > 0 {
+			attrsMap := attrsToMap(entry.Attrs)
+			for key, value := range attrsMap {
+				if _, exists := entryPayload[key]; exists {
+					continue
+				}
+				entryPayload[key] = value
+			}
+		}
+		payload = append(payload, entryPayload)
+	}
+	return payload
+}
+
+func attrsToMap(attrs []slog.Attr) map[string]any {
+	result := map[string]any{}
+	for _, attr := range attrs {
+		if attr.Key == "" {
+			if attr.Value.Kind() == slog.KindGroup {
+				for key, value := range attrsToMap(attr.Value.Group()) {
+					result[key] = value
+				}
+			}
+			continue
+		}
+		result[attr.Key] = valueToAny(attr.Value)
+	}
+	return result
+}
+
+func valueToAny(value slog.Value) any {
+	switch value.Kind() {
+	case slog.KindAny:
+		return value.Any()
+	case slog.KindBool:
+		return value.Bool()
+	case slog.KindDuration:
+		return value.Duration()
+	case slog.KindFloat64:
+		return value.Float64()
+	case slog.KindInt64:
+		return value.Int64()
+	case slog.KindString:
+		return value.String()
+	case slog.KindTime:
+		return value.Time()
+	case slog.KindUint64:
+		return value.Uint64()
+	case slog.KindGroup:
+		return attrsToMap(value.Group())
+	default:
+		return value.String()
+	}
 }

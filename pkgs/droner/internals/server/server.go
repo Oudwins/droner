@@ -2,10 +2,14 @@ package server
 
 import (
 	"droner/conf"
+	"droner/internals/logbuf"
+	"errors"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -13,12 +17,23 @@ import (
 type Server struct {
 	Config *conf.Config
 	Env    *conf.EnvStruct
+	Logger *slog.Logger
+	Logbuf *logbuf.Logger
 }
 
 func New() *Server {
+	config := conf.GetConfig()
+	env := conf.GetEnv()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	buffer := logbuf.New(
+		slog.String("version", config.VERSION),
+		slog.String("base_path", config.BASE_PATH),
+	)
 	return &Server{
-		Config: conf.GetConfig(),
-		Env:    conf.GetEnv(),
+		Config: config,
+		Env:    env,
+		Logger: logger,
+		Logbuf: buffer,
 	}
 }
 

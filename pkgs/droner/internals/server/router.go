@@ -8,6 +8,7 @@ import (
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(s.MiddlewareLogger)
 	r.Get("/version", s.HandlerVersion)
 	r.Get("/sum", s.HandlerSum)
 	return r
