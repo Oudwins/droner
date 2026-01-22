@@ -58,8 +58,7 @@ func (s *Server) SafeStart() error {
 }
 
 func (s *Server) IsRunning() bool {
-	time.Sleep(2 * time.Second)
-	client := &http.Client{Timeout: 200 * time.Second}
+	client := &http.Client{Timeout: 200 * time.Millisecond}
 	ourVersion := conf.GetConfig().VERSION
 	isRunning := false
 	for i := range 5 {
