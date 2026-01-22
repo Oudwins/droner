@@ -27,7 +27,7 @@ func New() *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	buffer := logbuf.New(
 		slog.String("version", config.VERSION),
-		slog.String("base_path", config.BASE_PATH),
+		slog.Int("port", config.PORT),
 	)
 	return &Server{
 		Config: config,
@@ -65,7 +65,7 @@ func (s *Server) IsRunning() bool {
 	for i := range 5 {
 		time.Sleep(time.Duration(i) * time.Second)
 		s.Logger.Info("Checking server is running", "attempt", i)
-		resp, err := client.Get(s.Config.BASE_PATH + "/version")
+		resp, err := client.Get(s.Config.BASE_URL + "/version")
 		if err != nil {
 			continue
 		}
@@ -91,7 +91,7 @@ func (s *Server) IsRunning() bool {
 }
 
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.Config.BASE_PATH)
+	listener, err := net.Listen("tcp", s.Config.LISTEN_ADDR)
 	if err != nil {
 		return err
 	}

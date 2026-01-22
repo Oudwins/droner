@@ -14,6 +14,13 @@ import (
 func main() {
 	args := os.Args[1:]
 	serverInstance := server.New()
+	if len(args) == 0 {
+		if err := serverInstance.Start(); err != nil {
+			log.Fatal("[Droner] Failed to start server. Error: ", err)
+		}
+		return
+	}
+
 	err := serverInstance.SafeStart()
 
 	if err != nil {

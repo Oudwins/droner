@@ -11,7 +11,7 @@ import (
 
 func (s *Server) HandlerVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-
+	_, _ = w.Write([]byte(s.Config.VERSION))
 }
 
 func (s *Server) HandlerSum(w http.ResponseWriter, r *http.Request) {

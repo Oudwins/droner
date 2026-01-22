@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"droner/conf"
 	"droner/internals/schemas"
-	"droner/internals/server"
 )
 
 var ErrUsage = errors.New("usage: droner sum <a> <b>")
@@ -33,7 +33,9 @@ func Run(args []string) error {
 		return ErrUsage
 	}
 
-	endpoint := fmt.Sprintf("http://%s/sum?a=%s&b=%s", server.New().Config.BASE_PATH, args[1], args[2])
+	config := conf.GetConfig()
+
+	endpoint := fmt.Sprintf("%s/sum?a=%s&b=%s", config.BASE_URL, args[1], args[2])
 	resp, err := http.Get(endpoint)
 	if err != nil {
 		return err

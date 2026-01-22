@@ -2,6 +2,7 @@ package conf
 
 import (
 	"log"
+	"log/slog"
 	"strconv"
 
 	z "github.com/Oudwins/zog"
@@ -13,7 +14,7 @@ type EnvStruct struct {
 	XDG_HOME string `zog:"$XDG_HOME"`
 }
 
-var env *EnvStruct = &EnvStruct{}
+var env *EnvStruct
 
 var EnvSchema = z.Struct(z.Shape{
 	"HOME":     z.String(),
@@ -22,39 +23,42 @@ var EnvSchema = z.Struct(z.Shape{
 
 func GetEnv() *EnvStruct {
 	if env == nil {
-		errs := EnvSchema.Parse(zenv.NewDataProvider(), &env)
-		log.Fatal("[Droner] Failed to parse environment variables", errs)
+		env = &EnvStruct{}
+		errs := EnvSchema.Parse(zenv.NewDataProvider(), env)
+		if errs != nil {
+			log.Fatal("[Droner] Failed to parse environment variables", errs)
+		}
 	}
 	return env
 }
 
 type Config struct {
-	VERSION   string
-	PORT      int
-	BASE_PATH string
+	VERSION     string
+	PORT        int
+	LISTEN_ADDR string
+	LISTEN_PROT string
+	BASE_URL    string
 }
 
 var ConfigSchema = z.Struct(z.Shape{
-	"PORT":      z.Int().Default(57876),
-	"BASE_PATH": z.String(),
-	// type Transform[T any] func(valPtr T, ctx Ctx) error
-	"VERSION": z.String().Transform(func(valPtr *string, ctx z.Ctx) error {
-		*valPtr = "0.0.1" // override whatever is in the config file force this value
-		return nil
-	}),
-}).Transform(func(valPtr any, ctx z.Ctx) error {
-	v := valPtr.(*Config)
-	v.BASE_PATH = "http://localhost:" + strconv.Itoa(v.PORT)
-	return nil
+	"PORT": z.Int().Default(57876),
 })
-var config *Config = &Config{}
+var config *Config
 
 func GetConfig() *Config {
 
 	if config == nil {
 		// TODO: We need to parse this form config file
-		err := ConfigSchema.Parse(map[string]any{}, &config)
-		log.Fatal("[Droner] Failed to parse config", err)
+		config = &Config{}
+		err := ConfigSchema.Parse(map[string]any{}, config)
+		if err != nil {
+			log.Fatal("[Droner] Failed to parse config", err)
+		}
+		config.VERSION = "0.0.1"
+		config.LISTEN_PROT = "http://"
+		config.LISTEN_ADDR = "localhost:" + strconv.Itoa(config.PORT)
+		config.BASE_URL = config.LISTEN_PROT + config.LISTEN_ADDR
+		slog.Info("config", slog.String("version", config.VERSION), slog.String("base_path", config.LISTEN_ADDR))
 	}
 
 	return config
