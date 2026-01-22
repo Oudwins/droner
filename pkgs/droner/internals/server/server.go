@@ -22,19 +22,23 @@ func New() *Server {
 	}
 }
 
-func (s *Server) Start() error {
+func (s *Server) SafeStart() error {
 	if s.IsRunning() {
 		return nil
 	}
 
 	go func() {
-		err := s.Run()
+		err := s.Start()
 		if err != nil {
 			log.Fatal("[Droner] Failed to start server", err)
 		}
 	}()
 
-	return nil // TODO:
+	if s.IsRunning() {
+		return nil
+	}
+
+	return errors.New("Couldn't start server")
 }
 
 func (s *Server) IsRunning() bool {
@@ -57,7 +61,7 @@ func (s *Server) IsRunning() bool {
 	return strings.TrimSpace(string(body)) == s.Config.VERSION
 }
 
-func (s *Server) Run() error {
+func (s *Server) Start() error {
 	listener, err := net.Listen("tcp", s.Config.BASE_PATH)
 	if err != nil {
 		return err
