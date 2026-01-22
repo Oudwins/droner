@@ -23,13 +23,13 @@ type SessionDeleteResponse struct {
 }
 
 var SessionCreateSchema = z.Struct(z.Shape{
-	"Path":      z.String().Required(),
-	"SessionID": z.String().Optional(),
+	"Path":      z.String().Required().Trim(),
+	"SessionID": z.String().Optional().Trim(),
 })
 
 var SessionDeleteSchema = z.Struct(z.Shape{
-	"Path":      z.String().Optional(),
-	"SessionID": z.String().Optional(),
+	"Path":      z.String().Optional().Trim(),
+	"SessionID": z.String().Optional().Trim(),
 }).TestFunc(func(valPtr any, ctx z.Ctx) bool {
 	v := valPtr.(*SessionDeleteRequest)
 	return v.Path != "" || v.SessionID != ""

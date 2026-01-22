@@ -85,31 +85,30 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseName := filepath.Base(repoPath)
-	sessionID := strings.TrimSpace(request.SessionID)
-	if sessionID != "" {
-		worktreePath := filepath.Join(worktreeRoot, baseName+"#"+sessionID)
+	if request.SessionID != "" {
+		worktreePath := filepath.Join(worktreeRoot, baseName+"#"+request.SessionID)
 		if _, err := os.Stat(worktreePath); err == nil {
 
-			response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: sessionID}
+			response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: request.SessionID}
 
 			RenderJSON(w, r, response)
 			return
 		}
 	}
 
-	if sessionID == "" {
+	if request.SessionID == "" {
 		generatedID, err := generateSessionID(baseName, worktreeRoot)
 		if err != nil {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		sessionID = generatedID
+		request.SessionID = generatedID
 	}
 
-	worktreeName := baseName + "#" + sessionID
+	worktreeName := baseName + "#" + request.SessionID
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 
-	if err := createGitWorktree(repoPath, worktreePath); err != nil {
+	if err := createGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -123,7 +122,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
-	response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: sessionID}
+	response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: request.SessionID}
 	RenderJSON(w, r, response)
 }
 
@@ -233,8 +232,8 @@ func generateSessionID(baseName string, worktreeRoot string) (string, error) {
 	return "", fmt.Errorf("no available session id")
 }
 
-func createGitWorktree(repoPath string, worktreePath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", worktreePath)
+func createGitWorktree(sessionId string, repoPath string, worktreePath string) error {
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", sessionId, worktreePath) // create worktree with branch name = sessionid
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create worktree: %s", strings.TrimSpace(string(output)))
 	}

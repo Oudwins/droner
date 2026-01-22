@@ -25,3 +25,5 @@ curl -sS -X DELETE http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
   -d '{"session_id":"abc-12"}'
 ```
+
+Forgot to cleanup the branch!
