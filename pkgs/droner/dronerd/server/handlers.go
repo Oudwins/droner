@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -142,12 +143,23 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		reqbody.SessionID = sessionIDFromName(worktreeName)
 	}
 
+	commonGitDir, err := gitCommonDirFromWorktree(worktreePath)
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
 	if err := killTmuxSession(worktreeName); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	if err := removeGitWorktree(worktreePath); err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	if err := deleteGitBranch(commonGitDir, reqbody.SessionID); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -216,6 +228,41 @@ func removeGitWorktree(worktreePath string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "worktree", "remove", "--force", worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove worktree: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func gitCommonDirFromWorktree(worktreePath string) (string, error) {
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine git common dir: %s", strings.TrimSpace(string(output)))
+	}
+	commonDir := strings.TrimSpace(string(output))
+	if commonDir == "" {
+		return "", errors.New("failed to determine git common dir")
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+	return commonDir, nil
+}
+
+func deleteGitBranch(commonGitDir string, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	check := exec.Command("git", "--git-dir", commonGitDir, "show-ref", "--verify", "--quiet", "refs/heads/"+sessionID)
+	if err := check.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil
+		}
+		return fmt.Errorf("failed to check branch: %w", err)
+	}
+	cmd := exec.Command("git", "--git-dir", commonGitDir, "branch", "-D", sessionID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete branch: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
