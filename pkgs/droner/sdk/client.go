@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -67,30 +66,6 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 
 	return strings.TrimSpace(string(body)), nil
-}
-
-func (c *Client) Sum(ctx context.Context, a, b int) (int, error) {
-	values := url.Values{}
-	values.Set("a", fmt.Sprintf("%d", a))
-	values.Set("b", fmt.Sprintf("%d", b))
-
-	path := "/sum?" + values.Encode()
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, unexpectedStatusError(resp)
-	}
-
-	var payload schemas.SumResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return 0, err
-	}
-
-	return payload.Sum, nil
 }
 
 func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.SessionCreateResponse, error) {
