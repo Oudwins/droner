@@ -4,9 +4,11 @@
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
-- CLI/server entry point: `pkgs/droner/cmd/droner/main.go`.
-- Core packages: `pkgs/droner/internals/...` and `pkgs/droner/conf`.
-- HTTP server lives under `pkgs/droner/internals/server`.
+- Server entry point: `pkgs/droner/dronerd/main.go`.
+- CLI entry point: `pkgs/droner/cli/cli.go`.
+- Core packages live under `pkgs/droner/internals/...`.
+- SDK package lives under `pkgs/droner/sdk`.
+- HTTP server code lives in `pkgs/droner/dronerd/server`.
 - JSON schemas/validation live in `pkgs/droner/internals/schemas`.
 
 ## Environment setup
@@ -16,19 +18,23 @@
 
 ## Build and run
 - Run server (kills port 57876 first): `make dev`.
-- Run server without kill: `make run`.
-- Manual run: `go run ./pkgs/droner/cmd/droner/main.go`.
-- Build binary: `go build -o droner ./pkgs/droner/cmd/droner`.
+- Manual server run: `go run ./pkgs/droner/dronerd`.
+- Build binaries into `./bin`: `make build`.
+- Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd`.
+- Build CLI only: `go build -o ./bin/droner ./pkgs/droner/cli`.
+- Run CLI (builds first): `make cli <args>`.
 
 ## Tests
 - Run all tests: `go test ./pkgs/droner/...`.
 - Run a single package: `go test ./pkgs/droner/internals/server`.
 - Run a single test by name:
   `go test ./pkgs/droner/... -run ^TestName$ -count=1`.
-- Run a single subtest: `-run ^TestName$/^SubtestName$`.
+- Run a single subtest:
+  `go test ./pkgs/droner/... -run ^TestName$/^SubtestName$ -count=1`.
+- Use `-count=1` when you need to bypass cached results.
 
 ## Lint and formatting
-- Formatting is standard Go formatting: `gofmt -w <files>`.
+- Format files: `gofmt -w <files>`.
 - Format entire module: `gofmt -w ./pkgs/droner`.
 - Basic vetting: `go vet ./pkgs/droner/...`.
 - No repo-managed linter (no golangci config found).
@@ -36,7 +42,7 @@
 ## HTTP service notes
 - Server listens on `env.PORT` / `env.LISTEN_ADDR` (default port 57876).
 - Health check: `GET /version`.
-- Other endpoints: `GET /sum`, `POST /sessions`, `DELETE /sessions`.
+- Other endpoints: `POST /sessions`, `DELETE /sessions`.
 - See `README.md` for curl examples.
 
 ## Cursor/Copilot rules
@@ -54,18 +60,20 @@
 - 1 tab indentation; no trailing whitespace.
 - Keep line lengths reasonable; wrap long literals where practical.
 - Keep error strings lower-case, no trailing punctuation.
-
-## Code style: types and structs
-- Use `struct` types for request/response payloads (see `schemas`).
-- Prefer `time.Duration` for timeouts and intervals.
-- Use pointer receivers when mutating or to avoid copies.
-- Use slices over arrays unless fixed-size is required.
+- Keep comments short and only where logic is non-obvious.
 
 ## Code style: naming
 - Exported identifiers are `PascalCase`; unexported are `camelCase`.
 - Use Go initialisms: `ID`, `URL`, `HTTP`, `JSON`.
 - Error vars use `ErrX` (e.g. `ErrUsage`).
 - Function names should be verbs: `HandlerCreateSession`.
+
+## Code style: types and structs
+- Use `struct` types for request/response payloads (see `schemas`).
+- Prefer `time.Duration` for timeouts and intervals.
+- Use pointer receivers when mutating or to avoid copies.
+- Use slices over arrays unless fixed-size is required.
+- Keep interfaces small and close to the caller.
 
 ## Code style: error handling
 - Check and handle errors immediately; avoid ignoring errors.
@@ -94,6 +102,7 @@
 - Use `filepath` helpers and `filepath.Clean`.
 - Expand `~` paths with `expandPath` when needed.
 - Validate directories before operating on them.
+- Avoid hard-coding OS-specific separators or paths.
 
 ## Worktrees and sessions
 - Worktrees are named `<repo>#<sessionID>`.
@@ -104,6 +113,7 @@
 - Follow existing package layout under `pkgs/droner`.
 - Prefer small, focused functions with clear error messages.
 - Keep new APIs consistent with existing JSON payload shapes.
+- Keep schema validation close to handler entry points.
 - Update this file if you add new build/test tooling.
 
 ## Quick sanity checks
