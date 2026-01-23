@@ -6,3 +6,4 @@ result-*
 *.test
 /pkgs/droner/droner
 /pkgs/droner/bin/
+bin/

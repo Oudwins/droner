@@ -1,9 +1,6 @@
 package server
 
 import (
-	"droner/conf"
-	"droner/env"
-	"droner/internals/logbuf"
 	"errors"
 	"io"
 	"log"
@@ -14,6 +11,10 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"droner/internals/conf"
+	"droner/internals/env"
+	"droner/internals/logbuf"
 )
 
 type Server struct {

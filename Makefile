@@ -5,6 +5,10 @@ ifneq (,$(wildcard ./.env))
 endif
 
 
+BIN_DIR ?= ./bin
+DRONERD_BIN := $(BIN_DIR)/dronerd
+DRONER_BIN := $(BIN_DIR)/droner
+
 kill:
 	-@if command -v fuser >/dev/null 2>&1; then \
 		fuser -k 57876/tcp; \
@@ -15,7 +19,15 @@ kill:
 	fi
 
 dev: kill
-	cd ./pkgs/droner/ && go run ./cmd/droner/main.go
+	cd ./pkgs/droner/ && go run ./dronerd
 
-run:
-	cd ./pkgs/droner/ && go run ./cmd/droner/main.go
+build:
+	mkdir -p $(BIN_DIR)
+	cd ./pkgs/droner/ && go build -o ../../$(DRONERD_BIN) ./dronerd
+	cd ./pkgs/droner/ && go build -o ../../$(DRONER_BIN) ./cli
+
+cli: build
+	$(DRONER_BIN) $(filter-out $@,$(MAKECMDGOALS))
+
+%:
+	@:
