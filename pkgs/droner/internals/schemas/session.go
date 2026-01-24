@@ -1,10 +1,20 @@
 package schemas
 
-import z "github.com/Oudwins/zog"
+import (
+	"droner/internals/conf"
+
+	z "github.com/Oudwins/zog"
+)
+
+type SessionAgentConfig struct {
+	Model  string `json:"model" zog:"model"`
+	Prompt string `json:"prompt" zog:"prompt"`
+}
 
 type SessionCreateRequest struct {
-	Path      string `json:"path" zog:"path"`
-	SessionID string `json:"session_id" zog:"session_id"`
+	Path      string              `json:"path" zog:"path"`
+	SessionID string              `json:"session_id" zog:"session_id"`
+	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
 }
 
 type SessionCreateResponse struct {
@@ -25,6 +35,20 @@ type SessionDeleteResponse struct {
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim(),
 	"SessionID": z.String().Optional().Trim(),
+	"Agent": z.Ptr(z.Struct(z.Shape{
+		"Model":  z.String().Default(conf.GetConfig().DEFAULT_MODEL).Trim(),
+		"Prompt": z.String().Optional().Trim(),
+	})),
+}).Transform(func(valPtr any, _ z.Ctx) error {
+	request := valPtr.(*SessionCreateRequest)
+	if request.Agent == nil {
+		request.Agent = &SessionAgentConfig{Model: conf.GetConfig().DEFAULT_MODEL}
+		return nil
+	}
+	if request.Agent.Model == "" {
+		request.Agent.Model = conf.GetConfig().DEFAULT_MODEL
+	}
+	return nil
 })
 
 var SessionDeleteSchema = z.Struct(z.Shape{

@@ -7,12 +7,14 @@ import (
 )
 
 type Config struct {
-	VERSION      string
-	WORKTREE_DIR string
+	VERSION       string
+	WORKTREE_DIR  string
+	DEFAULT_MODEL string
 }
 
 var ConfigSchema = z.Struct(z.Shape{
-	"WORKTREE_DIR": z.String().Default("~/.droner"),
+	"WORKTREE_DIR":  z.String().Default("~/.droner"),
+	"DEFAULT_MODEL": z.String().Default("openai/gpt-5.2-codex"),
 })
 var config *Config
 

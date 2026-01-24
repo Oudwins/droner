@@ -16,11 +16,13 @@ import (
 	z "github.com/Oudwins/zog"
 )
 
-var ErrUsage = errors.New("usage:\n  droner new [--path <path>] [--id <id>]\n  droner del <id>")
+var ErrUsage = errors.New("usage:\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>]\n  droner del <id>")
 
 type NewArgs struct {
-	Path string `zog:"path"`
-	ID   string `zog:"id"`
+	Path   string `zog:"path"`
+	ID     string `zog:"id"`
+	Model  string `zog:"model"`
+	Prompt string `zog:"prompt"`
 }
 
 type DelArgs struct {
@@ -28,8 +30,10 @@ type DelArgs struct {
 }
 
 var newArgsSchema = z.Struct(z.Shape{
-	"Path": z.String().Optional().Trim(),
-	"ID":   z.String().Optional().Trim(),
+	"Path":   z.String().Optional().Trim(),
+	"ID":     z.String().Optional().Trim(),
+	"Model":  z.String().Optional().Trim(),
+	"Prompt": z.String().Optional().Trim(),
 })
 
 var delArgsSchema = z.Struct(z.Shape{
@@ -76,7 +80,11 @@ func run(args []string) error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		response, err := client.CreateSession(ctx, schemas.SessionCreateRequest{Path: parsed.Path, SessionID: parsed.ID})
+		request := schemas.SessionCreateRequest{Path: parsed.Path, SessionID: parsed.ID}
+		if parsed.Model != "" || parsed.Prompt != "" {
+			request.Agent = &schemas.SessionAgentConfig{Model: parsed.Model, Prompt: parsed.Prompt}
+		}
+		response, err := client.CreateSession(ctx, request)
 		if err != nil {
 			return err
 		}
@@ -121,6 +129,18 @@ func parseNewArgs(args []string) (NewArgs, error) {
 				return parsed, ErrUsage
 			}
 			parsed.ID = args[i+1]
+			i += 2
+		case "--model":
+			if i+1 >= len(args) {
+				return parsed, ErrUsage
+			}
+			parsed.Model = args[i+1]
+			i += 2
+		case "--prompt":
+			if i+1 >= len(args) {
+				return parsed, ErrUsage
+			}
+			parsed.Prompt = args[i+1]
 			i += 2
 		default:
 			return parsed, ErrUsage
