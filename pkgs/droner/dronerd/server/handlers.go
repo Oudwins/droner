@@ -30,10 +30,19 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if issues := schemas.SessionCreateSchema.Validate(&request); len(issues) > 0 {
-		payload := JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(issues))
-		RenderJSON(w, r, payload, Render.Status(http.StatusBadRequest))
+	request.Path = strings.TrimSpace(request.Path)
+	request.SessionID = strings.TrimSpace(request.SessionID)
+	if request.Path == "" {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path is required", nil), Render.Status(http.StatusBadRequest))
 		return
+	}
+	if request.Agent == nil {
+		request.Agent = &schemas.SessionAgentConfig{}
+	}
+	request.Agent.Model = strings.TrimSpace(request.Agent.Model)
+	request.Agent.Prompt = strings.TrimSpace(request.Agent.Prompt)
+	if request.Agent.Model == "" {
+		request.Agent.Model = conf.GetConfig().DEFAULT_MODEL
 	}
 
 	repoPath := filepath.Clean(request.Path)
@@ -92,15 +101,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent := request.Agent
-	if agent == nil {
-		agent = &schemas.SessionAgentConfig{}
-	}
-	if agent.Model == "" {
-		agent.Model = conf.GetConfig().DEFAULT_MODEL
-	}
-
-	if err := createTmuxSession(worktreeName, worktreePath, agent.Model, agent.Prompt); err != nil {
+	if err := createTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
