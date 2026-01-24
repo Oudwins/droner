@@ -1,7 +1,7 @@
 package schemas
 
 import (
-	"droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 
 	z "github.com/Oudwins/zog"
 )

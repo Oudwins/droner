@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"droner/dronerd/server"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 )
 
 func main() {

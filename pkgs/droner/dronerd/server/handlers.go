@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"droner/internals/conf"
-	"droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 
 	z "github.com/Oudwins/zog"
 )

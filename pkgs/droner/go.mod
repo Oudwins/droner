@@ -1,4 +1,4 @@
-module droner
+module github.com/Oudwins/droner/pkgs/droner
 
 go 1.22
 

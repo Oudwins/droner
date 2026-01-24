@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"droner/internals/env"
-	"droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
+	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
 
 type Client struct {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"droner/internals/conf"
-	"droner/internals/env"
-	"droner/internals/logbuf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
+	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 )
 
 type Server struct {
