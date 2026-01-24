@@ -16,6 +16,10 @@ curl -sS -X POST http://localhost:57876/sessions \
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
   -d '{"path":"/home/tmx/projects/droner/","session_id":"abc-12"}'
+# Create session with agent prompt/model:
+curl -sS -X POST http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/tmx/projects/droner/","agent":{"model":"openai/gpt-5.2-codex","prompt":"review the repo"}}'
 # Delete session by path:
 curl -sS -X DELETE http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
@@ -26,4 +30,9 @@ curl -sS -X DELETE http://localhost:57876/sessions \
   -d '{"session_id":"abc-12"}'
 ```
 
-Forgot to cleanup the branch!
+
+
+
+
+## Notes
+- Maybe refactor the command line utility with: https://github.com/spf13/cobra

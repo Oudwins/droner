@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"droner/internals/conf"
 	"droner/internals/schemas"
 
 	z "github.com/Oudwins/zog"
@@ -91,7 +92,15 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := createTmuxSession(worktreeName, worktreePath); err != nil {
+	agent := request.Agent
+	if agent == nil {
+		agent = &schemas.SessionAgentConfig{}
+	}
+	if agent.Model == "" {
+		agent.Model = conf.GetConfig().DEFAULT_MODEL
+	}
+
+	if err := createTmuxSession(worktreeName, worktreePath, agent.Model, agent.Prompt); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -311,13 +320,21 @@ func runWorktreeSetup(repoPath string, worktreePath string) error {
 	return nil
 }
 
-func createTmuxSession(sessionName string, worktreePath string) error {
+func createTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
 	newSession := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
 	if output, err := newSession.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux session: %s", strings.TrimSpace(string(output)))
 	}
 
-	newOpencode := exec.Command("tmux", "new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode")
+	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode"}
+	if model != "" {
+		opencodeArgs = append(opencodeArgs, "--model", model)
+	}
+	if prompt != "" {
+		opencodeArgs = append(opencodeArgs, "--prompt", prompt)
+	}
+
+	newOpencode := exec.Command("tmux", opencodeArgs...)
 	if output, err := newOpencode.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
 	}
