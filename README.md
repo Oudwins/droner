@@ -1,6 +1,14 @@
 # 
 
 
+## Installation
+
+```bash
+
+go install github.com/Oudwins/droner/pkgs/droner/cli@latest
+go install github.com/Oudwins/droner/pkgs/droner/dronerd@latest
+
+```
 
 
 ## Useful commands

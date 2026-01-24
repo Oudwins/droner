@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"droner/internals/schemas"
-	"droner/sdk"
+	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/sdk"
 
 	z "github.com/Oudwins/zog"
 )

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"droner/internals/logbuf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"log/slog"
 )
 
