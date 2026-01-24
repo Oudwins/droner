@@ -24,7 +24,7 @@ dev: kill
 build:
 	mkdir -p $(BIN_DIR)
 	cd ./pkgs/droner/ && go build -o ../../$(DRONERD_BIN) ./dronerd
-	cd ./pkgs/droner/ && go build -o ../../$(DRONER_BIN) ./cli
+	cd ./pkgs/droner/ && go build -o ../../$(DRONER_BIN) ./droner
 
 cli: build
 	$(DRONER_BIN) $(filter-out $@,$(MAKECMDGOALS))

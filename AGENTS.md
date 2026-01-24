@@ -5,7 +5,7 @@
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
 - Server entry point: `pkgs/droner/dronerd/main.go`.
-- CLI entry point: `pkgs/droner/cli/cli.go`.
+- CLI entry point: `pkgs/droner/droner/cli.go`.
 - Core packages live under `pkgs/droner/internals/...`.
 - SDK package lives under `pkgs/droner/sdk`.
 - HTTP server code lives in `pkgs/droner/dronerd/server`.
@@ -21,7 +21,7 @@
 - Manual server run: `go run ./pkgs/droner/dronerd`.
 - Build binaries into `./bin`: `make build`.
 - Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd`.
-- Build CLI only: `go build -o ./bin/droner ./pkgs/droner/cli`.
+- Build CLI only: `go build -o ./bin/droner ./pkgs/droner/droner`.
 - Run CLI (builds first): `make cli <args>`.
 
 ## Tests
