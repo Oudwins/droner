@@ -18,28 +18,36 @@ import (
 	z "github.com/Oudwins/zog"
 )
 
-var ErrUsage = errors.New("usage:\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>]\n  droner del <id>\n  droner auth github")
+var ErrUsage = errors.New("usage:\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>] [--wait] [--wait-timeout <duration>]\n  droner del <id> [--wait] [--wait-timeout <duration>]\n  droner task <id>\n  droner auth github")
 
 type NewArgs struct {
-	Path   string `zog:"path"`
-	ID     string `zog:"id"`
-	Model  string `zog:"model"`
-	Prompt string `zog:"prompt"`
+	Path    string `zog:"path"`
+	ID      string `zog:"id"`
+	Model   string `zog:"model"`
+	Prompt  string `zog:"prompt"`
+	Wait    bool   `zog:"wait"`
+	Timeout string `zog:"timeout"`
 }
 
 type DelArgs struct {
-	ID string `zog:"id"`
+	ID      string `zog:"id"`
+	Wait    bool   `zog:"wait"`
+	Timeout string `zog:"timeout"`
 }
 
 var newArgsSchema = z.Struct(z.Shape{
-	"Path":   z.String().Optional().Trim(),
-	"ID":     z.String().Optional().Trim(),
-	"Model":  z.String().Optional().Trim(),
-	"Prompt": z.String().Optional().Trim(),
+	"Path":    z.String().Optional().Trim(),
+	"ID":      z.String().Optional().Trim(),
+	"Model":   z.String().Optional().Trim(),
+	"Prompt":  z.String().Optional().Trim(),
+	"Wait":    z.Bool().Optional(),
+	"Timeout": z.String().Optional().Trim(),
 })
 
 var delArgsSchema = z.Struct(z.Shape{
-	"ID": z.String().Required().Trim(),
+	"ID":      z.String().Required().Trim(),
+	"Wait":    z.Bool().Optional(),
+	"Timeout": z.String().Optional().Trim(),
 })
 
 func main() {
@@ -102,7 +110,18 @@ func run(args []string) error {
 				return err
 			}
 		}
-		fmt.Printf("session: %s\nworktree: %s\n", response.SessionID, response.WorktreePath)
+		printTaskSummary(response)
+		if parsed.Wait {
+			timeout, err := parseWaitTimeout(parsed.Timeout)
+			if err != nil {
+				return err
+			}
+			final, err := waitForTask(client, response.TaskID, timeout)
+			if err != nil {
+				return err
+			}
+			printTaskSummary(final)
+		}
 		return nil
 	case "del":
 		parsed, err := parseDelArgs(args[1:])
@@ -121,7 +140,33 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("session: %s\nworktree: %s\n", response.SessionID, response.WorktreePath)
+		printTaskSummary(response)
+		if parsed.Wait {
+			timeout, err := parseWaitTimeout(parsed.Timeout)
+			if err != nil {
+				return err
+			}
+			final, err := waitForTask(client, response.TaskID, timeout)
+			if err != nil {
+				return err
+			}
+			printTaskSummary(final)
+		}
+		return nil
+	case "task":
+		if len(args) != 2 {
+			return ErrUsage
+		}
+		if err := ensureDaemonRunning(client); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		response, err := client.TaskStatus(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		printTaskSummary(response)
 		return nil
 	case "auth":
 		if len(args) != 2 || args[1] != "github" {
@@ -164,6 +209,15 @@ func parseNewArgs(args []string) (NewArgs, error) {
 			}
 			parsed.Prompt = args[i+1]
 			i += 2
+		case "--wait":
+			parsed.Wait = true
+			i += 1
+		case "--wait-timeout":
+			if i+1 >= len(args) {
+				return parsed, ErrUsage
+			}
+			parsed.Timeout = args[i+1]
+			i += 2
 		default:
 			return parsed, ErrUsage
 		}
@@ -172,10 +226,26 @@ func parseNewArgs(args []string) (NewArgs, error) {
 }
 
 func parseDelArgs(args []string) (DelArgs, error) {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return DelArgs{}, ErrUsage
 	}
-	return DelArgs{ID: args[0]}, nil
+	parsed := DelArgs{ID: args[0]}
+	for i := 1; i < len(args); {
+		switch args[i] {
+		case "--wait":
+			parsed.Wait = true
+			i += 1
+		case "--wait-timeout":
+			if i+1 >= len(args) {
+				return parsed, ErrUsage
+			}
+			parsed.Timeout = args[i+1]
+			i += 2
+		default:
+			return parsed, ErrUsage
+		}
+	}
+	return parsed, nil
 }
 
 func validateNewArgs(payload *NewArgs) error {
@@ -298,6 +368,57 @@ func waitForDaemon(client *sdk.Client) error {
 		return lastErr
 	}
 	return errors.New("failed to reach dronerd")
+}
+
+func parseWaitTimeout(raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 45 * time.Minute, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid wait timeout: %w", err)
+	}
+	return value, nil
+}
+
+func waitForTask(client *sdk.Client, taskID string, timeout time.Duration) (*schemas.TaskResponse, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		response, err := client.TaskStatus(ctx, taskID)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		switch response.Status {
+		case schemas.TaskStatusSucceeded:
+			return response, nil
+		case schemas.TaskStatusFailed:
+			if response.Error != "" {
+				return response, fmt.Errorf("task failed: %s", response.Error)
+			}
+			return response, errors.New("task failed")
+		default:
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	return nil, fmt.Errorf("timed out waiting for task %s", taskID)
+}
+
+func printTaskSummary(response *schemas.TaskResponse) {
+	fmt.Printf("task: %s\nstatus: %s\n", response.TaskID, response.Status)
+	if response.Result != nil {
+		if response.Result.SessionID != "" {
+			fmt.Printf("session: %s\n", response.Result.SessionID)
+		}
+		if response.Result.WorktreePath != "" {
+			fmt.Printf("worktree: %s\n", response.Result.WorktreePath)
+		}
+	}
+	if response.Error != "" {
+		fmt.Printf("error: %s\n", response.Error)
+	}
 }
 
 func findDaemonBinary() (string, error) {
