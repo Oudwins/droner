@@ -4,9 +4,8 @@
 ## Installation
 
 ```bash
-
-go install github.com/Oudwins/droner/pkgs/droner/droner@latest
-go install github.com/Oudwins/droner/pkgs/droner/dronerd@latest
+GOPROXY=direct go install github.com/Oudwins/droner/pkgs/droner/droner@latest
+GOPROXY=direct go install github.com/Oudwins/droner/pkgs/droner/dronerd@latest
 
 ```
 

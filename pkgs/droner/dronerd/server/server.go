@@ -22,6 +22,7 @@ type Server struct {
 	Env    *env.EnvStruct
 	Logger *slog.Logger
 	Logbuf *logbuf.Logger
+	subs   *subscriptionManager
 }
 
 func New() *Server {
@@ -37,6 +38,7 @@ func New() *Server {
 		Env:    env,
 		Logger: logger,
 		Logbuf: buffer,
+		subs:   newSubscriptionManager(),
 	}
 }
 

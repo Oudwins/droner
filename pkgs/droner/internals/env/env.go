@@ -9,20 +9,22 @@ import (
 )
 
 type EnvStruct struct {
-	HOME        string `zog:"HOME"`
-	XDG_HOME    string `zog:"XDG_HOME"`
-	PORT        int    `zog:"DRONER_ENV_PORT"`
-	LISTEN_ADDR string
-	LISTEN_PROT string
-	BASE_URL    string
+	HOME         string `zog:"HOME"`
+	XDG_HOME     string `zog:"XDG_HOME"`
+	PORT         int    `zog:"DRONER_ENV_PORT"`
+	GITHUB_TOKEN string `zog:"GITHUB_TOKEN"`
+	LISTEN_ADDR  string
+	LISTEN_PROT  string
+	BASE_URL     string
 }
 
 var env *EnvStruct
 
 var EnvSchema = z.Struct(z.Shape{
-	"HOME":     z.String(),
-	"XDG_HOME": z.String(),
-	"PORT":     z.Int().Default(57876),
+	"HOME":         z.String(),
+	"XDG_HOME":     z.String(),
+	"PORT":         z.Int().Default(57876),
+	"GITHUB_TOKEN": z.String().Optional(),
 })
 
 func Get() *EnvStruct {

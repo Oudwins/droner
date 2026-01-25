@@ -105,6 +105,27 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
+
+	// Try to subscribe to remote events for this session
+	if remoteURL, err := getRemoteURL(repoPath); err == nil {
+		if err := s.subs.subscribe(r.Context(), remoteURL, request.SessionID, s.Logger, func(sessionID string) {
+			// Event-driven cleanup
+			s.deleteSessionBySessionID(sessionID)
+		}); err != nil {
+			s.Logger.Warn("Failed to subscribe to remote events",
+				"error", err,
+				"remote_url", remoteURL,
+				"session_id", request.SessionID,
+			)
+			// Don't fail session creation for subscription errors
+		}
+	} else {
+		s.Logger.Warn("Failed to get remote URL, skipping event subscription",
+			"error", err,
+			"session_id", request.SessionID,
+		)
+	}
+
 	response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: request.SessionID}
 	RenderJSON(w, r, response)
 }
@@ -172,6 +193,18 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	if err := deleteGitBranch(commonGitDir, reqbody.SessionID); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
+	}
+
+	// Unsubscribe from remote events
+	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
+		if err := s.subs.unsubscribe(r.Context(), remoteURL, reqbody.SessionID, s.Logger); err != nil {
+			s.Logger.Warn("Failed to unsubscribe from remote events",
+				"error", err,
+				"remote_url", remoteURL,
+				"session_id", reqbody.SessionID,
+			)
+			// Don't fail session deletion for unsubscribe errors
+		}
 	}
 
 	RenderJSON(w, r, schemas.SessionDeleteResponse{WorktreePath: worktreePath, SessionID: reqbody.SessionID})
