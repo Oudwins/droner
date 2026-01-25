@@ -7,7 +7,7 @@ import (
 
 // deleteSessionBySessionID deletes a session by its session ID (used by event-driven cleanup)
 func (s *Server) deleteSessionBySessionID(sessionID string) {
-	worktreeRoot, err := expandPath(s.Config.WORKTREE_DIR)
+	worktreeRoot, err := expandPath(s.Config.WORKTREES_DIR)
 	if err != nil {
 		s.Logger.Error("Failed to expand worktree root for event-driven cleanup",
 			"error", err,

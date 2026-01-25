@@ -23,6 +23,7 @@ type Server struct {
 	Logger *slog.Logger
 	Logbuf *logbuf.Logger
 	subs   *subscriptionManager
+	oauth  *oauthStateStore
 }
 
 func New() *Server {
@@ -39,6 +40,7 @@ func New() *Server {
 		Logger: logger,
 		Logbuf: buffer,
 		subs:   newSubscriptionManager(),
+		oauth:  newOAuthStateStore(),
 	}
 }
 

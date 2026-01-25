@@ -9,4 +9,5 @@ import (
 type provider interface {
 	pollEvents(ctx context.Context, remoteURL string, branchName string) ([]BranchEvent, error)
 	pollInterval() time.Duration
+	ensureAuth(ctx context.Context, remoteURL string) error
 }

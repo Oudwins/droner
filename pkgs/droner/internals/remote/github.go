@@ -7,6 +7,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
+	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 // githubProvider implements the provider interface for GitHub
@@ -27,6 +30,22 @@ func newGitHubProvider() *githubProvider {
 		token:         os.Getenv("GITHUB_TOKEN"),
 		pollIntervalD: interval,
 	}
+}
+
+func (p *githubProvider) ensureAuth(ctx context.Context, remoteURL string) error {
+	if !isGitHubURL(remoteURL) {
+		return nil
+	}
+
+	token, err := resolveGitHubToken()
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		return sdk.ErrAuthRequired
+	}
+	p.token = token
+	return nil
 }
 
 func (p *githubProvider) pollInterval() time.Duration {
@@ -81,4 +100,31 @@ func (p *githubProvider) parseGitHubURL(remoteURL string) (string, string, error
 	}
 
 	return parts[0], parts[1], nil
+}
+
+func resolveGitHubToken() (string, error) {
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token, nil
+	}
+
+	stored, ok, err := auth.ReadGitHubAuth()
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+
+	return strings.TrimSpace(stored.AccessToken), nil
+}
+
+func isGitHubURL(remoteURL string) bool {
+	if strings.HasPrefix(remoteURL, "git@github.com:") {
+		return true
+	}
+	parsed, err := url.Parse(remoteURL)
+	if err != nil {
+		return false
+	}
+	return parsed.Host == "github.com"
 }
