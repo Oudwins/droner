@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 
 	z "github.com/Oudwins/zog"
@@ -61,7 +62,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, _ := expandPath(s.Config.WORKTREE_DIR)
+	worktreeRoot, _ := expandPath(s.Config.WORKTREES_DIR)
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -86,6 +87,25 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.SessionID = generatedID
+	}
+
+	if remoteURL, err := getRemoteURL(repoPath); err == nil {
+		if err := remote.EnsureAuth(r.Context(), remoteURL); err != nil {
+			if errors.Is(err, remote.ErrAuthRequired) {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeAuthRequired, "GitHub auth required", nil), Render.Status(http.StatusPreconditionRequired))
+				return
+			}
+			s.Logger.Warn("Failed to verify remote auth",
+				"error", err,
+				"remote_url", remoteURL,
+				"session_id", request.SessionID,
+			)
+		}
+	} else {
+		s.Logger.Warn("Failed to get remote URL for auth check",
+			"error", err,
+			"session_id", request.SessionID,
+		)
 	}
 
 	worktreeName := baseName + "#" + request.SessionID
@@ -143,7 +163,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, err := expandPath(s.Config.WORKTREE_DIR)
+	worktreeRoot, err := expandPath(s.Config.WORKTREES_DIR)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Worktree Root doesn't exist", nil), Render.Status(http.StatusInternalServerError))
 		return

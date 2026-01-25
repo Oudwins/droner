@@ -19,6 +19,7 @@ const (
 	JsonResponseErrorCodeValidationFailed JsonResponseErrorCode = "validation_failed"
 	JsonResponseErroCodeInternal          JsonResponseErrorCode = "internal"
 	JsonResponseErrorCodeNotFound         JsonResponseErrorCode = "not_found"
+	JsonResponseErrorCodeAuthRequired     JsonResponseErrorCode = "auth_required"
 )
 
 type ErrorResponse struct {

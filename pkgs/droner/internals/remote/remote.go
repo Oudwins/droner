@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -17,6 +18,8 @@ const (
 	BranchCreated BranchEventType = "branch_created"
 	BranchDeleted BranchEventType = "branch_deleted"
 )
+
+var ErrAuthRequired = errors.New("github auth required")
 
 // BranchEvent represents a branch or PR lifecycle event
 type BranchEvent struct {
@@ -66,6 +69,10 @@ func getRegistry() *registry {
 
 func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName string, handler BranchEventHandler) error {
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
+
+	if err := r.provider.ensureAuth(ctx, remoteURL); err != nil {
+		return err
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,6 +132,11 @@ func (r *registry) pollLoop(ctx context.Context, remoteURL string, branchName st
 			}
 		}
 	}
+}
+
+// EnsureAuth validates provider auth for the remote URL.
+func EnsureAuth(ctx context.Context, remoteURL string) error {
+	return getRegistry().provider.ensureAuth(ctx, remoteURL)
 }
 
 // SubscribeBranchEvents subscribes to branch/PR events for a given remote URL and branch
