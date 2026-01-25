@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
+	"os"
+
+	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
 
 // deleteSessionBySessionID deletes a session by its session ID (used by event-driven cleanup)
@@ -16,8 +19,15 @@ func (s *Server) deleteSessionBySessionID(sessionID string) {
 		return
 	}
 
-	worktreePath, err := findWorktreeBySessionID(worktreeRoot, sessionID)
+	worktreePath, err := resolveDeleteWorktreePath(worktreeRoot, schemas.SessionDeleteRequest{SessionID: sessionID})
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.Logger.Warn("Worktree not found for event-driven cleanup",
+				"error", err,
+				"session_id", sessionID,
+			)
+			return
+		}
 		s.Logger.Warn("Worktree not found for event-driven cleanup",
 			"error", err,
 			"session_id", sessionID,
@@ -25,47 +35,13 @@ func (s *Server) deleteSessionBySessionID(sessionID string) {
 		return
 	}
 
-	worktreeName := filepath.Base(worktreePath)
-	commonGitDir, err := gitCommonDirFromWorktree(worktreePath)
+	_, err = s.runDeleteSession(context.Background(), schemas.SessionDeleteRequest{SessionID: sessionID}, worktreePath)
 	if err != nil {
-		s.Logger.Error("Failed to get git common dir for event-driven cleanup",
+		s.Logger.Error("Failed to delete session during event-driven cleanup",
 			"error", err,
 			"session_id", sessionID,
 		)
 		return
-	}
-
-	// Unsubscribe from remote events first
-	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
-		if err := s.subs.unsubscribe(context.Background(), remoteURL, sessionID, s.Logger); err != nil {
-			s.Logger.Warn("Failed to unsubscribe from remote events during cleanup",
-				"error", err,
-				"remote_url", remoteURL,
-				"session_id", sessionID,
-			)
-		}
-	}
-
-	// Perform cleanup steps
-	if err := killTmuxSession(worktreeName); err != nil {
-		s.Logger.Error("Failed to kill tmux session during event-driven cleanup",
-			"error", err,
-			"session_id", sessionID,
-		)
-	}
-
-	if err := removeGitWorktree(worktreePath); err != nil {
-		s.Logger.Error("Failed to remove git worktree during event-driven cleanup",
-			"error", err,
-			"session_id", sessionID,
-		)
-	}
-
-	if err := deleteGitBranch(commonGitDir, sessionID); err != nil {
-		s.Logger.Error("Failed to delete git branch during event-driven cleanup",
-			"error", err,
-			"session_id", sessionID,
-		)
 	}
 
 	s.Logger.Info("Session deleted via event-driven cleanup",

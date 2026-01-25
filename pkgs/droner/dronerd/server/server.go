@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type Server struct {
 	Logbuf *logbuf.Logger
 	subs   *subscriptionManager
 	oauth  *oauthStateStore
+	tasks  *taskManager
 }
 
 func New() *Server {
@@ -34,6 +36,20 @@ func New() *Server {
 		slog.String("version", config.VERSION),
 		slog.Int("port", env.PORT),
 	)
+	worktreeRoot, err := expandPath(config.WORKTREES_DIR)
+	if err != nil {
+		log.Fatal("[Droner] Failed to expand worktree root: ", err)
+	}
+	dataDir := filepath.Join(worktreeRoot, ".droner")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		log.Fatal("[Droner] Failed to create task data dir: ", err)
+	}
+	dbPath := filepath.Join(dataDir, "tasks.db")
+	store, err := newTaskStore(dbPath)
+	if err != nil {
+		log.Fatal("[Droner] Failed to initialize task store: ", err)
+	}
+	manager := newTaskManager(store, logger)
 	return &Server{
 		Config: config,
 		Env:    env,
@@ -41,6 +57,7 @@ func New() *Server {
 		Logbuf: buffer,
 		subs:   newSubscriptionManager(),
 		oauth:  newOAuthStateStore(),
+		tasks:  manager,
 	}
 }
 

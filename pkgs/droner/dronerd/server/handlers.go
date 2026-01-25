@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 
 	z "github.com/Oudwins/zog"
@@ -62,24 +62,17 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, _ := expandPath(s.Config.WORKTREES_DIR)
+	worktreeRoot, err := expandPath(s.Config.WORKTREES_DIR)
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to expand worktree root", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	baseName := filepath.Base(repoPath)
-	if request.SessionID != "" {
-		worktreePath := filepath.Join(worktreeRoot, baseName+"#"+request.SessionID)
-		if _, err := os.Stat(worktreePath); err == nil {
-
-			response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: request.SessionID}
-
-			RenderJSON(w, r, response)
-			return
-		}
-	}
-
 	if request.SessionID == "" {
 		generatedID, err := generateSessionID(baseName, worktreeRoot)
 		if err != nil {
@@ -89,65 +82,29 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		request.SessionID = generatedID
 	}
 
-	if remoteURL, err := getRemoteURL(repoPath); err == nil {
-		if err := remote.EnsureAuth(r.Context(), remoteURL); err != nil {
-			if errors.Is(err, remote.ErrAuthRequired) {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeAuthRequired, "GitHub auth required", nil), Render.Status(http.StatusPreconditionRequired))
-				return
-			}
-			s.Logger.Warn("Failed to verify remote auth",
-				"error", err,
-				"remote_url", remoteURL,
-				"session_id", request.SessionID,
-			)
-		}
-	} else {
-		s.Logger.Warn("Failed to get remote URL for auth check",
-			"error", err,
-			"session_id", request.SessionID,
-		)
-	}
-
 	worktreeName := baseName + "#" + request.SessionID
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 
-	if err := createGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	if err := runWorktreeSetup(repoPath, worktreePath); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	if err := createTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	// Try to subscribe to remote events for this session
-	if remoteURL, err := getRemoteURL(repoPath); err == nil {
-		if err := s.subs.subscribe(r.Context(), remoteURL, request.SessionID, s.Logger, func(sessionID string) {
-			// Event-driven cleanup
-			s.deleteSessionBySessionID(sessionID)
-		}); err != nil {
-			s.Logger.Warn("Failed to subscribe to remote events",
-				"error", err,
-				"remote_url", remoteURL,
-				"session_id", request.SessionID,
-			)
-			// Don't fail session creation for subscription errors
+	if request.SessionID != "" {
+		if _, err := os.Stat(worktreePath); err == nil {
+			response, err := s.enqueueCreateSession(request, repoPath, worktreePath, true)
+			if err != nil {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+				return
+			}
+			response.Result = &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}
+			RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
+			return
 		}
-	} else {
-		s.Logger.Warn("Failed to get remote URL, skipping event subscription",
-			"error", err,
-			"session_id", request.SessionID,
-		)
 	}
 
-	response := schemas.SessionCreateResponse{WorktreePath: worktreePath, SessionID: request.SessionID}
-	RenderJSON(w, r, response)
+	response, err := s.enqueueCreateSession(request, repoPath, worktreePath, false)
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+	response.Result = &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}
+	RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
 }
 
 func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -169,65 +126,27 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var worktreePath string
-	if reqbody.Path != "" {
-		worktreePath = filepath.Clean(reqbody.Path)
-		if _, err := os.Stat(worktreePath); err != nil {
-			if os.IsNotExist(err) {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Couldn't find the worktree", nil), Render.Status(http.StatusNotFound))
-				return
-			}
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Faild to read worktree", nil), Render.Status(http.StatusInternalServerError))
+	worktreePath, err := resolveDeleteWorktreePath(worktreeRoot, reqbody)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Couldn't find the worktree", nil), Render.Status(http.StatusNotFound))
 			return
 		}
-	} else {
-		matchedPath, err := findWorktreeBySessionID(worktreeRoot, reqbody.SessionID)
-		if err != nil {
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Couldn't find the session", nil), Render.Status(http.StatusNotFound))
-			return
-		}
-		worktreePath = matchedPath
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
 	}
-
 	worktreeName := filepath.Base(worktreePath)
 	if reqbody.SessionID == "" {
 		reqbody.SessionID = sessionIDFromName(worktreeName)
 	}
 
-	commonGitDir, err := gitCommonDirFromWorktree(worktreePath)
+	response, err := s.enqueueDeleteSession(reqbody, worktreePath)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
-
-	if err := killTmuxSession(worktreeName); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	if err := removeGitWorktree(worktreePath); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	if err := deleteGitBranch(commonGitDir, reqbody.SessionID); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	// Unsubscribe from remote events
-	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
-		if err := s.subs.unsubscribe(r.Context(), remoteURL, reqbody.SessionID, s.Logger); err != nil {
-			s.Logger.Warn("Failed to unsubscribe from remote events",
-				"error", err,
-				"remote_url", remoteURL,
-				"session_id", reqbody.SessionID,
-			)
-			// Don't fail session deletion for unsubscribe errors
-		}
-	}
-
-	RenderJSON(w, r, schemas.SessionDeleteResponse{WorktreePath: worktreePath, SessionID: reqbody.SessionID})
+	response.Result = &schemas.TaskResult{SessionID: reqbody.SessionID, WorktreePath: worktreePath}
+	RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
 }
 
 func gitIsInsideWorkTree(repoPath string) error {
@@ -445,4 +364,132 @@ func findWorktreeBySessionID(worktreeRoot string, sessionID string) (string, err
 		return "", fmt.Errorf("multiple worktrees matched session id")
 	}
 	return matches[0], nil
+}
+
+type createSessionPayload struct {
+	RepoPath     string `json:"repo_path"`
+	WorktreePath string `json:"worktree_path"`
+	SessionID    string `json:"session_id"`
+	Model        string `json:"model"`
+	Prompt       string `json:"prompt"`
+}
+
+type deleteSessionPayload struct {
+	WorktreePath string `json:"worktree_path"`
+	SessionID    string `json:"session_id"`
+}
+
+func (s *Server) enqueueCreateSession(request schemas.SessionCreateRequest, repoPath string, worktreePath string, existing bool) (*schemas.TaskResponse, error) {
+	payload := createSessionPayload{
+		RepoPath:     repoPath,
+		WorktreePath: worktreePath,
+		SessionID:    request.SessionID,
+		Model:        request.Agent.Model,
+		Prompt:       request.Agent.Prompt,
+	}
+	return s.tasks.Enqueue(taskTypeSessionCreate, payload, func(ctx context.Context) (any, error) {
+		if existing {
+			return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+		}
+		return s.runCreateSession(ctx, request, repoPath, worktreePath)
+	})
+}
+
+func (s *Server) enqueueDeleteSession(request schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResponse, error) {
+	payload := deleteSessionPayload{
+		WorktreePath: worktreePath,
+		SessionID:    request.SessionID,
+	}
+	return s.tasks.Enqueue(taskTypeSessionDelete, payload, func(ctx context.Context) (any, error) {
+		return s.runDeleteSession(ctx, request, worktreePath)
+	})
+}
+
+func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
+	worktreeName := filepath.Base(worktreePath)
+	if err := createGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+		return nil, err
+	}
+
+	if err := runWorktreeSetup(repoPath, worktreePath); err != nil {
+		return nil, err
+	}
+
+	if err := createTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
+		return nil, err
+	}
+
+	if remoteURL, err := getRemoteURL(repoPath); err == nil {
+		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Logger, func(sessionID string) {
+			s.deleteSessionBySessionID(sessionID)
+		}); err != nil {
+			s.Logger.Warn("Failed to subscribe to remote events",
+				"error", err,
+				"remote_url", remoteURL,
+				"session_id", request.SessionID,
+			)
+		}
+	} else {
+		s.Logger.Warn("Failed to get remote URL, skipping event subscription",
+			"error", err,
+			"session_id", request.SessionID,
+		)
+	}
+
+	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+}
+
+func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResult, error) {
+	worktreeName := filepath.Base(worktreePath)
+	if request.SessionID == "" {
+		request.SessionID = sessionIDFromName(worktreeName)
+	}
+
+	commonGitDir, err := gitCommonDirFromWorktree(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
+		if err := s.subs.unsubscribe(ctx, remoteURL, request.SessionID, s.Logger); err != nil {
+			s.Logger.Warn("Failed to unsubscribe from remote events",
+				"error", err,
+				"remote_url", remoteURL,
+				"session_id", request.SessionID,
+			)
+		}
+	}
+
+	if err := killTmuxSession(worktreeName); err != nil {
+		return nil, err
+	}
+
+	if err := removeGitWorktree(worktreePath); err != nil {
+		return nil, err
+	}
+
+	if err := deleteGitBranch(commonGitDir, request.SessionID); err != nil {
+		return nil, err
+	}
+
+	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+}
+
+func resolveDeleteWorktreePath(worktreeRoot string, request schemas.SessionDeleteRequest) (string, error) {
+	if request.Path != "" {
+		worktreePath := filepath.Clean(request.Path)
+		if _, err := os.Stat(worktreePath); err != nil {
+			if os.IsNotExist(err) {
+				return "", os.ErrNotExist
+			}
+			return "", fmt.Errorf("failed to read worktree")
+		}
+		return worktreePath, nil
+	}
+
+	matchedPath, err := findWorktreeBySessionID(worktreeRoot, request.SessionID)
+	if err != nil {
+		return "", os.ErrNotExist
+	}
+	return matchedPath, nil
 }

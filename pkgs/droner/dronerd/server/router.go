@@ -14,5 +14,6 @@ func (s *Server) Router() http.Handler {
 	r.Get("/oauth/github/status", s.HandlerGitHubOAuthStatus)
 	r.Post("/sessions", s.HandlerCreateSession)
 	r.Delete("/sessions", s.HandlerDeleteSession)
+	r.Get("/tasks/{id}", s.HandlerTaskStatus)
 	return r
 }

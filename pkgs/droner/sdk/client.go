@@ -95,7 +95,7 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(body)), nil
 }
 
-func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.SessionCreateResponse, error) {
+func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.TaskResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
@@ -107,11 +107,11 @@ func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreat
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return nil, responseError(resp)
 	}
 
-	var payload schemas.SessionCreateResponse
+	var payload schemas.TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreat
 	return &payload, nil
 }
 
-func (c *Client) DeleteSession(ctx context.Context, request schemas.SessionDeleteRequest) (*schemas.SessionDeleteResponse, error) {
+func (c *Client) DeleteSession(ctx context.Context, request schemas.SessionDeleteRequest) (*schemas.TaskResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
@@ -131,11 +131,31 @@ func (c *Client) DeleteSession(ctx context.Context, request schemas.SessionDelet
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, responseError(resp)
+	}
+
+	var payload schemas.TaskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return &payload, nil
+}
+
+func (c *Client) TaskStatus(ctx context.Context, taskID string) (*schemas.TaskResponse, error) {
+	path := "/tasks/" + url.PathEscape(taskID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, responseError(resp)
 	}
 
-	var payload schemas.SessionDeleteResponse
+	var payload schemas.TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
