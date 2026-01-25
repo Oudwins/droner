@@ -6,3 +6,4 @@ result-*
 *.test
 /pkgs/droner/bin/
 bin/
+.env
