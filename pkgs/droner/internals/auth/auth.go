@@ -69,7 +69,7 @@ func WriteGitHubAuth(auth GitHubAuth) error {
 
 func authFilePath() (string, error) {
 	config := conf.GetConfig()
-	dataDir, err := expandPath(config.DATA_DIR)
+	dataDir, err := expandPath(config.Server.DataDir)
 	if err != nil {
 		return "", err
 	}
