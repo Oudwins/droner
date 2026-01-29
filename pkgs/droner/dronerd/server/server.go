@@ -19,13 +19,14 @@ import (
 )
 
 type Server struct {
-	Config *conf.Config
-	Env    *env.EnvStruct
-	Logger *slog.Logger
-	Logbuf *logbuf.Logger
-	subs   *subscriptionManager
-	oauth  *oauthStateStore
-	tasks  *taskManager
+	Config     *conf.Config
+	Env        *env.EnvStruct
+	Logger     *slog.Logger
+	Logbuf     *logbuf.Logger
+	subs       *subscriptionManager
+	oauth      *oauthStateStore
+	tasks      *taskManager
+	httpServer *http.Server
 }
 
 func New() *Server {
@@ -122,5 +123,10 @@ func (s *Server) Start() error {
 	server := &http.Server{
 		Handler: s.Router(),
 	}
-	return server.Serve(listener)
+	s.httpServer = server
+	err = server.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

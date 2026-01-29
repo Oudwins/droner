@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/desktop"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/term"
@@ -297,8 +298,12 @@ func ensureDaemonRunning(client *sdk.Client) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	if _, err := client.Version(ctx); err == nil {
-		return nil
+	if version, err := client.Version(ctx); err == nil {
+		localVersion := conf.GetConfig().VERSION
+		if strings.TrimSpace(version) == strings.TrimSpace(localVersion) {
+			return nil
+		}
+		return replaceDaemon(client, version, localVersion)
 	}
 
 	if err := startDaemon(); err != nil {
@@ -399,6 +404,42 @@ func waitForDaemon(client *sdk.Client) error {
 		return lastErr
 	}
 	return errors.New("failed to reach droner server")
+}
+
+func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := client.Shutdown(ctx); err != nil {
+		if errors.Is(err, sdk.ErrShutdownUnsupported) {
+			return fmt.Errorf("dronerd %s is running; please stop it and retry", strings.TrimSpace(remoteVersion))
+		}
+		return fmt.Errorf("failed to shutdown dronerd %s: %w", strings.TrimSpace(remoteVersion), err)
+	}
+
+	if err := waitForDaemonStop(client); err != nil {
+		return fmt.Errorf("dronerd %s did not stop: %w", strings.TrimSpace(remoteVersion), err)
+	}
+
+	if err := startDaemon(); err != nil {
+		return err
+	}
+
+	return waitForDaemon(client)
+}
+
+func waitForDaemonStop(client *sdk.Client) error {
+	for i := 0; i < 8; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		_, err := client.Version(ctx)
+		cancel()
+		if err != nil {
+			return nil
+		}
+		time.Sleep(time.Duration(i+1) * 150 * time.Millisecond)
+	}
+
+	return errors.New("failed to stop dronerd")
 }
 
 func parseWaitTimeout(raw string) (time.Duration, error) {
