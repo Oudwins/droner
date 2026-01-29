@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/internals/desktop"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/term"
@@ -18,7 +18,7 @@ import (
 	z "github.com/Oudwins/zog"
 )
 
-var ErrUsage = errors.New("usage:\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>] [--wait] [--wait-timeout <duration>]\n  droner del <id> [--wait] [--wait-timeout <duration>]\n  droner task <id>\n  droner auth github")
+var ErrUsage = errors.New("usage:\n  droner serve [--detach|-d]\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>] [--wait] [--wait-timeout <duration>]\n  droner del <id> [--wait] [--wait-timeout <duration>]\n  droner task <id>\n  droner auth github")
 
 type NewArgs struct {
 	Path    string `zog:"path"`
@@ -27,6 +27,10 @@ type NewArgs struct {
 	Prompt  string `zog:"prompt"`
 	Wait    bool   `zog:"wait"`
 	Timeout string `zog:"timeout"`
+}
+
+type ServeArgs struct {
+	Detach bool
 }
 
 type DelArgs struct {
@@ -70,6 +74,19 @@ func run(args []string) error {
 	client := sdk.NewClient()
 
 	switch command {
+	case "serve":
+		parsed, err := parseServeArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if parsed.Detach {
+			return startDaemon()
+		}
+		serverInstance := server.New()
+		if err := serverInstance.Start(); err != nil {
+			return fmt.Errorf("failed to start server: %w", err)
+		}
+		return nil
 	case "new":
 		parsed, err := parseNewArgs(args[1:])
 		if err != nil {
@@ -225,6 +242,20 @@ func parseNewArgs(args []string) (NewArgs, error) {
 	return parsed, nil
 }
 
+func parseServeArgs(args []string) (ServeArgs, error) {
+	parsed := ServeArgs{}
+	for i := 0; i < len(args); {
+		switch args[i] {
+		case "--detach", "-d":
+			parsed.Detach = true
+			i += 1
+		default:
+			return parsed, ErrUsage
+		}
+	}
+	return parsed, nil
+}
+
 func parseDelArgs(args []string) (DelArgs, error) {
 	if len(args) < 1 {
 		return DelArgs{}, ErrUsage
@@ -340,12 +371,12 @@ func runGitHubAuthFlow(client *sdk.Client) error {
 }
 
 func startDaemon() error {
-	path, err := findDaemonBinary()
+	path, err := findServeBinary()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(path)
+	cmd := exec.Command(path, "serve")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Start()
@@ -367,7 +398,7 @@ func waitForDaemon(client *sdk.Client) error {
 	if lastErr != nil {
 		return lastErr
 	}
-	return errors.New("failed to reach dronerd")
+	return errors.New("failed to reach droner server")
 }
 
 func parseWaitTimeout(raw string) (time.Duration, error) {
@@ -421,18 +452,15 @@ func printTaskSummary(response *schemas.TaskResponse) {
 	}
 }
 
-func findDaemonBinary() (string, error) {
+func findServeBinary() (string, error) {
 	executable, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(executable), "dronerd")
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return candidate, nil
-		}
+	if err == nil && executable != "" {
+		return executable, nil
 	}
 
-	path, err := exec.LookPath("dronerd")
+	path, err := exec.LookPath("droner")
 	if err != nil {
-		return "", fmt.Errorf("dronerd not found in PATH")
+		return "", fmt.Errorf("droner not found in PATH")
 	}
 	return path, nil
 }
