@@ -36,17 +36,17 @@ var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim(),
 	"SessionID": z.String().Optional().Trim(),
 	"Agent": z.Ptr(z.Struct(z.Shape{
-		"Model":  z.String().Default(conf.GetConfig().DEFAULT_MODEL).Trim(),
+		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
 		"Prompt": z.String().Optional().Trim(),
 	})),
 }).Transform(func(valPtr any, _ z.Ctx) error {
 	request := valPtr.(*SessionCreateRequest)
 	if request.Agent == nil {
-		request.Agent = &SessionAgentConfig{Model: conf.GetConfig().DEFAULT_MODEL}
+		request.Agent = &SessionAgentConfig{Model: conf.GetConfig().Agent.DefaultModel}
 		return nil
 	}
 	if request.Agent.Model == "" {
-		request.Agent.Model = conf.GetConfig().DEFAULT_MODEL
+		request.Agent.Model = conf.GetConfig().Agent.DefaultModel
 	}
 	return nil
 })

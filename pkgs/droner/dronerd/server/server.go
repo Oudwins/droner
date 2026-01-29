@@ -34,7 +34,7 @@ func New() *Server {
 	env := env.Get()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	buffer := logbuf.New(
-		slog.String("version", config.VERSION),
+		slog.String("version", config.Version),
 		slog.Int("port", env.PORT),
 	)
 	worktreeRoot, err := expandPath(config.WORKTREES_DIR)

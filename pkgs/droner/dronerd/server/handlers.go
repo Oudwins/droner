@@ -21,7 +21,7 @@ import (
 
 func (s *Server) HandlerVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte(s.Config.VERSION))
+	_, _ = w.Write([]byte(s.Config.Version))
 }
 
 func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +60,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	request.Agent.Model = strings.TrimSpace(request.Agent.Model)
 	request.Agent.Prompt = strings.TrimSpace(request.Agent.Prompt)
 	if request.Agent.Model == "" {
-		request.Agent.Model = conf.GetConfig().DEFAULT_MODEL
+		request.Agent.Model = conf.GetConfig().Agent.DefaultModel
 	}
 
 	repoPath := filepath.Clean(request.Path)
@@ -79,11 +79,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, err := expandPath(s.Config.WORKTREES_DIR)
-	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to expand worktree root", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
+	worktreeRoot, _ := expandPath(s.Config.Worktrees.Dir)
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -137,7 +133,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, err := expandPath(s.Config.WORKTREES_DIR)
+	worktreeRoot, err := expandPath(s.Config.Worktrees.Dir)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Worktree Root doesn't exist", nil), Render.Status(http.StatusInternalServerError))
 		return
