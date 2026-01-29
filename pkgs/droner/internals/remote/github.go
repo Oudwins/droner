@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -20,6 +21,11 @@ type githubProvider struct {
 
 func newGitHubProvider() *githubProvider {
 	interval := 1 * time.Hour // default
+	if configured := strings.TrimSpace(conf.GetConfig().Providers.GitHub.PollInterval); configured != "" {
+		if d, err := time.ParseDuration(configured); err == nil {
+			interval = d
+		}
+	}
 	if val := os.Getenv("REMOTE_POLL_INTERVAL"); val != "" {
 		if d, err := time.ParseDuration(val); err == nil {
 			interval = d
