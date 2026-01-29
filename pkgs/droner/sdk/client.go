@@ -22,6 +22,7 @@ type Client struct {
 }
 
 var ErrAuthRequired = errors.New("auth required")
+var ErrShutdownUnsupported = errors.New("shutdown unsupported")
 
 type ErrorResponse struct {
 	Status  string              `json:"status"`
@@ -93,6 +94,22 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 
 	return strings.TrimSpace(string(body)), nil
+}
+
+func (c *Client) Shutdown(ctx context.Context) error {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/shutdown", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrShutdownUnsupported
+	}
+	return responseError(resp)
 }
 
 func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.TaskResponse, error) {
