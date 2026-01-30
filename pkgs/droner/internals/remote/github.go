@@ -21,7 +21,7 @@ type githubProvider struct {
 
 func newGitHubProvider() *githubProvider {
 	interval := 1 * time.Hour // default
-	if configured := strings.TrimSpace(conf.GetConfig().Providers.GitHub.PollInterval); configured != "" {
+	if configured := strings.TrimSpace(conf.GetConfig().Providers.Github.PollInterval); configured != "" {
 		if d, err := time.ParseDuration(configured); err == nil {
 			interval = d
 		}

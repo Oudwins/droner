@@ -13,34 +13,34 @@ import (
 
 type Config struct {
 	Version   string          `json:"-"`
-	Providers ProvidersConfig `json:"providers" zog:"providers"`
-	Worktrees WorktreesConfig `json:"worktrees" zog:"worktrees"`
-	Server    ServerConfig    `json:"server" zog:"server"`
-	Agent     AgentConfig     `json:"agent" zog:"agent"`
+	Providers ProvidersConfig `json:"providers"`
+	Worktrees WorktreesConfig `json:"worktrees" `
+	Server    ServerConfig    `json:"server"`
+	Agent     AgentConfig     `json:"agent"`
 }
 
 type ProvidersConfig struct {
-	GitHub GitHubConfig `json:"github" zog:"github"`
+	Github GitHubConfig `json:"github"`
 }
 
 type GitHubConfig struct {
-	PollInterval string `json:"poll_interval" zog:"poll_interval"`
+	PollInterval string `json:"poll_interval"`
 }
 
 type WorktreesConfig struct {
-	Dir string `json:"dir" zog:"dir"`
+	Dir string `json:"dir"`
 }
 
 type ServerConfig struct {
-	DataDir string `json:"data_dir" zog:"data_dir"`
+	DataDir string `json:"data_dir"`
 }
 
 type AgentConfig struct {
-	DefaultModel string `json:"default_model" zog:"default_model"`
+	DefaultModel string `json:"default_model"`
 }
 
 var gitHubSchema = z.Struct(z.Shape{
-	"poll_interval": z.String().Default("1h"),
+	"PollInterval": z.String().Default("60"),
 })
 
 var providersSchema = z.Struct(z.Shape{
@@ -48,15 +48,15 @@ var providersSchema = z.Struct(z.Shape{
 })
 
 var worktreesSchema = z.Struct(z.Shape{
-	"dir": z.String().Default("~/.local/share/droner/worktrees"),
+	"Dir": z.String().Default("~/.local/share/droner/worktrees"),
 })
 
 var serverSchema = z.Struct(z.Shape{
-	"data_dir": z.String().Default("~/.local/share/droner"),
+	"DataDir": z.String().Default("~/.local/share/droner"),
 })
 
 var agentSchema = z.Struct(z.Shape{
-	"default_model": z.String().Default("openai/gpt-5.2-codex"),
+	"DefaultModel": z.String().Default("openai/gpt-5.2-codex"),
 })
 
 var ConfigSchema = z.Struct(z.Shape{
