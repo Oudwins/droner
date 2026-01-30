@@ -299,7 +299,7 @@ func ensureDaemonRunning(client *sdk.Client) error {
 	defer cancel()
 
 	if version, err := client.Version(ctx); err == nil {
-		localVersion := conf.GetConfig().VERSION
+		localVersion := conf.GetConfig().Version
 		if strings.TrimSpace(version) == strings.TrimSpace(localVersion) {
 			return nil
 		}

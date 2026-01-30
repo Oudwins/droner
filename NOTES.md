@@ -21,3 +21,10 @@ We can do worktree names as
   dr {x} --message {m} --path {y} --id {z}
 
   ```
+
+
+
+## Worktree names
+We cannot use '#' in the folder name it doesn't play nice with some tools. We also cannot use '.' in the session name, doesn't work with tmux.
+
+

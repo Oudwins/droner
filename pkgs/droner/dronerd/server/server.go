@@ -37,7 +37,7 @@ func New() *Server {
 		slog.String("version", config.Version),
 		slog.Int("port", env.PORT),
 	)
-	worktreeRoot, err := expandPath(config.WORKTREES_DIR)
+	worktreeRoot, err := expandPath(config.Worktrees.Dir)
 	if err != nil {
 		log.Fatal("[Droner] Failed to expand worktree root: ", err)
 	}
