@@ -6,17 +6,20 @@ import (
 	"runtime"
 )
 
+var ExecCommand = exec.Command
+var RuntimeGOOS = runtime.GOOS
+
 func OpenURL(url string) error {
 	if url == "" {
 		return errors.New("url is empty")
 	}
 
 	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	switch RuntimeGOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = ExecCommand("open", url)
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = ExecCommand("xdg-open", url)
 	default:
 		return errors.New("unsupported platform")
 	}

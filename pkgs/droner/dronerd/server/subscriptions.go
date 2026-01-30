@@ -8,6 +8,9 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 )
 
+var subscribeRemote = remote.SubscribeBranchEvents
+var unsubscribeRemote = remote.UnsubscribeBranchEvents
+
 // subscriptionManager tracks active remote subscriptions for this server
 type subscriptionManager struct {
 	mu   sync.RWMutex
@@ -64,7 +67,7 @@ func (sm *subscriptionManager) subscribe(ctx context.Context, remoteURL string, 
 	}
 
 	// Subscribe via remote package
-	if err := remote.SubscribeBranchEvents(ctx, remoteURL, branch, handler); err != nil {
+	if err := subscribeRemote(ctx, remoteURL, branch, handler); err != nil {
 		logger.Error("Failed to subscribe to remote events",
 			"error", err,
 			"remote_url", remoteURL,
@@ -99,7 +102,7 @@ func (sm *subscriptionManager) unsubscribe(ctx context.Context, remoteURL string
 		return nil // already unsubscribed
 	}
 
-	if err := remote.UnsubscribeBranchEvents(ctx, remoteURL, branch); err != nil {
+	if err := unsubscribeRemote(ctx, remoteURL, branch); err != nil {
 		logger.Error("Failed to unsubscribe from remote events",
 			"error", err,
 			"remote_url", remoteURL,
