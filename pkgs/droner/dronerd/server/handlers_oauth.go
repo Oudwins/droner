@@ -23,6 +23,10 @@ const (
 	oauthStateTTL       = 10 * time.Minute
 )
 
+var now = time.Now
+
+var oauthHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
 type oauthStateStatus string
 
 const (
@@ -94,10 +98,10 @@ func (s *oauthStateStore) create(deviceCode string, interval time.Duration, expi
 			s.states[state] = &oauthState{
 				deviceCode: deviceCode,
 				interval:   interval,
-				nextPoll:   time.Now().Add(interval),
+				nextPoll:   now().Add(interval),
 				expiresAt:  expiresAt,
 				status:     oauthStatusPending,
-				createdAt:  time.Now(),
+				createdAt:  now(),
 			}
 			s.mu.Unlock()
 			return state, nil
@@ -112,10 +116,10 @@ func (s *oauthStateStore) create(deviceCode string, interval time.Duration, expi
 	s.states[state] = &oauthState{
 		deviceCode: deviceCode,
 		interval:   interval,
-		nextPoll:   time.Now().Add(interval),
+		nextPoll:   now().Add(interval),
 		expiresAt:  expiresAt,
 		status:     oauthStatusPending,
-		createdAt:  time.Now(),
+		createdAt:  now(),
 	}
 	s.mu.Unlock()
 	return state, nil
@@ -129,7 +133,7 @@ func (s *oauthStateStore) status(state string) (oauthStateStatus, string, bool) 
 		return oauthStatusFailed, "unknown_state", false
 	}
 
-	if time.Since(record.createdAt) > oauthStateTTL {
+	if now().Sub(record.createdAt) > oauthStateTTL {
 		s.mu.Lock()
 		record.status = oauthStatusFailed
 		record.err = "expired"
@@ -166,7 +170,7 @@ func (s *oauthStateStore) updatePoll(state string, interval time.Duration) {
 	s.mu.Lock()
 	if record, exists := s.states[state]; exists {
 		record.interval = interval
-		record.nextPoll = time.Now().Add(interval)
+		record.nextPoll = now().Add(interval)
 	}
 	s.mu.Unlock()
 }
@@ -180,7 +184,7 @@ func (s *Server) HandlerGitHubOAuthStart(w http.ResponseWriter, r *http.Request)
 	}
 
 	interval := time.Duration(deviceResp.Interval) * time.Second
-	expiresAt := time.Now().Add(time.Duration(deviceResp.ExpiresIn) * time.Second)
+	expiresAt := now().Add(time.Duration(deviceResp.ExpiresIn) * time.Second)
 	state, err := s.oauth.create(deviceResp.DeviceCode, interval, expiresAt)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create auth state", nil), Render.Status(http.StatusInternalServerError))
@@ -220,13 +224,13 @@ func (s *Server) HandlerGitHubOAuthStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if time.Now().After(record.expiresAt) {
+	if now().After(record.expiresAt) {
 		s.oauth.mark(state, oauthStatusFailed, "expired")
 		RenderJSON(w, r, oauthStatusResponse{Status: string(oauthStatusFailed), Error: "expired"})
 		return
 	}
 
-	if time.Now().Before(record.nextPoll) {
+	if now().Before(record.nextPoll) {
 		RenderJSON(w, r, oauthStatusResponse{Status: string(oauthStatusPending)})
 		return
 	}
@@ -245,7 +249,7 @@ func (s *Server) HandlerGitHubOAuthStatus(w http.ResponseWriter, r *http.Request
 			AccessToken: result.AccessToken,
 			TokenType:   result.TokenType,
 			Scope:       result.Scope,
-			UpdatedAt:   time.Now().UTC(),
+			UpdatedAt:   now().UTC(),
 		}); err != nil {
 			s.oauth.mark(state, oauthStatusFailed, "failed_to_store_token")
 			RenderJSON(w, r, oauthStatusResponse{Status: string(oauthStatusFailed), Error: "failed_to_store_token"})
@@ -288,8 +292,7 @@ func (s *Server) requestGitHubDeviceCode(r *http.Request, config *oauth2.Config)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -340,8 +343,7 @@ func (s *Server) exchangeGitHubDeviceToken(r *http.Request, config *oauth2.Confi
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

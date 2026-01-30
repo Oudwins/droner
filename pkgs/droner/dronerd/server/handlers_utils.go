@@ -2,14 +2,13 @@ package server
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // getRemoteURL gets the origin remote URL from a git repository
 func getRemoteURL(repoPath string) (string, error) {
-	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
+	cmd := execCommand("git", "-C", repoPath, "remote", "get-url", "origin")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to get origin URL: %s", strings.TrimSpace(string(output)))
@@ -21,7 +20,7 @@ func getRemoteURL(repoPath string) (string, error) {
 // by climbing to the git common dir and getting the remote URL from there
 func getRemoteURLFromWorktree(worktreePath string) (string, error) {
 	// Get the common git directory for this worktree
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	cmd := execCommand("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to get git common dir: %s", strings.TrimSpace(string(output)))
