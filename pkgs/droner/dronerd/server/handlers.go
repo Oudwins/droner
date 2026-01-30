@@ -163,7 +163,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func gitIsInsideWorkTree(repoPath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--is-inside-work-tree")
+	cmd := execCommand("git", "-C", repoPath, "rev-parse", "--is-inside-work-tree")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git check failed: %s", strings.TrimSpace(string(output)))
@@ -212,7 +212,7 @@ func generateSessionID(baseName string, worktreeRoot string) (string, error) {
 }
 
 func createGitWorktree(sessionId string, repoPath string, worktreePath string) error {
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", sessionId, worktreePath) // create worktree with branch name = sessionid
+	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", sessionId, worktreePath) // create worktree with branch name = sessionid
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create worktree: %s", strings.TrimSpace(string(output)))
 	}
@@ -220,7 +220,7 @@ func createGitWorktree(sessionId string, repoPath string, worktreePath string) e
 }
 
 func removeGitWorktree(worktreePath string) error {
-	cmd := exec.Command("git", "-C", worktreePath, "worktree", "remove", "--force", worktreePath)
+	cmd := execCommand("git", "-C", worktreePath, "worktree", "remove", "--force", worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove worktree: %s", strings.TrimSpace(string(output)))
 	}
@@ -228,7 +228,7 @@ func removeGitWorktree(worktreePath string) error {
 }
 
 func gitCommonDirFromWorktree(worktreePath string) (string, error) {
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	cmd := execCommand("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine git common dir: %s", strings.TrimSpace(string(output)))
@@ -247,7 +247,7 @@ func deleteGitBranch(commonGitDir string, sessionID string) error {
 	if sessionID == "" {
 		return nil
 	}
-	check := exec.Command("git", "--git-dir", commonGitDir, "show-ref", "--verify", "--quiet", "refs/heads/"+sessionID)
+	check := execCommand("git", "--git-dir", commonGitDir, "show-ref", "--verify", "--quiet", "refs/heads/"+sessionID)
 	if err := check.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -255,7 +255,7 @@ func deleteGitBranch(commonGitDir string, sessionID string) error {
 		}
 		return fmt.Errorf("failed to check branch: %w", err)
 	}
-	cmd := exec.Command("git", "--git-dir", commonGitDir, "branch", "-D", sessionID)
+	cmd := execCommand("git", "--git-dir", commonGitDir, "branch", "-D", sessionID)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to delete branch: %s", strings.TrimSpace(string(output)))
 	}
@@ -290,7 +290,7 @@ func runWorktreeSetup(repoPath string, worktreePath string) error {
 		if command == "" {
 			continue
 		}
-		cmd := exec.Command("sh", "-c", command)
+		cmd := execCommand("sh", "-c", command)
 		cmd.Dir = worktreePath
 		cmd.Env = append(os.Environ(), fmt.Sprintf("ROOT_WORKTREE_PATH=%s", repoPath))
 		output, err := cmd.CombinedOutput()
@@ -307,7 +307,7 @@ func runWorktreeSetup(repoPath string, worktreePath string) error {
 }
 
 func createTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
-	newSession := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
+	newSession := execCommand("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
 	if output, err := newSession.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux session: %s", strings.TrimSpace(string(output)))
 	}
@@ -320,12 +320,12 @@ func createTmuxSession(sessionName string, worktreePath string, model string, pr
 		opencodeArgs = append(opencodeArgs, "--prompt", prompt)
 	}
 
-	newOpencode := exec.Command("tmux", opencodeArgs...)
+	newOpencode := execCommand("tmux", opencodeArgs...)
 	if output, err := newOpencode.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
 	}
 
-	newTerminal := exec.Command("tmux", "new-window", "-t", sessionName, "-n", "terminal", "-c", worktreePath)
+	newTerminal := execCommand("tmux", "new-window", "-t", sessionName, "-n", "terminal", "-c", worktreePath)
 	if output, err := newTerminal.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux terminal window: %s", strings.TrimSpace(string(output)))
 	}
@@ -334,11 +334,11 @@ func createTmuxSession(sessionName string, worktreePath string, model string, pr
 }
 
 func killTmuxSession(sessionName string) error {
-	check := exec.Command("tmux", "has-session", "-t", sessionName)
+	check := execCommand("tmux", "has-session", "-t", sessionName)
 	if err := check.Run(); err != nil {
 		return nil
 	}
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	cmd := execCommand("tmux", "kill-session", "-t", sessionName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to kill tmux session: %s", strings.TrimSpace(string(output)))
 	}
