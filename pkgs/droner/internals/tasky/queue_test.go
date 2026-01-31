@@ -63,8 +63,8 @@ func TestNewQueueValidation(t *testing.T) {
 	_, err = NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob(jobID, JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
-			NewJob(jobID, JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob(jobID, JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
+			NewJob(jobID, JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
 		},
 	})
 	if err == nil {
@@ -87,7 +87,7 @@ func TestEnqueueValidation(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("alpha", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob("alpha", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
 		},
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("alpha", JobConfig{Priority: 7, Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob("alpha", JobConfig[string]{Priority: 7, Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
 		},
 		TaskIDGen: TaskIDGeneratorFunc[string](func(jobID string) TaskID {
 			return "gen-1"
@@ -183,8 +183,8 @@ func TestConsumerRunAckNack(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("ok", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
-			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
+			NewJob("ok", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
+			NewJob("fail", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return errors.New("boom") }}),
 		},
 	})
 	if err != nil {
@@ -252,7 +252,7 @@ func TestConsumerOnErrorStops(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
+			NewJob("fail", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return errors.New("boom") }}),
 		},
 		OnError: func(err error, task *Task[string], payload []byte) error {
 			return stopErr
@@ -279,7 +279,7 @@ func TestConsumerDefaultsWorkers(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("ok", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob("ok", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
 		},
 	})
 	if err != nil {
@@ -308,7 +308,7 @@ func TestEnqueueConcurrentSafety(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			NewJob("alpha", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob("alpha", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
 		},
 	})
 	if err != nil {

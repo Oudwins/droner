@@ -20,15 +20,15 @@ const (
 
 func NewQueue(base *baseserver.BaseServer) (*tasky.Queue[Jobs], error) {
 
-	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig{
-		Run: func(ctx context.Context, payload []byte) error {
+	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig[Jobs]{
+		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			// DO STUFF
 			return nil
 		},
 	})
 
-	deleteSessionJob := tasky.NewJob(JobDeleteSession, tasky.JobConfig{
-		Run: func(ctx context.Context, payload []byte) error {
+	deleteSessionJob := tasky.NewJob(JobDeleteSession, tasky.JobConfig[Jobs]{
+		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			// DO STUFF
 			return nil
 		},
