@@ -8,6 +8,8 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,16 +32,34 @@ type Server struct {
 
 func New() *Server {
 	base := baseserver.New()
+	dataDir, err := expandPath(base.Config.Server.DataDir)
+	assert.AssertNil(err, "[SERVER] Failed to expand data dir")
+	if dataDir != "" {
+		dataDir = filepath.Clean(dataDir)
+		base.Config.Server.DataDir = dataDir
+	}
 	buffer := logbuf.New(
 		slog.String("version", base.Config.Version),
 		slog.Int("port", base.Env.PORT),
 	)
 
-	q, error := tasks.NewQueue(base)
-	assert.AssertNil(error, "[SERVER] Failed to initialize")
+	storePath := filepath.Join(base.Config.Server.DataDir, "tasks", "tasks.db")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		assert.AssertNil(err, "[SERVER] Failed to create data directory")
+	}
+	store, err := newTaskStore(storePath)
+	assert.AssertNil(err, "[SERVER] Failed to initialize task store")
+	manager := newTaskManager(store, base.Logger)
+
+	q, err := tasks.NewQueue(base)
+	assert.AssertNil(err, "[SERVER] Failed to initialize queue")
+
 	return &Server{
 		Base:   base,
 		Logbuf: buffer,
+		subs:   newSubscriptionManager(),
+		oauth:  newOAuthStateStore(),
+		tasks:  manager,
 		tasky:  q,
 	}
 }
@@ -49,6 +69,7 @@ func (s *Server) SafeStart() error {
 		return nil
 	}
 
+	// TODO: Start the queue & the subscription manager
 	go func() {
 		s.Base.Logger.Info("starting server")
 		err := s.Start()
