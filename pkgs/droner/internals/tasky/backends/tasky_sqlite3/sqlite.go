@@ -29,10 +29,11 @@ type Config struct {
 type Backend[T tasky.JobID] struct {
 	mu         sync.Mutex
 	db         *sql.DB
-	batch      []queueItem[T]
+	batch      []queueItem
 	batchTimer *time.Timer
 	signal     chan struct{}
 	cfg        Config
+	stmts      *preparedStatements
 }
 
 func New[T tasky.JobID](cfg Config) (*Backend[T], error) {
@@ -71,11 +72,16 @@ func New[T tasky.JobID](cfg Config) (*Backend[T], error) {
 	if err := backend.init(); err != nil {
 		return nil, err
 	}
+	stmts, err := prepareStatements(backend.db, backend.cfg.QueueName)
+	if err != nil {
+		return nil, err
+	}
+	backend.stmts = stmts
 
 	return backend, nil
 }
 
-func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.Job[T]) error {
+func (b *Backend[T]) Enqueue(ctx context.Context, task *tasky.Task[T], job *tasky.Job[T]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -85,7 +91,7 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.
 		return err
 	}
 
-	item := queueItem[T]{
+	item := queueItem{
 		taskID:    taskKey,
 		jobID:     string(task.JobID),
 		payload:   task.Payload,
@@ -118,6 +124,8 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.
 }
 
 func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, error) {
+	timer := time.NewTimer(b.cfg.PollInterval)
+	defer timer.Stop()
 	for {
 		if ctx.Err() != nil {
 			var zero T
@@ -134,12 +142,20 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, erro
 			return jobID, item.taskID, item.payload, nil
 		}
 
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(b.cfg.PollInterval)
+
 		select {
 		case <-ctx.Done():
 			var zero T
 			return zero, nil, nil, ctx.Err()
 		case <-b.signal:
-		case <-time.After(b.cfg.PollInterval):
+		case <-timer.C:
 		}
 	}
 }
@@ -154,15 +170,7 @@ func (b *Backend[T]) Ack(ctx context.Context, taskID tasky.TaskID) error {
 	}
 
 	now := time.Now().UTC().UnixNano()
-	res, err := b.db.ExecContext(ctx, fmt.Sprintf(`
-UPDATE %s
-SET status = 'completed', updated_at = ?, completed_at = ?
-WHERE id = ?
-`, b.cfg.QueueName), now, now, key)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
+	rows, err := b.stmts.ack(ctx, now, key)
 	if err != nil {
 		return err
 	}
@@ -194,6 +202,9 @@ func (b *Backend[T]) ForceFlush(ctx context.Context) error {
 }
 
 func (b *Backend[T]) Close() error {
+	if b.stmts != nil {
+		b.stmts.Close()
+	}
 	if b.cfg.DB != nil {
 		return nil
 	}
@@ -220,62 +231,23 @@ CREATE TABLE IF NOT EXISTS %s (
 	updated_at INTEGER NOT NULL,
 	completed_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_%s_status_available ON %s(status, available_at);
-CREATE INDEX IF NOT EXISTS idx_%s_priority ON %s(priority, created_at);
-`, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName))
+CREATE INDEX IF NOT EXISTS idx_%s_dequeue ON %s(status, available_at, priority DESC, created_at ASC);
+DROP INDEX IF EXISTS idx_%s_priority;
+`, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName))
 	return err
 }
 
-func (b *Backend[T]) tryDequeue(ctx context.Context) (*queueItem[T], error) {
+func (b *Backend[T]) tryDequeue(ctx context.Context) (*queueItem, error) {
 	if err := b.flushBatchIfReady(ctx); err != nil {
 		return nil, err
 	}
 
-	tx, err := b.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	now := time.Now().UTC().UnixNano()
-	row := tx.QueryRowContext(ctx, fmt.Sprintf(`
-SELECT id, job_id, payload
-FROM %s
-WHERE status = 'pending' AND available_at <= ?
-ORDER BY priority DESC, created_at ASC
-LIMIT 1
-`, b.cfg.QueueName), now)
-
-	var item queueItem[T]
-	if err := row.Scan(&item.taskID, &item.jobID, &item.payload); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	res, err := tx.ExecContext(ctx, fmt.Sprintf(`
-UPDATE %s
-SET status = 'in_flight', updated_at = ?
-WHERE id = ? AND status = 'pending'
-`, b.cfg.QueueName), now, item.taskID)
+	item, err := b.stmts.dequeue(ctx, now)
 	if err != nil {
 		return nil, err
 	}
-
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if affected == 0 {
-		return nil, nil
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
-	return &item, nil
+	return item, nil
 }
 
 func (b *Backend[T]) retryTask(ctx context.Context, taskKey string) error {
@@ -286,12 +258,8 @@ func (b *Backend[T]) retryTask(ctx context.Context, taskKey string) error {
 	defer tx.Rollback()
 
 	var attempts int
-	row := tx.QueryRowContext(ctx, fmt.Sprintf(`
-SELECT attempts
-FROM %s
-WHERE id = ? AND status = 'in_flight'
-`, b.cfg.QueueName), taskKey)
-	if err := row.Scan(&attempts); err != nil {
+	attempts, err = b.stmts.retrySelect(ctx, tx, taskKey)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("unknown task id: %v", taskKey)
 		}
@@ -300,11 +268,7 @@ WHERE id = ? AND status = 'in_flight'
 
 	attempts++
 	if b.cfg.RetryMax >= 0 && attempts > b.cfg.RetryMax {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
-UPDATE %s
-SET status = 'failed', updated_at = ?
-WHERE id = ?
-`, b.cfg.QueueName), time.Now().UTC().UnixNano(), taskKey); err != nil {
+		if err := b.stmts.retryFail(ctx, tx, time.Now().UTC().UnixNano(), taskKey); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -322,11 +286,7 @@ WHERE id = ?
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
-UPDATE %s
-SET status = 'pending', attempts = ?, available_at = ?, updated_at = ?
-WHERE id = ?
-`, b.cfg.QueueName), attempts, availableAt, now, taskKey); err != nil {
+	if err := b.stmts.retryPending(ctx, tx, attempts, availableAt, now, taskKey); err != nil {
 		return err
 	}
 
@@ -338,12 +298,8 @@ WHERE id = ?
 	return nil
 }
 
-func (b *Backend[T]) insertItem(ctx context.Context, item queueItem[T]) error {
-	_, err := b.db.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
-VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, NULL)
-`, b.cfg.QueueName), item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt)
-	return err
+func (b *Backend[T]) insertItem(ctx context.Context, item queueItem) error {
+	return b.stmts.insert(ctx, item)
 }
 
 func (b *Backend[T]) flushBatchIfReady(ctx context.Context) error {
@@ -368,19 +324,30 @@ func (b *Backend[T]) flushBatchLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.PrepareContext(ctx, fmt.Sprintf(`
-INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
-VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, NULL)
-`, b.cfg.QueueName))
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	defer stmt.Close()
 
-	for _, item := range b.batch {
-		if _, err := stmt.ExecContext(ctx, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt); err != nil {
-			stmt.Close()
+	maxParams := 999
+	paramsPerRow := 8
+	maxRows := maxParams / paramsPerRow
+	for start := 0; start < len(b.batch); start += maxRows {
+		end := start + maxRows
+		if end > len(b.batch) {
+			end = len(b.batch)
+		}
+		args := make([]any, 0, (end-start)*paramsPerRow)
+		placeholders := make([]byte, 0, (end-start)*48)
+		for i := start; i < end; i++ {
+			item := b.batch[i]
+			if i > start {
+				placeholders = append(placeholders, ',')
+			}
+			placeholders = append(placeholders, '(', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '\'', 'p', 'e', 'n', 'd', 'i', 'n', 'g', '\'', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', 'N', 'U', 'L', 'L', ')')
+			args = append(args, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt)
+		}
+		query := fmt.Sprintf(`
+INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
+VALUES %s
+`, b.cfg.QueueName, string(placeholders))
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -426,7 +393,7 @@ func taskIDKey(taskID tasky.TaskID) (string, error) {
 	return fmt.Sprint(taskID), nil
 }
 
-type queueItem[T tasky.JobID] struct {
+type queueItem struct {
 	taskID    string
 	jobID     string
 	payload   []byte
@@ -434,6 +401,158 @@ type queueItem[T tasky.JobID] struct {
 	attempts  int
 	createdAt int64
 	availAt   int64
+}
+
+type preparedStatements struct {
+	stmtDequeue      *sql.Stmt
+	stmtInsert       *sql.Stmt
+	stmtAck          *sql.Stmt
+	stmtRetrySelect  *sql.Stmt
+	stmtRetryFail    *sql.Stmt
+	stmtRetryPending *sql.Stmt
+}
+
+func prepareStatements(db *sql.DB, queueName string) (*preparedStatements, error) {
+	dequeueSQL := fmt.Sprintf(`
+WITH next AS (
+ SELECT id
+ FROM %s
+ WHERE status = 'pending' AND available_at <= ?
+ ORDER BY priority DESC, created_at ASC
+ LIMIT 1
+)
+UPDATE %s
+SET status = 'in_flight', updated_at = ?
+WHERE id IN (SELECT id FROM next)
+RETURNING id, job_id, payload
+`, queueName, queueName)
+	insertSQL := fmt.Sprintf(`
+INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
+VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, NULL)
+`, queueName)
+	ackSQL := fmt.Sprintf(`
+UPDATE %s
+SET status = 'completed', updated_at = ?, completed_at = ?
+WHERE id = ?
+`, queueName)
+	retrySelectSQL := fmt.Sprintf(`
+SELECT attempts
+FROM %s
+WHERE id = ? AND status = 'in_flight'
+`, queueName)
+	retryFailSQL := fmt.Sprintf(`
+UPDATE %s
+SET status = 'failed', updated_at = ?
+WHERE id = ?
+`, queueName)
+	retryPendingSQL := fmt.Sprintf(`
+UPDATE %s
+SET status = 'pending', attempts = ?, available_at = ?, updated_at = ?
+WHERE id = ?
+`, queueName)
+
+	var err error
+	stmts := &preparedStatements{}
+	stmts.stmtDequeue, err = db.Prepare(dequeueSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+	stmts.stmtInsert, err = db.Prepare(insertSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+	stmts.stmtAck, err = db.Prepare(ackSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+	stmts.stmtRetrySelect, err = db.Prepare(retrySelectSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+	stmts.stmtRetryFail, err = db.Prepare(retryFailSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+	stmts.stmtRetryPending, err = db.Prepare(retryPendingSQL)
+	if err != nil {
+		stmts.Close()
+		return nil, err
+	}
+
+	return stmts, nil
+}
+
+func (s *preparedStatements) Close() {
+	if s == nil {
+		return
+	}
+	if s.stmtDequeue != nil {
+		s.stmtDequeue.Close()
+	}
+	if s.stmtInsert != nil {
+		s.stmtInsert.Close()
+	}
+	if s.stmtAck != nil {
+		s.stmtAck.Close()
+	}
+	if s.stmtRetrySelect != nil {
+		s.stmtRetrySelect.Close()
+	}
+	if s.stmtRetryFail != nil {
+		s.stmtRetryFail.Close()
+	}
+	if s.stmtRetryPending != nil {
+		s.stmtRetryPending.Close()
+	}
+}
+
+func (s *preparedStatements) dequeue(ctx context.Context, now int64) (*queueItem, error) {
+	row := s.stmtDequeue.QueryRowContext(ctx, now, now)
+	var item queueItem
+	if err := row.Scan(&item.taskID, &item.jobID, &item.payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (s *preparedStatements) insert(ctx context.Context, item queueItem) error {
+	_, err := s.stmtInsert.ExecContext(ctx, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt)
+	return err
+}
+
+func (s *preparedStatements) ack(ctx context.Context, now int64, taskKey string) (int64, error) {
+	res, err := s.stmtAck.ExecContext(ctx, now, now, taskKey)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *preparedStatements) retrySelect(ctx context.Context, tx *sql.Tx, taskKey string) (int, error) {
+	row := tx.StmtContext(ctx, s.stmtRetrySelect).QueryRowContext(ctx, taskKey)
+	var attempts int
+	if err := row.Scan(&attempts); err != nil {
+		return 0, err
+	}
+	return attempts, nil
+}
+
+func (s *preparedStatements) retryFail(ctx context.Context, tx *sql.Tx, now int64, taskKey string) error {
+	_, err := tx.StmtContext(ctx, s.stmtRetryFail).ExecContext(ctx, now, taskKey)
+	return err
+}
+
+func (s *preparedStatements) retryPending(ctx context.Context, tx *sql.Tx, attempts int, availableAt int64, now int64, taskKey string) error {
+	_, err := tx.StmtContext(ctx, s.stmtRetryPending).ExecContext(ctx, attempts, availableAt, now, taskKey)
+	return err
 }
 
 var queueNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
