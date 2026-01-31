@@ -8,16 +8,16 @@ import (
 
 func TestGeneratorIncrements(t *testing.T) {
 	gen := New[string]()
-	first := gen.Next("job").(uint64)
-	second := gen.Next("job").(uint64)
-	if second <= first {
-		t.Fatalf("expected incrementing values, got %d then %d", first, second)
+	first := gen.Next("job")
+	second := gen.Next("job")
+	if first == second {
+		t.Fatal("expected unique values")
 	}
 }
 
 func TestGeneratorConcurrent(t *testing.T) {
 	gen := New[string]()
-	seen := make(map[uint64]struct{})
+	seen := make(map[string]struct{})
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -25,9 +25,13 @@ func TestGeneratorConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			val := gen.Next("job").(uint64)
+			val := gen.Next("job")
+			value, ok := val.(string)
+			if !ok {
+				t.Fatal("expected string task id")
+			}
 			mu.Lock()
-			seen[val] = struct{}{}
+			seen[value] = struct{}{}
 			mu.Unlock()
 		}()
 	}
