@@ -29,7 +29,7 @@ type TaskIDGenerator[T JobID] interface {
 	Next(jobID T) TaskID
 }
 
-type OnErrorHandler[T JobID] func(err error, task *Task[T], taskID TaskID, payload []byte) error
+type OnErrorHandler[T JobID] func(err error, task *Task[T], payload []byte) error
 
 type QueueConfig[T JobID] struct {
 	Jobs      []Job[T]
