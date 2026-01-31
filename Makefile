@@ -26,6 +26,9 @@ build:
 	cd ./pkgs/droner/ && go build -o ../../$(DRONERD_BIN) ./dronerd
 	cd ./pkgs/droner/ && go build -o ../../$(DRONER_BIN) ./droner
 
+test:
+	cd ./pkgs/droner/ && go test ./...
+
 cli: build
 	$(DRONER_BIN) $(filter-out $@,$(MAKECMDGOALS))
 

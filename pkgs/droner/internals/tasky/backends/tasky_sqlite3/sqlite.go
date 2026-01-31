@@ -1,4 +1,4 @@
-package sqlite
+package taskysqlite3
 
 import (
 	"context"
