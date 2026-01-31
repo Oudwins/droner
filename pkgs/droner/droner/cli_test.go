@@ -41,6 +41,14 @@ func captureOutput(t *testing.T, fn func() error) (string, error) {
 	return buf.String(), err
 }
 
+func executeCLI(args []string) error {
+	cmd := newRootCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(os.Stdout)
+	cmd.SetErr(os.Stderr)
+	return cmd.Execute()
+}
+
 func setupCLIEnv(t *testing.T, baseURL string) {
 	config := conf.GetConfig()
 	origVersion := config.Version
@@ -72,7 +80,7 @@ func TestCLITaskFlow(t *testing.T) {
 	setupCLIEnv(t, server.URL)
 
 	output, err := captureOutput(t, func() error {
-		return run([]string{"task", "abc"})
+		return executeCLI([]string{"task", "abc"})
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -111,7 +119,7 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	setupCLIEnv(t, server.URL)
 
 	output, err := captureOutput(t, func() error {
-		return run([]string{"new", "--path", "/repo", "--wait"})
+		return executeCLI([]string{"new", "--path", "/repo", "--wait"})
 	})
 	if err != nil {
 		t.Fatalf("run new: %v", err)
@@ -121,7 +129,7 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	}
 
 	output, err = captureOutput(t, func() error {
-		return run([]string{"del", "abc", "--wait"})
+		return executeCLI([]string{"del", "abc", "--wait"})
 	})
 	if err != nil {
 		t.Fatalf("run del: %v", err)
@@ -159,7 +167,7 @@ func TestCLIAuthFlow(t *testing.T) {
 	setupCLIEnv(t, completeServer.URL)
 
 	if _, err := captureOutput(t, func() error {
-		return run([]string{"auth", "github"})
+		return executeCLI([]string{"auth", "github"})
 	}); err != nil {
 		t.Fatalf("expected auth to succeed: %v", err)
 	}
@@ -180,7 +188,7 @@ func TestCLIAuthFlow(t *testing.T) {
 	setupCLIEnv(t, failedServer.URL)
 
 	if _, err := captureOutput(t, func() error {
-		return run([]string{"auth", "github"})
+		return executeCLI([]string{"auth", "github"})
 	}); err == nil {
 		t.Fatalf("expected auth to fail")
 	}
@@ -202,7 +210,7 @@ func TestCLIAuthFlow(t *testing.T) {
 
 	start := time.Now()
 	_, err := captureOutput(t, func() error {
-		return run([]string{"auth", "github"})
+		return executeCLI([]string{"auth", "github"})
 	})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout error, got %v", err)
