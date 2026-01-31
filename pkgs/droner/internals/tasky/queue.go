@@ -27,7 +27,7 @@ type Consumer[T ~string] struct {
 	options ConsumerOptions
 }
 
-func CreateQueue[T ~string](cfg QueueConfig[T]) (*Queue[T], error) {
+func NewQueue[T ~string](cfg QueueConfig[T]) (*Queue[T], error) {
 	if cfg.Backend == nil {
 		return nil, errors.New("backend is required")
 	}
