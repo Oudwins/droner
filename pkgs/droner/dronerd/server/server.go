@@ -13,9 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 )
 
 type Server struct {
@@ -27,6 +29,7 @@ type Server struct {
 	oauth      *oauthStateStore
 	tasks      *taskManager
 	httpServer *http.Server
+	tasky      *tasky.Queue[tasks.Jobs]
 }
 
 func New() *Server {

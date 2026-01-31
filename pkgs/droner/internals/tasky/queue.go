@@ -100,12 +100,12 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 
 	var runErr atomic.Value
 	var once sync.Once
-	reportError := func(err error, task *Task[T], taskID TaskID, payload []byte) {
+	reportError := func(err error, task *Task[T], payload []byte) {
 		if err == nil {
 			return
 		}
 		if c.queue.onError != nil {
-			if onErr := c.queue.onError(err, task, taskID, payload); onErr != nil {
+			if onErr := c.queue.onError(err, task, payload); onErr != nil {
 				once.Do(func() {
 					runErr.Store(onErr)
 					cancel()
@@ -131,7 +131,7 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						return
 					}
-					reportError(err, nil, nil, nil)
+					reportError(err, nil, nil)
 					continue
 				}
 
@@ -142,24 +142,24 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 					Payload: payload,
 				}
 				if !ok {
-					reportError(fmt.Errorf("unknown job id: %v", jobID), task, taskID, payload)
+					reportError(fmt.Errorf("unknown job id: %v", jobID), task, payload)
 					if ackErr := c.queue.backend.Ack(ctx, taskID); ackErr != nil {
-						reportError(ackErr, task, taskID, payload)
+						reportError(ackErr, task, payload)
 					}
 					continue
 				}
 
 				if err := job.Run(ctx, payload); err != nil {
 					if nackErr := c.queue.backend.Nack(ctx, taskID); nackErr != nil {
-						reportError(nackErr, task, taskID, payload)
+						reportError(nackErr, task, payload)
 					} else {
-						reportError(err, task, taskID, payload)
+						reportError(err, task, payload)
 					}
 					continue
 				}
 
 				if err := c.queue.backend.Ack(ctx, taskID); err != nil {
-					reportError(err, task, taskID, payload)
+					reportError(err, task, payload)
 				}
 			}
 		}()

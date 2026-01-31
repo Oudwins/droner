@@ -254,7 +254,7 @@ func TestConsumerOnErrorStops(t *testing.T) {
 		Jobs: []Job[string]{
 			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
 		},
-		OnError: func(err error, task *Task[string], taskID TaskID, payload []byte) error {
+		OnError: func(err error, task *Task[string], payload []byte) error {
 			return stopErr
 		},
 	})
