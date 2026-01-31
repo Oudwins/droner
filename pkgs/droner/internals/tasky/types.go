@@ -29,7 +29,7 @@ type TaskIDGenerator[T JobID] interface {
 	Next(jobID T) TaskID
 }
 
-type OnErrorHandler[T JobID] func(err error, task Task[T], taskID TaskID, payload []byte) error
+type OnErrorHandler[T JobID] func(err error, task *Task[T], taskID TaskID, payload []byte) error
 
 type QueueConfig[T JobID] struct {
 	Jobs      []Job[T]
@@ -39,7 +39,7 @@ type QueueConfig[T JobID] struct {
 }
 
 type Backend[T JobID] interface {
-	Enqueue(ctx context.Context, task Task[T], job Job[T]) error
+	Enqueue(ctx context.Context, task *Task[T], job *Job[T]) error
 	Dequeue(ctx context.Context) (jobID T, taskID TaskID, payload []byte, err error)
 	Ack(ctx context.Context, taskID TaskID) error
 	Nack(ctx context.Context, taskID TaskID) error
