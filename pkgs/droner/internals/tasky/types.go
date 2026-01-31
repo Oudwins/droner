@@ -9,14 +9,14 @@ type JobID interface {
 type Job[T JobID] struct {
 	ID       T
 	Priority int
-	Run      func(ctx context.Context, payload []byte) error
+	Run      func(ctx context.Context, task *Task[T]) error
 }
 
 type TaskID = any
 
-type JobConfig struct {
+type JobConfig[T JobID] struct {
 	Priority int
-	Run      func(ctx context.Context, payload []byte) error
+	Run      func(ctx context.Context, task *Task[T]) error
 }
 
 type Task[T JobID] struct {
@@ -46,7 +46,7 @@ type Backend[T JobID] interface {
 	ForceFlush(ctx context.Context) error
 }
 
-func NewJob[T JobID](id T, config JobConfig) Job[T] {
+func NewJob[T JobID](id T, config JobConfig[T]) Job[T] {
 	return Job[T]{
 		ID:       id,
 		Priority: config.Priority,

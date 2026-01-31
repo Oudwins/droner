@@ -149,7 +149,7 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 					continue
 				}
 
-				if err := job.Run(ctx, payload); err != nil {
+				if err := job.Run(ctx, task); err != nil {
 					if nackErr := c.queue.backend.Nack(ctx, taskID); nackErr != nil {
 						reportError(nackErr, task, payload)
 					} else {
