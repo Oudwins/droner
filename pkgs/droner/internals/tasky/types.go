@@ -1,49 +1,69 @@
 package tasky
 
-import (
-	"context"
-)
+import "context"
 
-type JobID[T ~string] struct {
-	Value T
+type JobID interface {
+	~string
 }
 
-func NewJobID[T ~string](value T) JobID[T] {
-	return JobID[T]{Value: value}
-}
-
-type Job[T ~string] struct {
-	ID       JobID[T]
+type Job[T JobID] struct {
+	ID       T
 	Priority int
 	Run      func(ctx context.Context, payload []byte) error
 }
 
 type TaskID = any
 
-type Task[T ~string] struct {
-	JobID    JobID[T]
-	TaskID   TaskID
-	Payload  []byte
+type JobConfig struct {
 	Priority int
+	Run      func(ctx context.Context, payload []byte) error
 }
 
-type TaskIDGenerator[T ~string] interface {
+type Task[T JobID] struct {
+	JobID   T
+	TaskID  TaskID
+	Payload []byte
+}
+
+type TaskIDGenerator[T JobID] interface {
 	Next(jobID T) TaskID
 }
 
-type OnErrorHandler[T ~string] func(err error, task Task[T], taskID TaskID, payload []byte) error
+type OnErrorHandler[T JobID] func(err error, task Task[T], taskID TaskID, payload []byte) error
 
-type QueueConfig[T ~string] struct {
+type QueueConfig[T JobID] struct {
 	Jobs      []Job[T]
 	Backend   Backend[T]
 	TaskIDGen TaskIDGenerator[T]
 	OnError   OnErrorHandler[T]
 }
 
-type Backend[T ~string] interface {
-	Enqueue(ctx context.Context, task Task[T]) error
-	Dequeue(ctx context.Context) (jobID JobID[T], taskID TaskID, payload []byte, err error)
+type Backend[T JobID] interface {
+	Enqueue(ctx context.Context, task Task[T], job Job[T]) error
+	Dequeue(ctx context.Context) (jobID T, taskID TaskID, payload []byte, err error)
 	Ack(ctx context.Context, taskID TaskID) error
 	Nack(ctx context.Context, taskID TaskID) error
 	ForceFlush(ctx context.Context) error
+}
+
+func NewJob[T JobID](id T, config JobConfig) Job[T] {
+	return Job[T]{
+		ID:       id,
+		Priority: config.Priority,
+		Run:      config.Run,
+	}
+}
+
+func NewTask[T JobID](jobID T, payload []byte) Task[T] {
+	return Task[T]{
+		JobID:   jobID,
+		Payload: payload,
+	}
+}
+
+func NewQueueConfig[T JobID](jobs []Job[T], backend Backend[T]) QueueConfig[T] {
+	return QueueConfig[T]{
+		Jobs:    jobs,
+		Backend: backend,
+	}
 }

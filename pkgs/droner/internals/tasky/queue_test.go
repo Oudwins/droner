@@ -8,26 +8,26 @@ import (
 	"time"
 )
 
-type stubBackend[T ~string] struct {
-	enqueue func(ctx context.Context, task Task[T]) error
-	dequeue func(ctx context.Context) (JobID[T], TaskID, []byte, error)
+type stubBackend[T JobID] struct {
+	enqueue func(ctx context.Context, task Task[T], job Job[T]) error
+	dequeue func(ctx context.Context) (T, TaskID, []byte, error)
 	ack     func(ctx context.Context, taskID TaskID) error
 	nack    func(ctx context.Context, taskID TaskID) error
 	flush   func(ctx context.Context) error
 }
 
-func (b *stubBackend[T]) Enqueue(ctx context.Context, task Task[T]) error {
+func (b *stubBackend[T]) Enqueue(ctx context.Context, task Task[T], job Job[T]) error {
 	if b.enqueue != nil {
-		return b.enqueue(ctx, task)
+		return b.enqueue(ctx, task, job)
 	}
 	return nil
 }
 
-func (b *stubBackend[T]) Dequeue(ctx context.Context) (JobID[T], TaskID, []byte, error) {
+func (b *stubBackend[T]) Dequeue(ctx context.Context) (T, TaskID, []byte, error) {
 	if b.dequeue != nil {
 		return b.dequeue(ctx)
 	}
-	var zero JobID[T]
+	var zero T
 	return zero, nil, nil, context.Canceled
 }
 
@@ -59,12 +59,12 @@ func TestNewQueueValidation(t *testing.T) {
 	}
 
 	backend := &stubBackend[string]{}
-	jobID := NewJobID("alpha")
+	jobID := "alpha"
 	_, err = NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: jobID, Run: func(ctx context.Context, payload []byte) error { return nil }},
-			{ID: jobID, Run: func(ctx context.Context, payload []byte) error { return nil }},
+			NewJob(jobID, JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob(jobID, JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
 		},
 	})
 	if err == nil {
@@ -74,7 +74,7 @@ func TestNewQueueValidation(t *testing.T) {
 	_, err = NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("beta")},
+			{ID: "beta"},
 		},
 	})
 	if err == nil {
@@ -87,7 +87,7 @@ func TestEnqueueValidation(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("alpha"), Run: func(ctx context.Context, payload []byte) error { return nil }},
+			NewJob("alpha", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
 		},
 	})
 	if err != nil {
@@ -95,14 +95,14 @@ func TestEnqueueValidation(t *testing.T) {
 	}
 
 	_, err = queue.Enqueue(context.Background(), Task[string]{
-		JobID: NewJobID("missing"),
+		JobID: "missing",
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown job id")
 	}
 
 	_, err = queue.Enqueue(context.Background(), Task[string]{
-		JobID:  NewJobID("alpha"),
+		JobID:  "alpha",
 		TaskID: map[string]int{"bad": 1},
 	})
 	if err == nil {
@@ -113,15 +113,17 @@ func TestEnqueueValidation(t *testing.T) {
 func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 	backend := &stubBackend[string]{}
 	var gotTask Task[string]
-	backend.enqueue = func(ctx context.Context, task Task[string]) error {
+	var gotPriority int
+	backend.enqueue = func(ctx context.Context, task Task[string], job Job[string]) error {
 		gotTask = task
+		gotPriority = job.Priority
 		return nil
 	}
 
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("alpha"), Priority: 7, Run: func(ctx context.Context, payload []byte) error { return nil }},
+			NewJob("alpha", JobConfig{Priority: 7, Run: func(ctx context.Context, payload []byte) error { return nil }}),
 		},
 		TaskIDGen: TaskIDGeneratorFunc[string](func(jobID string) TaskID {
 			return "gen-1"
@@ -132,7 +134,7 @@ func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 	}
 
 	taskID, err := queue.Enqueue(context.Background(), Task[string]{
-		JobID:   NewJobID("alpha"),
+		JobID:   "alpha",
 		Payload: []byte("payload"),
 	})
 	if err != nil {
@@ -144,14 +146,14 @@ func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 	if gotTask.TaskID != "gen-1" {
 		t.Fatalf("expected backend task id gen-1, got %v", gotTask.TaskID)
 	}
-	if gotTask.Priority != 7 {
-		t.Fatalf("expected priority 7, got %d", gotTask.Priority)
+	if gotPriority != 7 {
+		t.Fatalf("expected priority 7, got %d", gotPriority)
 	}
 }
 
 func TestConsumerRunAckNack(t *testing.T) {
 	dequeueCh := make(chan struct {
-		jobID   JobID[string]
+		jobID   string
 		taskID  TaskID
 		payload []byte
 		err     error
@@ -160,11 +162,10 @@ func TestConsumerRunAckNack(t *testing.T) {
 	nackCh := make(chan TaskID, 1)
 
 	backend := &stubBackend[string]{
-		dequeue: func(ctx context.Context) (JobID[string], TaskID, []byte, error) {
+		dequeue: func(ctx context.Context) (string, TaskID, []byte, error) {
 			select {
 			case <-ctx.Done():
-				var zero JobID[string]
-				return zero, nil, nil, ctx.Err()
+				return "", nil, nil, ctx.Err()
 			case item := <-dequeueCh:
 				return item.jobID, item.taskID, item.payload, item.err
 			}
@@ -182,8 +183,8 @@ func TestConsumerRunAckNack(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("ok"), Run: func(ctx context.Context, payload []byte) error { return nil }},
-			{ID: NewJobID("fail"), Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }},
+			NewJob("ok", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
+			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
 		},
 	})
 	if err != nil {
@@ -200,17 +201,17 @@ func TestConsumerRunAckNack(t *testing.T) {
 	}()
 
 	dequeueCh <- struct {
-		jobID   JobID[string]
+		jobID   string
 		taskID  TaskID
 		payload []byte
 		err     error
-	}{jobID: NewJobID("ok"), taskID: "t1", payload: []byte("ok")}
+	}{jobID: "ok", taskID: "t1", payload: []byte("ok")}
 	dequeueCh <- struct {
-		jobID   JobID[string]
+		jobID   string
 		taskID  TaskID
 		payload []byte
 		err     error
-	}{jobID: NewJobID("fail"), taskID: "t2", payload: []byte("bad")}
+	}{jobID: "fail", taskID: "t2", payload: []byte("bad")}
 
 	select {
 	case got := <-ackCh:
@@ -240,8 +241,8 @@ func TestConsumerRunAckNack(t *testing.T) {
 
 func TestConsumerOnErrorStops(t *testing.T) {
 	backend := &stubBackend[string]{}
-	backend.dequeue = func(ctx context.Context) (JobID[string], TaskID, []byte, error) {
-		return NewJobID("fail"), "t1", []byte("payload"), nil
+	backend.dequeue = func(ctx context.Context) (string, TaskID, []byte, error) {
+		return "fail", "t1", []byte("payload"), nil
 	}
 	backend.nack = func(ctx context.Context, taskID TaskID) error {
 		return nil
@@ -251,7 +252,7 @@ func TestConsumerOnErrorStops(t *testing.T) {
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("fail"), Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }},
+			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
 		},
 		OnError: func(err error, task Task[string], taskID TaskID, payload []byte) error {
 			return stopErr
@@ -270,15 +271,15 @@ func TestConsumerOnErrorStops(t *testing.T) {
 func TestConsumerDefaultsWorkers(t *testing.T) {
 	var calls int
 	backend := &stubBackend[string]{
-		dequeue: func(ctx context.Context) (JobID[string], TaskID, []byte, error) {
+		dequeue: func(ctx context.Context) (string, TaskID, []byte, error) {
 			calls++
-			return JobID[string]{}, nil, nil, context.Canceled
+			return "", nil, nil, context.Canceled
 		},
 	}
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("ok"), Run: func(ctx context.Context, payload []byte) error { return nil }},
+			NewJob("ok", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
 		},
 	})
 	if err != nil {
@@ -292,7 +293,7 @@ func TestConsumerDefaultsWorkers(t *testing.T) {
 	}
 }
 
-type TaskIDGeneratorFunc[T ~string] func(jobID T) TaskID
+type TaskIDGeneratorFunc[T JobID] func(jobID T) TaskID
 
 func (f TaskIDGeneratorFunc[T]) Next(jobID T) TaskID {
 	return f(jobID)
@@ -300,14 +301,14 @@ func (f TaskIDGeneratorFunc[T]) Next(jobID T) TaskID {
 
 func TestEnqueueConcurrentSafety(t *testing.T) {
 	backend := &stubBackend[string]{}
-	backend.enqueue = func(ctx context.Context, task Task[string]) error {
+	backend.enqueue = func(ctx context.Context, task Task[string], job Job[string]) error {
 		return nil
 	}
 
 	queue, err := NewQueue(QueueConfig[string]{
 		Backend: backend,
 		Jobs: []Job[string]{
-			{ID: NewJobID("alpha"), Run: func(ctx context.Context, payload []byte) error { return nil }},
+			NewJob("alpha", JobConfig{Run: func(ctx context.Context, payload []byte) error { return nil }}),
 		},
 	})
 	if err != nil {
@@ -320,7 +321,7 @@ func TestEnqueueConcurrentSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _ = queue.Enqueue(context.Background(), Task[string]{
-				JobID:   NewJobID("alpha"),
+				JobID:   "alpha",
 				Payload: []byte("data"),
 			})
 		}()

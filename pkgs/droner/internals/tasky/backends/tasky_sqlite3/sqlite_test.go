@@ -36,13 +36,12 @@ func TestEnqueueDequeueSQLite(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_basic"})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	}); err != nil {
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -59,13 +58,12 @@ func TestAckMarksCompleted(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_ack"})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	}); err != nil {
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -90,13 +88,12 @@ func TestRetryFailedStatus(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_fail", RetryMax: 0})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	}); err != nil {
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -122,13 +119,12 @@ func TestRetryDelayAvailableAt(t *testing.T) {
 	})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	}); err != nil {
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -155,13 +151,12 @@ func TestQueueNameValidation(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_custom"})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	}); err != nil {
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -176,19 +171,17 @@ func TestBatchingFlushes(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_batch", BatchMaxSize: 2})
 	defer db.Close()
 
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t2",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t2",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, err := backend.Dequeue(context.Background())
 	if err != nil {

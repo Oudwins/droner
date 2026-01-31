@@ -11,14 +11,13 @@ import (
 
 func TestEnqueueDequeue(t *testing.T) {
 	backend := New[string](Config{})
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 
 	err := backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 	if err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
@@ -34,20 +33,18 @@ func TestEnqueueDequeue(t *testing.T) {
 
 func TestPriorityOrdering(t *testing.T) {
 	backend := New[string](Config{})
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "low",
-		Payload:  []byte("low"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "low",
+		Payload: []byte("low"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "high",
-		Payload:  []byte("high"),
-		Priority: 10,
-	})
+		JobID:   jobID,
+		TaskID:  "high",
+		Payload: []byte("high"),
+	}, tasky.Job[string]{ID: jobID, Priority: 10})
 
 	_, first, _, _ := backend.Dequeue(context.Background())
 	_, second, _, _ := backend.Dequeue(context.Background())
@@ -59,14 +56,13 @@ func TestPriorityOrdering(t *testing.T) {
 
 func TestAckNackRetry(t *testing.T) {
 	backend := New[string](Config{RetryMax: 1})
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, _ := backend.Dequeue(context.Background())
 	if err := backend.Nack(context.Background(), taskID); err != nil {
@@ -84,14 +80,13 @@ func TestRetryDelayFunction(t *testing.T) {
 		RetryMax:   2,
 		RetryDelay: func(attempts int) time.Duration { return 50 * time.Millisecond },
 	})
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, _ := backend.Dequeue(context.Background())
 	if err := backend.Nack(context.Background(), taskID); err != nil {
@@ -121,14 +116,13 @@ func TestBatchingAndForceFlush(t *testing.T) {
 		BatchMaxSize: 2,
 		BatchMaxWait: 200 * time.Millisecond,
 	})
-	jobID := tasky.NewJobID("alpha")
+	jobID := "alpha"
 
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t1",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -138,11 +132,10 @@ func TestBatchingAndForceFlush(t *testing.T) {
 	}
 
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t2",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t2",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, gotTask, _, err := backend.Dequeue(context.Background())
 	if err != nil {
@@ -154,11 +147,10 @@ func TestBatchingAndForceFlush(t *testing.T) {
 
 	backend = New[string](Config{BatchMaxSize: 10, BatchMaxWait: time.Second})
 	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
-		JobID:    jobID,
-		TaskID:   "t3",
-		Payload:  []byte("payload"),
-		Priority: 1,
-	})
+		JobID:   jobID,
+		TaskID:  "t3",
+		Payload: []byte("payload"),
+	}, tasky.Job[string]{ID: jobID, Priority: 1})
 	if err := backend.ForceFlush(context.Background()); err != nil {
 		t.Fatalf("force flush error: %v", err)
 	}
