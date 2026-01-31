@@ -15,11 +15,10 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/term"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
+	"github.com/spf13/cobra"
 
 	z "github.com/Oudwins/zog"
 )
-
-var ErrUsage = errors.New("usage:\n  droner serve [--detach|-d]\n  droner new [--path <path>] [--id <id>] [--model <model>] [--prompt <prompt>] [--wait] [--wait-timeout <duration>]\n  droner del <id> [--wait] [--wait-timeout <duration>]\n  droner task <id>\n  droner auth github")
 
 type NewArgs struct {
 	Path    string `zog:"path"`
@@ -56,228 +55,203 @@ var delArgsSchema = z.Struct(z.Shape{
 })
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		if errors.Is(err, ErrUsage) {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-		fmt.Fprintln(os.Stderr, err)
+	if err := newRootCmd().Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
-	if len(args) == 0 {
-		return ErrUsage
+func newRootCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "droner",
+		Short: "Droner CLI",
 	}
 
-	command := args[0]
-	client := sdk.NewClient()
+	cmd.AddCommand(
+		newServeCmd(),
+		newNewCmd(),
+		newDelCmd(),
+		newTaskCmd(),
+		newAuthCmd(),
+	)
 
-	switch command {
-	case "serve":
-		parsed, err := parseServeArgs(args[1:])
-		if err != nil {
-			return err
-		}
-		if parsed.Detach {
-			return startDaemon()
-		}
-		serverInstance := server.New()
-		if err := serverInstance.Start(); err != nil {
-			return fmt.Errorf("failed to start server: %w", err)
-		}
-		return nil
-	case "new":
-		parsed, err := parseNewArgs(args[1:])
-		if err != nil {
-			return err
-		}
-		if parsed.Path == "" {
-			repoRoot, err := repoRootFromCwd()
-			if err != nil {
-				return err
+	return cmd
+}
+
+func newServeCmd() *cobra.Command {
+	args := ServeArgs{}
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the droner server",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if args.Detach {
+				return startDaemon()
 			}
-			parsed.Path = repoRoot
-		}
-		if err := validateNewArgs(&parsed); err != nil {
-			return err
-		}
-		if err := ensureDaemonRunning(client); err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		request := schemas.SessionCreateRequest{Path: parsed.Path, SessionID: parsed.ID}
-		if parsed.Model != "" || parsed.Prompt != "" {
-			request.Agent = &schemas.SessionAgentConfig{Model: parsed.Model, Prompt: parsed.Prompt}
-		}
-		response, err := client.CreateSession(ctx, request)
-		if err != nil {
-			if errors.Is(err, sdk.ErrAuthRequired) {
-				if err := runGitHubAuthFlow(client); err != nil {
-					return err
-				}
-				ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer retryCancel()
-				response, err = client.CreateSession(ctx, request)
+			serverInstance := server.New()
+			if err := serverInstance.Start(); err != nil {
+				return fmt.Errorf("failed to start server: %w", err)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&args.Detach, "detach", "d", false, "run server in background")
+	return cmd
+}
+
+func newNewCmd() *cobra.Command {
+	args := NewArgs{}
+	cmd := &cobra.Command{
+		Use:   "new",
+		Short: "Create a new session",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client := sdk.NewClient()
+			if args.Path == "" {
+				repoRoot, err := repoRootFromCwd()
 				if err != nil {
 					return err
 				}
-			} else {
+				args.Path = repoRoot
+			}
+			if err := validateNewArgs(&args); err != nil {
 				return err
 			}
-		}
-		printTaskSummary(response)
-		if parsed.Wait {
-			timeout, err := parseWaitTimeout(parsed.Timeout)
+			if err := ensureDaemonRunning(client); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: args.ID}
+			if args.Model != "" || args.Prompt != "" {
+				request.Agent = &schemas.SessionAgentConfig{Model: args.Model, Prompt: args.Prompt}
+			}
+			response, err := client.CreateSession(ctx, request)
 			if err != nil {
-				return err
+				if errors.Is(err, sdk.ErrAuthRequired) {
+					if err := runGitHubAuthFlow(client); err != nil {
+						return err
+					}
+					ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer retryCancel()
+					response, err = client.CreateSession(ctx, request)
+					if err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
 			}
-			final, err := waitForTask(client, response.TaskID, timeout)
-			if err != nil {
-				return err
+			printTaskSummary(response)
+			if args.Wait {
+				timeout, err := parseWaitTimeout(args.Timeout)
+				if err != nil {
+					return err
+				}
+				final, err := waitForTask(client, response.TaskID, timeout)
+				if err != nil {
+					return err
+				}
+				printTaskSummary(final)
 			}
-			printTaskSummary(final)
-		}
-		return nil
-	case "del":
-		parsed, err := parseDelArgs(args[1:])
-		if err != nil {
-			return err
-		}
-		if err := validateDelArgs(&parsed); err != nil {
-			return err
-		}
-		if err := ensureDaemonRunning(client); err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: parsed.ID})
-		if err != nil {
-			return err
-		}
-		printTaskSummary(response)
-		if parsed.Wait {
-			timeout, err := parseWaitTimeout(parsed.Timeout)
-			if err != nil {
-				return err
-			}
-			final, err := waitForTask(client, response.TaskID, timeout)
-			if err != nil {
-				return err
-			}
-			printTaskSummary(final)
-		}
-		return nil
-	case "task":
-		if len(args) != 2 {
-			return ErrUsage
-		}
-		if err := ensureDaemonRunning(client); err != nil {
-			return err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		response, err := client.TaskStatus(ctx, args[1])
-		if err != nil {
-			return err
-		}
-		printTaskSummary(response)
-		return nil
-	case "auth":
-		if len(args) != 2 || args[1] != "github" {
-			return ErrUsage
-		}
-		if err := ensureDaemonRunning(client); err != nil {
-			return err
-		}
-		return runGitHubAuthFlow(client)
-	default:
-		return ErrUsage
+			return nil
+		},
 	}
+
+	cmd.Flags().StringVar(&args.Path, "path", "", "path to the repository")
+	cmd.Flags().StringVar(&args.ID, "id", "", "session ID")
+	cmd.Flags().StringVar(&args.Model, "model", "", "agent model")
+	cmd.Flags().StringVar(&args.Prompt, "prompt", "", "agent prompt")
+	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
+	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
+	return cmd
 }
 
-func parseNewArgs(args []string) (NewArgs, error) {
-	parsed := NewArgs{}
-	for i := 0; i < len(args); {
-		switch args[i] {
-		case "--path":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
+func newDelCmd() *cobra.Command {
+	args := DelArgs{}
+	cmd := &cobra.Command{
+		Use:   "del <id>",
+		Short: "Delete a session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, inputs []string) error {
+			client := sdk.NewClient()
+			args.ID = inputs[0]
+			if err := validateDelArgs(&args); err != nil {
+				return err
 			}
-			parsed.Path = args[i+1]
-			i += 2
-		case "--id":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
+			if err := ensureDaemonRunning(client); err != nil {
+				return err
 			}
-			parsed.ID = args[i+1]
-			i += 2
-		case "--model":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: args.ID})
+			if err != nil {
+				return err
 			}
-			parsed.Model = args[i+1]
-			i += 2
-		case "--prompt":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
+			printTaskSummary(response)
+			if args.Wait {
+				timeout, err := parseWaitTimeout(args.Timeout)
+				if err != nil {
+					return err
+				}
+				final, err := waitForTask(client, response.TaskID, timeout)
+				if err != nil {
+					return err
+				}
+				printTaskSummary(final)
 			}
-			parsed.Prompt = args[i+1]
-			i += 2
-		case "--wait":
-			parsed.Wait = true
-			i += 1
-		case "--wait-timeout":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
-			}
-			parsed.Timeout = args[i+1]
-			i += 2
-		default:
-			return parsed, ErrUsage
-		}
+			return nil
+		},
 	}
-	return parsed, nil
+
+	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
+	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
+	return cmd
 }
 
-func parseServeArgs(args []string) (ServeArgs, error) {
-	parsed := ServeArgs{}
-	for i := 0; i < len(args); {
-		switch args[i] {
-		case "--detach", "-d":
-			parsed.Detach = true
-			i += 1
-		default:
-			return parsed, ErrUsage
-		}
+func newTaskCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "task <id>",
+		Short: "Check a task status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, inputs []string) error {
+			client := sdk.NewClient()
+			if err := ensureDaemonRunning(client); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			response, err := client.TaskStatus(ctx, inputs[0])
+			if err != nil {
+				return err
+			}
+			printTaskSummary(response)
+			return nil
+		},
 	}
-	return parsed, nil
+
+	return cmd
 }
 
-func parseDelArgs(args []string) (DelArgs, error) {
-	if len(args) < 1 {
-		return DelArgs{}, ErrUsage
-	}
-	parsed := DelArgs{ID: args[0]}
-	for i := 1; i < len(args); {
-		switch args[i] {
-		case "--wait":
-			parsed.Wait = true
-			i += 1
-		case "--wait-timeout":
-			if i+1 >= len(args) {
-				return parsed, ErrUsage
+func newAuthCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth <provider>",
+		Short: "Authenticate with a provider",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, inputs []string) error {
+			provider := inputs[0]
+			if provider != "github" {
+				return fmt.Errorf("unsupported auth provider: %s", provider)
 			}
-			parsed.Timeout = args[i+1]
-			i += 2
-		default:
-			return parsed, ErrUsage
-		}
+			client := sdk.NewClient()
+			if err := ensureDaemonRunning(client); err != nil {
+				return err
+			}
+			return runGitHubAuthFlow(client)
+		},
 	}
-	return parsed, nil
+
+	return cmd
 }
 
 func validateNewArgs(payload *NewArgs) error {
