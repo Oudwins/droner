@@ -7,6 +7,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
+	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/backends/tasky_sqlite3"
 )
 
 type Jobs string
@@ -32,9 +33,17 @@ func NewQueue() (*tasky.Queue[Jobs], error) {
 		},
 	})
 
+	sqliteBackend, err := taskysqlite3.New[Jobs](taskysqlite3.Config{
+		Path:      "./tasks.db",
+		QueueName: "droner_queue",
+	})
+
+	assert.AssertNil(err, "[QUEUE] Failed to initialize")
+
 	q, err := tasky.NewQueue(
 		tasky.QueueConfig[Jobs]{
-			Jobs: []tasky.Job[Jobs]{createSessionJob, deleteSessionJob},
+			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob},
+			Backend: sqliteBackend,
 			OnError: func(err error, task *tasky.Task[Jobs], payload []byte) error {
 				slog.Error(fmt.Sprintf("Task %v from Job %v failed: %v", task.TaskID, task.JobID, err))
 				return nil
