@@ -8,15 +8,12 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/env"
+	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 )
@@ -37,9 +34,13 @@ func New() *Server {
 		slog.String("version", base.Config.Version),
 		slog.Int("port", base.Env.PORT),
 	)
+
+	q, error := tasks.NewQueue(base)
+	assert.AssertNil(error, "[SERVER] Failed to initialize")
 	return &Server{
 		Base:   base,
 		Logbuf: buffer,
+		tasky:  q,
 	}
 }
 
@@ -78,7 +79,7 @@ func (s *Server) waitForStart() bool {
 
 func (s *Server) IsRunning() bool {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
-	resp, err := client.Get(s.Env.BASE_URL + "/version")
+	resp, err := client.Get(s.Base.Env.BASE_URL + "/version")
 	if err != nil {
 		return false
 	}
@@ -97,7 +98,7 @@ func (s *Server) IsRunning() bool {
 }
 
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.Env.LISTEN_ADDR)
+	listener, err := net.Listen("tcp", s.Base.Env.LISTEN_ADDR)
 	if err != nil {
 		return err
 	}

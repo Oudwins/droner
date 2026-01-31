@@ -42,7 +42,7 @@ func (s *Server) MiddlewareLogger(next http.Handler) http.Handler {
 			logger.Add(slog.Duration("duration", time.Since(start)))
 
 			payload := logger.Flush()
-			s.Logger.Info("request", payload)
+			s.Base.Logger.Info("request", payload)
 		}()
 
 		_ = logger.Info("request")

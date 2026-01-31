@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 )
 
@@ -29,7 +30,9 @@ func TestMiddlewareStatusRecorder(t *testing.T) {
 
 func TestMiddlewareLoggerPanic(t *testing.T) {
 	s := &Server{
-		Logger: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Base: &baseserver.BaseServer{
+			Logger: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		},
 		Logbuf: logbuf.New(),
 	}
 
