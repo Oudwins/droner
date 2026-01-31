@@ -26,7 +26,7 @@ type Config struct {
 	PollInterval time.Duration
 }
 
-type Backend[T ~string] struct {
+type Backend[T tasky.JobID] struct {
 	mu         sync.Mutex
 	db         *sql.DB
 	batch      []queueItem[T]
@@ -35,7 +35,7 @@ type Backend[T ~string] struct {
 	cfg        Config
 }
 
-func New[T ~string](cfg Config) (*Backend[T], error) {
+func New[T tasky.JobID](cfg Config) (*Backend[T], error) {
 	if cfg.DB == nil && cfg.Path == "" {
 		return nil, errors.New("sqlite backend requires a db or path")
 	}
@@ -75,7 +75,7 @@ func New[T ~string](cfg Config) (*Backend[T], error) {
 	return backend, nil
 }
 
-func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
+func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.Job[T]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -87,9 +87,9 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
 
 	item := queueItem[T]{
 		taskID:    taskKey,
-		jobID:     string(task.JobID.Value),
+		jobID:     string(task.JobID),
 		payload:   task.Payload,
-		priority:  task.Priority,
+		priority:  job.Priority,
 		attempts:  0,
 		createdAt: time.Now().UTC().UnixNano(),
 		availAt:   time.Now().UTC().UnixNano(),
@@ -117,25 +117,26 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
 	return nil
 }
 
-func (b *Backend[T]) Dequeue(ctx context.Context) (tasky.JobID[T], tasky.TaskID, []byte, error) {
+func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, error) {
 	for {
 		if ctx.Err() != nil {
-			var zero tasky.JobID[T]
+			var zero T
 			return zero, nil, nil, ctx.Err()
 		}
 
 		item, err := b.tryDequeue(ctx)
 		if err != nil {
-			return tasky.JobID[T]{}, nil, nil, err
+			var zero T
+			return zero, nil, nil, err
 		}
 		if item != nil {
-			jobID := tasky.JobID[T]{Value: T(item.jobID)}
+			jobID := T(item.jobID)
 			return jobID, item.taskID, item.payload, nil
 		}
 
 		select {
 		case <-ctx.Done():
-			var zero tasky.JobID[T]
+			var zero T
 			return zero, nil, nil, ctx.Err()
 		case <-b.signal:
 		case <-time.After(b.cfg.PollInterval):
@@ -425,7 +426,7 @@ func taskIDKey(taskID tasky.TaskID) (string, error) {
 	return fmt.Sprint(taskID), nil
 }
 
-type queueItem[T ~string] struct {
+type queueItem[T tasky.JobID] struct {
 	taskID    string
 	jobID     string
 	payload   []byte

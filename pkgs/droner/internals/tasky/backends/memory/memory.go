@@ -20,7 +20,7 @@ type Config struct {
 	RetryMax     int
 }
 
-type Backend[T ~string] struct {
+type Backend[T tasky.JobID] struct {
 	mu         sync.Mutex
 	pending    priorityQueue[T]
 	inFlight   map[tasky.TaskID]*queueItem[T]
@@ -31,7 +31,7 @@ type Backend[T ~string] struct {
 	cfg        Config
 }
 
-func New[T ~string](cfg Config) *Backend[T] {
+func New[T tasky.JobID](cfg Config) *Backend[T] {
 	backend := &Backend[T]{
 		pending:  priorityQueue[T]{},
 		inFlight: make(map[tasky.TaskID]*queueItem[T]),
@@ -42,7 +42,7 @@ func New[T ~string](cfg Config) *Backend[T] {
 	return backend
 }
 
-func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
+func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.Job[T]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -54,7 +54,7 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
 		jobID:    task.JobID,
 		taskID:   task.TaskID,
 		payload:  task.Payload,
-		priority: task.Priority,
+		priority: job.Priority,
 		seq:      b.nextSeq(),
 	}
 
@@ -75,10 +75,10 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T]) error {
 	return nil
 }
 
-func (b *Backend[T]) Dequeue(ctx context.Context) (tasky.JobID[T], tasky.TaskID, []byte, error) {
+func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, error) {
 	for {
 		if ctx.Err() != nil {
-			var zero tasky.JobID[T]
+			var zero T
 			return zero, nil, nil, ctx.Err()
 		}
 
@@ -96,7 +96,7 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (tasky.JobID[T], tasky.TaskID,
 
 		select {
 		case <-ctx.Done():
-			var zero tasky.JobID[T]
+			var zero T
 			return zero, nil, nil, ctx.Err()
 		case <-b.signal:
 		}
@@ -221,8 +221,8 @@ func (b *Backend[T]) nextSeq() uint64 {
 	return b.seq
 }
 
-type queueItem[T ~string] struct {
-	jobID    tasky.JobID[T]
+type queueItem[T tasky.JobID] struct {
+	jobID    T
 	taskID   tasky.TaskID
 	payload  []byte
 	priority int
@@ -230,7 +230,7 @@ type queueItem[T ~string] struct {
 	attempts int
 }
 
-type priorityQueue[T ~string] []*queueItem[T]
+type priorityQueue[T tasky.JobID] []*queueItem[T]
 
 func (q priorityQueue[T]) Len() int { return len(q) }
 

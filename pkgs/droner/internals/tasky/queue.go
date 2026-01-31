@@ -11,8 +11,8 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/generators/simple"
 )
 
-type Queue[T ~string] struct {
-	jobs      map[JobID[T]]Job[T]
+type Queue[T JobID] struct {
+	jobs      map[T]Job[T]
 	backend   Backend[T]
 	taskIDGen TaskIDGenerator[T]
 	onError   OnErrorHandler[T]
@@ -22,17 +22,17 @@ type ConsumerOptions struct {
 	Workers int
 }
 
-type Consumer[T ~string] struct {
+type Consumer[T JobID] struct {
 	queue   *Queue[T]
 	options ConsumerOptions
 }
 
-func NewQueue[T ~string](cfg QueueConfig[T]) (*Queue[T], error) {
+func NewQueue[T JobID](cfg QueueConfig[T]) (*Queue[T], error) {
 	if cfg.Backend == nil {
 		return nil, errors.New("backend is required")
 	}
 
-	jobs := make(map[JobID[T]]Job[T], len(cfg.Jobs))
+	jobs := make(map[T]Job[T], len(cfg.Jobs))
 	for _, job := range cfg.Jobs {
 		if _, exists := jobs[job.ID]; exists {
 			return nil, fmt.Errorf("duplicate job id: %v", job.ID)
@@ -64,7 +64,7 @@ func (q *Queue[T]) Enqueue(ctx context.Context, task Task[T]) (TaskID, error) {
 
 	taskID := task.TaskID
 	if taskID == nil {
-		taskID = q.taskIDGen.Next(task.JobID.Value)
+		taskID = q.taskIDGen.Next(task.JobID)
 		if taskID == nil {
 			return nil, errors.New("task id generator returned nil")
 		}
@@ -75,17 +75,15 @@ func (q *Queue[T]) Enqueue(ctx context.Context, task Task[T]) (TaskID, error) {
 		return nil, fmt.Errorf("task id must be comparable: %T", taskID)
 	}
 
-	task.Priority = job.Priority
 	task.TaskID = taskID
-	task.Priority = job.Priority
-	if err := q.backend.Enqueue(ctx, task); err != nil {
+	if err := q.backend.Enqueue(ctx, task, job); err != nil {
 		return nil, err
 	}
 
 	return taskID, nil
 }
 
-func NewConsumer[T ~string](queue *Queue[T], options ConsumerOptions) *Consumer[T] {
+func NewConsumer[T JobID](queue *Queue[T], options ConsumerOptions) *Consumer[T] {
 	if options.Workers <= 0 {
 		options.Workers = 1
 	}
