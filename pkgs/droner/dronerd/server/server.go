@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -21,9 +22,7 @@ import (
 )
 
 type Server struct {
-	Config     *conf.Config
-	Env        *env.EnvStruct
-	Logger     *slog.Logger
+	Base       *baseserver.BaseServer
 	Logbuf     *logbuf.Logger
 	subs       *subscriptionManager
 	oauth      *oauthStateStore
@@ -33,35 +32,14 @@ type Server struct {
 }
 
 func New() *Server {
-	config := conf.GetConfig()
-	env := env.Get()
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	base := baseserver.New()
 	buffer := logbuf.New(
-		slog.String("version", config.Version),
-		slog.Int("port", env.PORT),
+		slog.String("version", base.Config.Version),
+		slog.Int("port", base.Env.PORT),
 	)
-	worktreeRoot, err := expandPath(config.Worktrees.Dir)
-	if err != nil {
-		log.Fatal("[Droner] Failed to expand worktree root: ", err)
-	}
-	dataDir := filepath.Join(worktreeRoot, ".droner")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatal("[Droner] Failed to create task data dir: ", err)
-	}
-	dbPath := filepath.Join(dataDir, "tasks.db")
-	store, err := newTaskStore(dbPath)
-	if err != nil {
-		log.Fatal("[Droner] Failed to initialize task store: ", err)
-	}
-	manager := newTaskManager(store, logger)
 	return &Server{
-		Config: config,
-		Env:    env,
-		Logger: logger,
+		Base:   base,
 		Logbuf: buffer,
-		subs:   newSubscriptionManager(),
-		oauth:  newOAuthStateStore(),
-		tasks:  manager,
 	}
 }
 
@@ -71,7 +49,7 @@ func (s *Server) SafeStart() error {
 	}
 
 	go func() {
-		s.Logger.Info("starting server")
+		s.Base.Logger.Info("starting server")
 		err := s.Start()
 		if err != nil {
 			log.Fatal("[Droner] Failed to start server: " + err.Error())
@@ -88,7 +66,7 @@ func (s *Server) SafeStart() error {
 func (s *Server) waitForStart() bool {
 	time.Sleep(2 * time.Second)
 	for i := range 6 {
-		s.Logger.Info("Waiting for server to start", "attempt", i)
+		s.Base.Logger.Info("Waiting for server to start", "attempt", i)
 		if isRunning := s.IsRunning(); isRunning {
 			return true
 		}
