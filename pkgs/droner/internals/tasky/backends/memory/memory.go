@@ -42,7 +42,7 @@ func New[T tasky.JobID](cfg Config) *Backend[T] {
 	return backend
 }
 
-func (b *Backend[T]) Enqueue(ctx context.Context, task tasky.Task[T], job tasky.Job[T]) error {
+func (b *Backend[T]) Enqueue(ctx context.Context, task *tasky.Task[T], job *tasky.Job[T]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

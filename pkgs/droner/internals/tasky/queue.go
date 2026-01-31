@@ -12,7 +12,7 @@ import (
 )
 
 type Queue[T JobID] struct {
-	jobs      map[T]Job[T]
+	jobs      map[T]*Job[T]
 	backend   Backend[T]
 	taskIDGen TaskIDGenerator[T]
 	onError   OnErrorHandler[T]
@@ -32,8 +32,9 @@ func NewQueue[T JobID](cfg QueueConfig[T]) (*Queue[T], error) {
 		return nil, errors.New("backend is required")
 	}
 
-	jobs := make(map[T]Job[T], len(cfg.Jobs))
-	for _, job := range cfg.Jobs {
+	jobs := make(map[T]*Job[T], len(cfg.Jobs))
+	for i := range cfg.Jobs {
+		job := &cfg.Jobs[i]
 		if _, exists := jobs[job.ID]; exists {
 			return nil, fmt.Errorf("duplicate job id: %v", job.ID)
 		}
@@ -56,7 +57,7 @@ func NewQueue[T JobID](cfg QueueConfig[T]) (*Queue[T], error) {
 	}, nil
 }
 
-func (q *Queue[T]) Enqueue(ctx context.Context, task Task[T]) (TaskID, error) {
+func (q *Queue[T]) Enqueue(ctx context.Context, task *Task[T]) (TaskID, error) {
 	job, exists := q.jobs[task.JobID]
 	if !exists {
 		return nil, fmt.Errorf("unknown job id: %v", task.JobID)
@@ -99,7 +100,7 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 
 	var runErr atomic.Value
 	var once sync.Once
-	reportError := func(err error, task Task[T], taskID TaskID, payload []byte) {
+	reportError := func(err error, task *Task[T], taskID TaskID, payload []byte) {
 		if err == nil {
 			return
 		}
@@ -130,12 +131,12 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						return
 					}
-					reportError(err, Task[T]{}, nil, nil)
+					reportError(err, nil, nil, nil)
 					continue
 				}
 
 				job, ok := c.queue.jobs[jobID]
-				task := Task[T]{
+				task := &Task[T]{
 					JobID:   jobID,
 					TaskID:  taskID,
 					Payload: payload,

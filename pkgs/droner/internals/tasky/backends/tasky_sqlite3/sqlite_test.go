@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,12 +18,21 @@ func setupSQLiteBackend(t *testing.T, cfg Config) (*Backend[string], *sql.DB) {
 	t.Helper()
 
 	if cfg.DB == nil {
-		path := filepath.Join(t.TempDir(), "tasky.db")
+		dbDir := filepath.Join(".temp", "tasky")
+		if err := os.MkdirAll(dbDir, 0o755); err != nil {
+			t.Fatalf("db dir error: %v", err)
+		}
+		name := strings.NewReplacer("/", "_", "\\", "_").Replace(t.Name())
+		path := filepath.Join(dbDir, name+"_"+time.Now().UTC().Format("20060102150405.000000000")+".db")
 		db, err := sql.Open("sqlite", path)
 		if err != nil {
 			t.Fatalf("db open error: %v", err)
 		}
 		cfg.DB = db
+		t.Cleanup(func() {
+			_ = db.Close()
+			_ = os.Remove(path)
+		})
 	}
 
 	backend, err := New[string](cfg)
@@ -33,15 +44,14 @@ func setupSQLiteBackend(t *testing.T, cfg Config) (*Backend[string], *sql.DB) {
 }
 
 func TestEnqueueDequeueSQLite(t *testing.T) {
-	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_basic"})
-	defer db.Close()
+	backend, _ := setupSQLiteBackend(t, Config{QueueName: "queue_basic"})
 
 	jobID := "alpha"
-	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -56,14 +66,13 @@ func TestEnqueueDequeueSQLite(t *testing.T) {
 
 func TestAckMarksCompleted(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_ack"})
-	defer db.Close()
 
 	jobID := "alpha"
-	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -86,14 +95,13 @@ func TestAckMarksCompleted(t *testing.T) {
 
 func TestRetryFailedStatus(t *testing.T) {
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_fail", RetryMax: 0})
-	defer db.Close()
 
 	jobID := "alpha"
-	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -117,14 +125,13 @@ func TestRetryDelayAvailableAt(t *testing.T) {
 		RetryMax:   1,
 		RetryDelay: func(attempts int) time.Duration { return 200 * time.Millisecond },
 	})
-	defer db.Close()
 
 	jobID := "alpha"
-	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -149,14 +156,13 @@ func TestQueueNameValidation(t *testing.T) {
 	}
 
 	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_custom"})
-	defer db.Close()
 
 	jobID := "alpha"
-	if err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
 
@@ -168,20 +174,19 @@ func TestQueueNameValidation(t *testing.T) {
 }
 
 func TestBatchingFlushes(t *testing.T) {
-	backend, db := setupSQLiteBackend(t, Config{QueueName: "queue_batch", BatchMaxSize: 2})
-	defer db.Close()
+	backend, _ := setupSQLiteBackend(t, Config{QueueName: "queue_batch", BatchMaxSize: 2})
 
 	jobID := "alpha"
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t2",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, err := backend.Dequeue(context.Background())
 	if err != nil {

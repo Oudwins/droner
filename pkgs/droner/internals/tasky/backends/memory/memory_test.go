@@ -13,11 +13,11 @@ func TestEnqueueDequeue(t *testing.T) {
 	backend := New[string](Config{})
 	jobID := "alpha"
 
-	err := backend.Enqueue(context.Background(), tasky.Task[string]{
+	err := backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 	if err != nil {
 		t.Fatalf("enqueue error: %v", err)
 	}
@@ -35,16 +35,16 @@ func TestPriorityOrdering(t *testing.T) {
 	backend := New[string](Config{})
 	jobID := "alpha"
 
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "low",
 		Payload: []byte("low"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "high",
 		Payload: []byte("high"),
-	}, tasky.Job[string]{ID: jobID, Priority: 10})
+	}, &tasky.Job[string]{ID: jobID, Priority: 10})
 
 	_, first, _, _ := backend.Dequeue(context.Background())
 	_, second, _, _ := backend.Dequeue(context.Background())
@@ -58,11 +58,11 @@ func TestAckNackRetry(t *testing.T) {
 	backend := New[string](Config{RetryMax: 1})
 	jobID := "alpha"
 
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, _ := backend.Dequeue(context.Background())
 	if err := backend.Nack(context.Background(), taskID); err != nil {
@@ -82,11 +82,11 @@ func TestRetryDelayFunction(t *testing.T) {
 	})
 	jobID := "alpha"
 
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, taskID, _, _ := backend.Dequeue(context.Background())
 	if err := backend.Nack(context.Background(), taskID); err != nil {
@@ -118,11 +118,11 @@ func TestBatchingAndForceFlush(t *testing.T) {
 	})
 	jobID := "alpha"
 
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t1",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -131,11 +131,11 @@ func TestBatchingAndForceFlush(t *testing.T) {
 		t.Fatalf("expected deadline exceeded before batch flush, got %v", err)
 	}
 
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t2",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 
 	_, gotTask, _, err := backend.Dequeue(context.Background())
 	if err != nil {
@@ -146,11 +146,11 @@ func TestBatchingAndForceFlush(t *testing.T) {
 	}
 
 	backend = New[string](Config{BatchMaxSize: 10, BatchMaxWait: time.Second})
-	_ = backend.Enqueue(context.Background(), tasky.Task[string]{
+	_ = backend.Enqueue(context.Background(), &tasky.Task[string]{
 		JobID:   jobID,
 		TaskID:  "t3",
 		Payload: []byte("payload"),
-	}, tasky.Job[string]{ID: jobID, Priority: 1})
+	}, &tasky.Job[string]{ID: jobID, Priority: 1})
 	if err := backend.ForceFlush(context.Background()); err != nil {
 		t.Fatalf("force flush error: %v", err)
 	}

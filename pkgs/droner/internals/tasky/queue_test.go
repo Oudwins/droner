@@ -9,14 +9,14 @@ import (
 )
 
 type stubBackend[T JobID] struct {
-	enqueue func(ctx context.Context, task Task[T], job Job[T]) error
+	enqueue func(ctx context.Context, task *Task[T], job *Job[T]) error
 	dequeue func(ctx context.Context) (T, TaskID, []byte, error)
 	ack     func(ctx context.Context, taskID TaskID) error
 	nack    func(ctx context.Context, taskID TaskID) error
 	flush   func(ctx context.Context) error
 }
 
-func (b *stubBackend[T]) Enqueue(ctx context.Context, task Task[T], job Job[T]) error {
+func (b *stubBackend[T]) Enqueue(ctx context.Context, task *Task[T], job *Job[T]) error {
 	if b.enqueue != nil {
 		return b.enqueue(ctx, task, job)
 	}
@@ -94,14 +94,14 @@ func TestEnqueueValidation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, err = queue.Enqueue(context.Background(), Task[string]{
+	_, err = queue.Enqueue(context.Background(), &Task[string]{
 		JobID: "missing",
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown job id")
 	}
 
-	_, err = queue.Enqueue(context.Background(), Task[string]{
+	_, err = queue.Enqueue(context.Background(), &Task[string]{
 		JobID:  "alpha",
 		TaskID: map[string]int{"bad": 1},
 	})
@@ -112,9 +112,9 @@ func TestEnqueueValidation(t *testing.T) {
 
 func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 	backend := &stubBackend[string]{}
-	var gotTask Task[string]
+	var gotTask *Task[string]
 	var gotPriority int
-	backend.enqueue = func(ctx context.Context, task Task[string], job Job[string]) error {
+	backend.enqueue = func(ctx context.Context, task *Task[string], job *Job[string]) error {
 		gotTask = task
 		gotPriority = job.Priority
 		return nil
@@ -133,7 +133,7 @@ func TestEnqueueGeneratesTaskIDAndPriority(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	taskID, err := queue.Enqueue(context.Background(), Task[string]{
+	taskID, err := queue.Enqueue(context.Background(), &Task[string]{
 		JobID:   "alpha",
 		Payload: []byte("payload"),
 	})
@@ -254,7 +254,7 @@ func TestConsumerOnErrorStops(t *testing.T) {
 		Jobs: []Job[string]{
 			NewJob("fail", JobConfig{Run: func(ctx context.Context, payload []byte) error { return errors.New("boom") }}),
 		},
-		OnError: func(err error, task Task[string], taskID TaskID, payload []byte) error {
+		OnError: func(err error, task *Task[string], taskID TaskID, payload []byte) error {
 			return stopErr
 		},
 	})
@@ -301,7 +301,7 @@ func (f TaskIDGeneratorFunc[T]) Next(jobID T) TaskID {
 
 func TestEnqueueConcurrentSafety(t *testing.T) {
 	backend := &stubBackend[string]{}
-	backend.enqueue = func(ctx context.Context, task Task[string], job Job[string]) error {
+	backend.enqueue = func(ctx context.Context, task *Task[string], job *Job[string]) error {
 		return nil
 	}
 
@@ -320,7 +320,7 @@ func TestEnqueueConcurrentSafety(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = queue.Enqueue(context.Background(), Task[string]{
+			_, _ = queue.Enqueue(context.Background(), &Task[string]{
 				JobID:   "alpha",
 				Payload: []byte("data"),
 			})
