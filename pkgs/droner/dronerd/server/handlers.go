@@ -21,7 +21,7 @@ import (
 
 func (s *Server) HandlerVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte(s.Config.Version))
+	_, _ = w.Write([]byte(s.Base.Config.Version))
 }
 
 func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
@@ -32,11 +32,11 @@ func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if s.httpServer == nil {
-			s.Logger.Error("shutdown failed", "error", errors.New("server not initialized"))
+			s.Base.Logger.Error("shutdown failed", "error", errors.New("server not initialized"))
 			return
 		}
 		if err := s.httpServer.Shutdown(ctx); err != nil {
-			s.Logger.Error("shutdown failed", "error", err)
+			s.Base.Logger.Error("shutdown failed", "error", err)
 		}
 	}()
 }
@@ -79,7 +79,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, _ := expandPath(s.Config.Worktrees.Dir)
+	worktreeRoot, _ := expandPath(s.Base.Config.Worktrees.Dir)
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -133,7 +133,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreeRoot, err := expandPath(s.Config.Worktrees.Dir)
+	worktreeRoot, err := expandPath(s.Base.Config.Worktrees.Dir)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Worktree Root doesn't exist", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -433,17 +433,17 @@ func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCr
 	}
 
 	if remoteURL, err := getRemoteURL(repoPath); err == nil {
-		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Logger, func(sessionID string) {
+		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
 			s.deleteSessionBySessionID(sessionID)
 		}); err != nil {
-			s.Logger.Warn("Failed to subscribe to remote events",
+			s.Base.Logger.Warn("Failed to subscribe to remote events",
 				"error", err,
 				"remote_url", remoteURL,
 				"session_id", request.SessionID,
 			)
 		}
 	} else {
-		s.Logger.Warn("Failed to get remote URL, skipping event subscription",
+		s.Base.Logger.Warn("Failed to get remote URL, skipping event subscription",
 			"error", err,
 			"session_id", request.SessionID,
 		)
@@ -464,8 +464,8 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 	}
 
 	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
-		if err := s.subs.unsubscribe(ctx, remoteURL, request.SessionID, s.Logger); err != nil {
-			s.Logger.Warn("Failed to unsubscribe from remote events",
+		if err := s.subs.unsubscribe(ctx, remoteURL, request.SessionID, s.Base.Logger); err != nil {
+			s.Base.Logger.Warn("Failed to unsubscribe from remote events",
 				"error", err,
 				"remote_url", remoteURL,
 				"session_id", request.SessionID,

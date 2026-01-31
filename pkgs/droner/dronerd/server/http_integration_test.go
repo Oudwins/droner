@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
@@ -104,9 +105,11 @@ func newTestServer(t *testing.T) (*Server, *taskStore) {
 	manager := newTaskManager(store, logger)
 
 	server := &Server{
-		Config: config,
-		Env:    dataEnv,
-		Logger: logger,
+		Base: &baseserver.BaseServer{
+			Config: config,
+			Env:    dataEnv,
+			Logger: logger,
+		},
 		Logbuf: logbuf.New(),
 		subs:   newSubscriptionManager(),
 		oauth:  newOAuthStateStore(),
@@ -310,7 +313,7 @@ func TestHTTPDeleteSession(t *testing.T) {
 		t.Fatalf("expected status 404, got %d", res.StatusCode)
 	}
 
-	worktreeRoot := server.Config.Worktrees.Dir
+	worktreeRoot := server.Base.Config.Worktrees.Dir
 	worktreePath := filepath.Join(worktreeRoot, "repo#abc")
 	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
