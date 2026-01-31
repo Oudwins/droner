@@ -149,6 +149,43 @@ func TestRetryDelayAvailableAt(t *testing.T) {
 	}
 }
 
+func TestLeaseTimeoutReclaimsTask(t *testing.T) {
+	backend, _ := setupSQLiteBackend(t, Config{
+		QueueName:     "queue_lease",
+		LeaseDuration: 50 * time.Millisecond,
+		PollInterval:  10 * time.Millisecond,
+	})
+
+	jobID := "alpha"
+	if err := backend.Enqueue(context.Background(), &tasky.Task[string]{
+		JobID:   jobID,
+		TaskID:  "t1",
+		Payload: []byte("payload"),
+	}, &tasky.Job[string]{ID: jobID, Priority: 1}); err != nil {
+		t.Fatalf("enqueue error: %v", err)
+	}
+
+	_, taskID, _, err := backend.Dequeue(context.Background())
+	if err != nil {
+		t.Fatalf("dequeue error: %v", err)
+	}
+	if taskID != "t1" {
+		t.Fatalf("expected task t1, got %v", taskID)
+	}
+
+	time.Sleep(80 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, taskID, _, err = backend.Dequeue(ctx)
+	if err != nil {
+		t.Fatalf("dequeue error after lease expiry: %v", err)
+	}
+	if taskID != "t1" {
+		t.Fatalf("expected reclaimed task t1, got %v", taskID)
+	}
+}
+
 func TestQueueNameValidation(t *testing.T) {
 	_, err := New[string](Config{QueueName: "bad-name"})
 	if err == nil {

@@ -16,14 +16,15 @@ import (
 var ErrRetriesExceeded = errors.New("retries exceeded")
 
 type Config struct {
-	Path         string
-	DB           *sql.DB
-	QueueName    string
-	BatchMaxSize int
-	BatchMaxWait time.Duration
-	RetryDelay   func(attempts int) time.Duration
-	RetryMax     int
-	PollInterval time.Duration
+	Path          string
+	DB            *sql.DB
+	QueueName     string
+	BatchMaxSize  int
+	BatchMaxWait  time.Duration
+	RetryDelay    func(attempts int) time.Duration
+	RetryMax      int
+	PollInterval  time.Duration
+	LeaseDuration time.Duration
 }
 
 type Backend[T tasky.JobID] struct {
@@ -55,6 +56,9 @@ func New[T tasky.JobID](cfg Config) (*Backend[T], error) {
 
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 200 * time.Millisecond
+	}
+	if cfg.LeaseDuration <= 0 {
+		cfg.LeaseDuration = 5 * time.Minute
 	}
 	if cfg.QueueName == "" {
 		cfg.QueueName = "tasky_queue"
@@ -92,13 +96,14 @@ func (b *Backend[T]) Enqueue(ctx context.Context, task *tasky.Task[T], job *task
 	}
 
 	item := queueItem{
-		taskID:    taskKey,
-		jobID:     string(task.JobID),
-		payload:   task.Payload,
-		priority:  job.Priority,
-		attempts:  0,
-		createdAt: time.Now().UTC().UnixNano(),
-		availAt:   time.Now().UTC().UnixNano(),
+		taskID:     taskKey,
+		jobID:      string(task.JobID),
+		payload:    task.Payload,
+		priority:   job.Priority,
+		attempts:   0,
+		createdAt:  time.Now().UTC().UnixNano(),
+		availAt:    time.Now().UTC().UnixNano(),
+		leaseUntil: 0,
 	}
 
 	b.mu.Lock()
@@ -227,11 +232,12 @@ CREATE TABLE IF NOT EXISTS %s (
 	status TEXT NOT NULL,
 	attempts INTEGER NOT NULL,
 	available_at INTEGER NOT NULL,
+	lease_until INTEGER NOT NULL,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	completed_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_%s_dequeue ON %s(status, available_at, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_%s_dequeue ON %s(status, available_at, lease_until, priority DESC, created_at ASC);
 DROP INDEX IF EXISTS idx_%s_priority;
 `, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName, b.cfg.QueueName))
 	return err
@@ -243,7 +249,8 @@ func (b *Backend[T]) tryDequeue(ctx context.Context) (*queueItem, error) {
 	}
 
 	now := time.Now().UTC().UnixNano()
-	item, err := b.stmts.dequeue(ctx, now)
+	leaseUntil := time.Now().UTC().Add(b.cfg.LeaseDuration).UnixNano()
+	item, err := b.stmts.dequeue(ctx, now, leaseUntil)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +333,7 @@ func (b *Backend[T]) flushBatchLocked(ctx context.Context) error {
 	}
 
 	maxParams := 999
-	paramsPerRow := 8
+	paramsPerRow := 9
 	maxRows := maxParams / paramsPerRow
 	for start := 0; start < len(b.batch); start += maxRows {
 		end := start + maxRows
@@ -334,17 +341,17 @@ func (b *Backend[T]) flushBatchLocked(ctx context.Context) error {
 			end = len(b.batch)
 		}
 		args := make([]any, 0, (end-start)*paramsPerRow)
-		placeholders := make([]byte, 0, (end-start)*48)
+		placeholders := make([]byte, 0, (end-start)*56)
 		for i := start; i < end; i++ {
 			item := b.batch[i]
 			if i > start {
 				placeholders = append(placeholders, ',')
 			}
-			placeholders = append(placeholders, '(', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '\'', 'p', 'e', 'n', 'd', 'i', 'n', 'g', '\'', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', 'N', 'U', 'L', 'L', ')')
-			args = append(args, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt)
+			placeholders = append(placeholders, '(', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '\'', 'p', 'e', 'n', 'd', 'i', 'n', 'g', '\'', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', '?', ',', ' ', 'N', 'U', 'L', 'L', ')')
+			args = append(args, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.leaseUntil, item.createdAt, item.createdAt)
 		}
 		query := fmt.Sprintf(`
-INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
+INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, lease_until, created_at, updated_at, completed_at)
 VALUES %s
 `, b.cfg.QueueName, string(placeholders))
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
@@ -394,13 +401,14 @@ func taskIDKey(taskID tasky.TaskID) (string, error) {
 }
 
 type queueItem struct {
-	taskID    string
-	jobID     string
-	payload   []byte
-	priority  int
-	attempts  int
-	createdAt int64
-	availAt   int64
+	taskID     string
+	jobID      string
+	payload    []byte
+	priority   int
+	attempts   int
+	createdAt  int64
+	availAt    int64
+	leaseUntil int64
 }
 
 type preparedStatements struct {
@@ -417,18 +425,18 @@ func prepareStatements(db *sql.DB, queueName string) (*preparedStatements, error
 WITH next AS (
  SELECT id
  FROM %s
- WHERE status = 'pending' AND available_at <= ?
+ WHERE status IN ('pending', 'in_flight') AND available_at <= ? AND lease_until <= ?
  ORDER BY priority DESC, created_at ASC
  LIMIT 1
 )
 UPDATE %s
-SET status = 'in_flight', updated_at = ?
+SET status = 'in_flight', updated_at = ?, lease_until = ?
 WHERE id IN (SELECT id FROM next)
 RETURNING id, job_id, payload
 `, queueName, queueName)
 	insertSQL := fmt.Sprintf(`
-INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, created_at, updated_at, completed_at)
-VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, NULL)
+INSERT INTO %s (id, job_id, payload, priority, status, attempts, available_at, lease_until, created_at, updated_at, completed_at)
+VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, NULL)
 `, queueName)
 	ackSQL := fmt.Sprintf(`
 UPDATE %s
@@ -447,7 +455,7 @@ WHERE id = ?
 `, queueName)
 	retryPendingSQL := fmt.Sprintf(`
 UPDATE %s
-SET status = 'pending', attempts = ?, available_at = ?, updated_at = ?
+SET status = 'pending', attempts = ?, available_at = ?, lease_until = 0, updated_at = ?
 WHERE id = ?
 `, queueName)
 
@@ -511,8 +519,8 @@ func (s *preparedStatements) Close() {
 	}
 }
 
-func (s *preparedStatements) dequeue(ctx context.Context, now int64) (*queueItem, error) {
-	row := s.stmtDequeue.QueryRowContext(ctx, now, now)
+func (s *preparedStatements) dequeue(ctx context.Context, now int64, leaseUntil int64) (*queueItem, error) {
+	row := s.stmtDequeue.QueryRowContext(ctx, now, now, now, leaseUntil)
 	var item queueItem
 	if err := row.Scan(&item.taskID, &item.jobID, &item.payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -524,7 +532,7 @@ func (s *preparedStatements) dequeue(ctx context.Context, now int64) (*queueItem
 }
 
 func (s *preparedStatements) insert(ctx context.Context, item queueItem) error {
-	_, err := s.stmtInsert.ExecContext(ctx, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.createdAt, item.createdAt)
+	_, err := s.stmtInsert.ExecContext(ctx, item.taskID, item.jobID, item.payload, item.priority, item.attempts, item.availAt, item.leaseUntil, item.createdAt, item.createdAt)
 	return err
 }
 
