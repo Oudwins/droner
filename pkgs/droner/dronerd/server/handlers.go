@@ -116,13 +116,13 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		reqbody.SessionID = sessionIDFromName(worktreeName)
 	}
 
-	response, err := s.enqueueDeleteSession(reqbody, worktreePath)
-	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-	response.Result = &schemas.TaskResult{SessionID: reqbody.SessionID, WorktreePath: worktreePath}
-	RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
+	// response, err := s.enqueueDeleteSession(reqbody, worktreePath)
+	// if err != nil {
+	// 	RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+	// 	return
+	// }
+	// response.Result = &schemas.TaskResult{SessionID: reqbody.SessionID, WorktreePath: worktreePath}
+	// RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
 }
 
 func expandPath(path string) (string, error) {
@@ -196,48 +196,9 @@ func findWorktreeBySessionID(host workspace.Host, worktreeRoot string, sessionID
 	return matches[0], nil
 }
 
-type createSessionPayload struct {
-	RepoPath     string `json:"repo_path"`
-	WorktreePath string `json:"worktree_path"`
-	SessionID    string `json:"session_id"`
-	Model        string `json:"model"`
-	Prompt       string `json:"prompt"`
-}
-
-type deleteSessionPayload struct {
-	WorktreePath string `json:"worktree_path"`
-	SessionID    string `json:"session_id"`
-}
-
-func (s *Server) enqueueCreateSession(payload schemas.SessionCreateRequest, repoPath string, worktreePath string, existing bool) (*schemas.TaskResponse, error) {
-	payload := createSessionPayload{
-		RepoPath:     repoPath,
-		WorktreePath: worktreePath,
-		SessionID:    request.SessionID,
-		Model:        request.Agent.Model,
-		Prompt:       request.Agent.Prompt,
-	}
-	return s.tasks.Enqueue(taskTypeSessionCreate, payload, func(ctx context.Context) (any, error) {
-		if existing {
-			return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
-		}
-		return s.runCreateSession(ctx, payload, repoPath, worktreePath)
-	})
-}
-
-func (s *Server) enqueueDeleteSession(request schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResponse, error) {
-	payload := deleteSessionPayload{
-		WorktreePath: worktreePath,
-		SessionID:    request.SessionID,
-	}
-	return s.tasks.Enqueue(taskTypeSessionDelete, payload, func(ctx context.Context) (any, error) {
-		return s.runDeleteSession(ctx, payload, worktreePath)
-	})
-}
-
 func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if err := s.Workspace.CreateGitWorktree(payload.SessionID, repoPath, worktreePath); err != nil {
+	if err := s.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
@@ -245,18 +206,18 @@ func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCr
 		return nil, err
 	}
 
-	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, payload.Agent.Model, payload.Agent.Prompt); err != nil {
+	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
 		return nil, err
 	}
 
 	if remoteURL, err := s.Workspace.GetRemoteURL(repoPath); err == nil {
-		if err := s.subs.subscribe(ctx, remoteURL, payload.SessionID, s.Base.Logger, func(sessionID string) {
+		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
 			s.deleteSessionBySessionID(sessionID)
 		}); err != nil {
 			s.Base.Logger.Warn("Failed to subscribe to remote events",
 				"error", err,
 				"remote_url", remoteURL,
-				"session_id", payload.SessionID,
+				"session_id", request.SessionID,
 			)
 		}
 	} else {
@@ -266,10 +227,10 @@ func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCr
 		)
 	}
 
-	return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
+	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
 }
 
-func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResult, error) {
+func (s *Server) runDeleteSession(ctx context.Context, payload schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
 	if payload.SessionID == "" {
 		payload.SessionID = sessionIDFromName(worktreeName)
@@ -305,7 +266,7 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 	return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
 }
 
-func resolveDeleteWorktreePath(host workspace.Host, worktreeRoot string, request schemas.SessionDeleteRequest) (string, error) {
+func resolveDeleteWorktreePath(host workspace.Host, worktreeRoot string, payload schemas.SessionDeleteRequest) (string, error) {
 	if payload.Path != "" {
 		worktreePath := filepath.Clean(payload.Path)
 		if _, err := host.Stat(worktreePath); err != nil {
@@ -317,7 +278,7 @@ func resolveDeleteWorktreePath(host workspace.Host, worktreeRoot string, request
 		return worktreePath, nil
 	}
 
-	matchedPath, err := findWorktreeBySessionID(host, worktreeRoot, request.SessionID)
+	matchedPath, err := findWorktreeBySessionID(host, worktreeRoot, payload.SessionID)
 	if err != nil {
 		return "", os.ErrNotExist
 	}
