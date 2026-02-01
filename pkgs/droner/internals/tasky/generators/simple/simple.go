@@ -15,7 +15,7 @@ func New[T ~string]() *Generator[T] {
 	return &Generator[T]{}
 }
 
-func (g *Generator[T]) Next(jobID T) any {
+func (g *Generator[T]) Next(jobID T) string {
 	ts := time.Now().UTC().UnixNano()
 	var buf [6]byte
 	if _, err := rand.Read(buf[:]); err != nil {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
+	"log/slog"
 	"path"
 	"path/filepath"
 
@@ -24,7 +24,7 @@ const (
 )
 
 // worktreeName := filepath.Base(worktreePath)
-// if err := s.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+// if err := s.Workspace.CreateGitWorktree(repoPath, worktreePath, request.SessionID); err != nil {
 // 	return nil, err
 // }
 //
@@ -63,9 +63,19 @@ func NewQueue(base *baseserver.BaseServer) (*tasky.Queue[Jobs], error) {
 			payload := schemas.SessionCreateRequest{}
 			schemas.SessionCreateSchema.Parse(zjson.Decode(bytes.NewReader(task.Payload)), &payload)
 
-			worktreeName := filepath.Base(payload.Path)
-			if err := ws.CreateGitWorktree(payload.SessionID, payload.Path, worktreePath); err != nil {
-				return nil, err
+			repoName := filepath.Base(payload.Path)
+			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+"."+payload.SessionID)
+
+			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
+			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
+				return err
+			}
+
+			// create tmux sesion
+			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
+			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, payload.Agent.Model, payload.Agent.Prompt); err != nil {
+				base.Logger.Error("[queue] Failed to create tmux session", slog.String("taskId", task.TaskID), slog.String("error", err.Error()))
+				return err
 			}
 
 			// DO STUFF

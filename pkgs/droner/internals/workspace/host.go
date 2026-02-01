@@ -9,7 +9,7 @@ type Host interface {
 	MkdirAll(path string, perm os.FileMode) error
 
 	GitIsInsideWorkTree(repoPath string) error
-	CreateGitWorktree(sessionID string, repoPath string, worktreePath string) error
+	CreateGitWorktree(repoPath string, worktreePath string, branchName string) error
 	RemoveGitWorktree(worktreePath string) error
 	GitCommonDirFromWorktree(worktreePath string) (string, error)
 	DeleteGitBranch(commonGitDir string, sessionID string) error

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -60,27 +59,20 @@ func NewQueue[T JobID](cfg QueueConfig[T]) (*Queue[T], error) {
 func (q *Queue[T]) Enqueue(ctx context.Context, task *Task[T]) (TaskID, error) {
 	job, exists := q.jobs[task.JobID]
 	if !exists {
-		return nil, fmt.Errorf("unknown job id: %v", task.JobID)
+		return "", fmt.Errorf("unknown job id: %v", task.JobID)
 	}
-
 	taskID := task.TaskID
-	if taskID == nil {
+	if taskID == "" {
 		taskID = q.taskIDGen.Next(task.JobID)
-		if taskID == nil {
-			return nil, errors.New("task id generator returned nil")
+		if taskID == "" {
+			return "", errors.New("task id generator returned nil")
 		}
 	}
-
-	taskType := reflect.TypeOf(taskID)
-	if taskType == nil || !taskType.Comparable() {
-		return nil, fmt.Errorf("task id must be comparable: %T", taskID)
-	}
-
+	//
 	task.TaskID = taskID
 	if err := q.backend.Enqueue(ctx, task, job); err != nil {
-		return nil, err
+		return "", err
 	}
-
 	return taskID, nil
 }
 

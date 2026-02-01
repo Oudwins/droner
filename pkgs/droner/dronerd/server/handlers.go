@@ -150,7 +150,7 @@ func findWorktreeBySessionID(host workspace.Host, worktreeRoot string, sessionID
 
 func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if err := s.Base.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+	if err := s.Base.Workspace.CreateGitWorktree(repoPath, worktreePath, request.SessionID); err != nil {
 		return nil, err
 	}
 

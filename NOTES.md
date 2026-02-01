@@ -28,3 +28,13 @@ We can do worktree names as
 We cannot use '#' in the folder name it doesn't play nice with some tools. We also cannot use '.' in the session name, doesn't work with tmux.
 
 
+
+## ---
+Two tasks can be created at the same time for the same ID and will cause issues. Won't happen in practice. But in theory. Which means that we need to check the DB to validate a created taskId. The queue DB
+
+
+## Scripting
+Go with lua but will have to setup events etc. So lets not bother for now. Use shopify version if I can (light weight)
+
+- https://github.com/yuin/gopher-lua?tab=readme-ov-file#how-about-performance
+- https://github.com/Shopify/go-lua
