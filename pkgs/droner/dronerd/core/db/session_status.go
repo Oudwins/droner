@@ -1,6 +1,6 @@
 package db
 
-type SessionStatus string
+type SessionStatus = string
 
 const (
 	SessionStatusQueued    SessionStatus = "queued"
