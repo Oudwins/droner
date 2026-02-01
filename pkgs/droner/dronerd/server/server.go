@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
@@ -99,4 +101,21 @@ func (s *Server) Start() error {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) Shutdown() {
+	// TODO: Handle graceful shutdown of all componets
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if s.httpServer == nil {
+			s.Base.Logger.Error("shutdown failed", "error", errors.New("server not initialized"))
+			return
+		}
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			s.Base.Logger.Error("shutdown failed", "error", err)
+		}
+	}()
+
 }

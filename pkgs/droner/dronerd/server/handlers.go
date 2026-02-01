@@ -26,19 +26,8 @@ func (s *Server) HandlerVersion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("shutting down"))
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if s.httpServer == nil {
-			s.Base.Logger.Error("shutdown failed", "error", errors.New("server not initialized"))
-			return
-		}
-		if err := s.httpServer.Shutdown(ctx); err != nil {
-			s.Base.Logger.Error("shutdown failed", "error", err)
-		}
-	}()
+	s.Shutdown()
+	_, _ = w.Write([]byte("Shutdown"))
 }
 
 func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
