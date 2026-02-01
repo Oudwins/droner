@@ -195,7 +195,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob},
 			Backend: sqliteBackend,
 			OnError: func(err error, task *tasky.Task[Jobs], payload []byte) error {
-				base.Logger.Error(fmt.Sprintf("Task %v from Job %v failed: %v", task.TaskID, task.JobID, err))
+				base.Logger.Error("[QUEUE] Task failed to complete", slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)), slog.String("error", err.Error()))
 				return nil
 			},
 		},
