@@ -12,7 +12,7 @@ import (
 type Session struct {
 	ID           string
 	SimpleID     string
-	Status       string
+	Status       SessionStatus
 	RepoPath     string
 	WorktreePath sql.NullString
 	AgentModel   sql.NullString

@@ -36,7 +36,7 @@ RETURNING id, simple_id, status, repo_path, worktree_path, agent_model, agent_pr
 type CreateSessionParams struct {
 	ID           string
 	SimpleID     string
-	Status       string
+	Status       SessionStatus
 	RepoPath     string
 	WorktreePath sql.NullString
 	AgentModel   sql.NullString
@@ -177,7 +177,7 @@ WHERE status = ?
 ORDER BY updated_at DESC
 `
 
-func (q *Queries) ListSessionsByStatus(ctx context.Context, status string) ([]Session, error) {
+func (q *Queries) ListSessionsByStatus(ctx context.Context, status SessionStatus) ([]Session, error) {
 	rows, err := q.db.QueryContext(ctx, listSessionsByStatus, status)
 	if err != nil {
 		return nil, err
@@ -221,7 +221,7 @@ RETURNING id, simple_id, status, repo_path, worktree_path, agent_model, agent_pr
 `
 
 type UpdateSessionStatusByIDParams struct {
-	Status string
+	Status SessionStatus
 	Error  sql.NullString
 	ID     string
 }
@@ -255,7 +255,7 @@ RETURNING id, simple_id, status, repo_path, worktree_path, agent_model, agent_pr
 `
 
 type UpdateSessionStatusBySimpleIDParams struct {
-	Status   string
+	Status   SessionStatus
 	Error    sql.NullString
 	SimpleID string
 }
