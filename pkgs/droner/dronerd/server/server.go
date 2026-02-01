@@ -98,10 +98,6 @@ func (s *Server) Start() error {
 
 	runErr := <-errCh
 	s.Shutdown()
-	secondErr := <-errCh
-	if runErr == nil {
-		runErr = secondErr
-	}
 	return runErr
 }
 
