@@ -12,7 +12,7 @@ type Job[T JobID] struct {
 	Run      func(ctx context.Context, task *Task[T]) error
 }
 
-type TaskID = any
+type TaskID = string
 
 type JobConfig[T JobID] struct {
 	Priority int

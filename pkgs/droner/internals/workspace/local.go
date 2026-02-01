@@ -50,8 +50,8 @@ func (l *LocalHost) GitIsInsideWorkTree(repoPath string) error {
 	return nil
 }
 
-func (l *LocalHost) CreateGitWorktree(sessionID string, repoPath string, worktreePath string) error {
-	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", sessionID, worktreePath)
+func (l *LocalHost) CreateGitWorktree(repoPath string, worktreePath string, branchName string) error {
+	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
 	}
