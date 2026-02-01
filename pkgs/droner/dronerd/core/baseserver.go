@@ -17,6 +17,7 @@ type BaseServer struct {
 	Config        *conf.Config
 	Env           *env.EnvStruct
 	Logger        *slog.Logger
+	LogFile       *os.File
 	Workspace     workspace.Host
 	TaskQueue     *tasky.Queue[Jobs]
 	Subscriptions *subscriptionManager
@@ -32,13 +33,14 @@ func New() *BaseServer {
 		config.Server.DataDir = dataDir
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger, logFile := InitLogger(config)
 	w := workspace.NewLocalHost()
 
 	base := &BaseServer{
 		Config:    config,
 		Env:       env,
 		Logger:    logger,
+		LogFile:   logFile,
 		Workspace: w,
 	}
 
@@ -52,4 +54,10 @@ func New() *BaseServer {
 	base.Subscriptions = newSubscriptionManager(base)
 
 	return base
+}
+
+func (b *BaseServer) Close() {
+	if b.LogFile != nil {
+		_ = b.LogFile.Close()
+	}
 }

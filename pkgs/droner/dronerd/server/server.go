@@ -95,4 +95,8 @@ func (s *Server) Shutdown() {
 		}
 	}()
 
+	if s.Base != nil {
+		s.Base.Close()
+	}
+
 }
