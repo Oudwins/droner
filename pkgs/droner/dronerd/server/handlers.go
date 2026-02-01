@@ -39,9 +39,10 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Workspace))
 	if errs != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
+		return
 	}
 
-	worktreeRoot, _ := expandPath(s.Base.Config.Worktrees.Dir)
+	worktreeRoot := s.Base.Config.Worktrees.Dir
 	if err := s.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -85,22 +86,14 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	var reqbody schemas.SessionDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqbody); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid JSON", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-
-	if issues := schemas.SessionDeleteSchema.Validate(&reqbody); len(issues) > 0 {
-		payload := JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(issues))
+	errs := schemas.SessionDeleteSchema.Parse(zhttp.Request(r), &reqbody)
+	if errs != nil {
+		payload := JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs))
 		RenderJSON(w, r, payload, Render.Status(http.StatusBadRequest))
 		return
 	}
 
-	worktreeRoot, err := expandPath(s.Base.Config.Worktrees.Dir)
-	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Worktree Root doesn't exist", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
+	worktreeRoot := s.Base.Config.Worktrees.Dir
 
 	worktreePath, err := resolveDeleteWorktreePath(s.Workspace, worktreeRoot, reqbody)
 	if err != nil {
@@ -123,23 +116,6 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	// }
 	// response.Result = &schemas.TaskResult{SessionID: reqbody.SessionID, WorktreePath: worktreePath}
 	// RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
-}
-
-func expandPath(path string) (string, error) {
-	if path == "" {
-		return path, nil
-	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		if path == "~" {
-			return home, nil
-		}
-		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
-	}
-	return path, nil
 }
 
 func generateSessionID(host workspace.Host, baseName string, worktreeRoot string) (string, error) {
