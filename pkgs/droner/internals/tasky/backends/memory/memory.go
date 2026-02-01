@@ -79,7 +79,7 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, erro
 	for {
 		if ctx.Err() != nil {
 			var zero T
-			return zero, nil, nil, ctx.Err()
+			return zero, "", nil, ctx.Err()
 		}
 
 		b.mu.Lock()
@@ -97,7 +97,7 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, erro
 		select {
 		case <-ctx.Done():
 			var zero T
-			return zero, nil, nil, ctx.Err()
+			return zero, "", nil, ctx.Err()
 		case <-b.signal:
 		}
 	}

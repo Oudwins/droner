@@ -134,13 +134,13 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, erro
 	for {
 		if ctx.Err() != nil {
 			var zero T
-			return zero, nil, nil, ctx.Err()
+			return zero, "", nil, ctx.Err()
 		}
 
 		item, err := b.tryDequeue(ctx)
 		if err != nil {
 			var zero T
-			return zero, nil, nil, err
+			return zero, "", nil, err
 		}
 		if item != nil {
 			jobID := T(item.jobID)
@@ -158,7 +158,7 @@ func (b *Backend[T]) Dequeue(ctx context.Context) (T, tasky.TaskID, []byte, erro
 		select {
 		case <-ctx.Done():
 			var zero T
-			return zero, nil, nil, ctx.Err()
+			return zero, "", nil, ctx.Err()
 		case <-b.signal:
 		case <-timer.C:
 		}
@@ -394,10 +394,10 @@ func (b *Backend[T]) signalLocked() {
 }
 
 func taskIDKey(taskID tasky.TaskID) (string, error) {
-	if taskID == nil {
-		return "", errors.New("task id is nil")
+	if taskID == "" {
+		return "", errors.New("task id is empty")
 	}
-	return fmt.Sprint(taskID), nil
+	return taskID, nil
 }
 
 type queueItem struct {

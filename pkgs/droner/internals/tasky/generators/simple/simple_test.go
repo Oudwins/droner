@@ -25,11 +25,7 @@ func TestGeneratorConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			val := gen.Next("job")
-			value, ok := val.(string)
-			if !ok {
-				t.Fatal("expected string task id")
-			}
+			value := gen.Next("job")
 			mu.Lock()
 			seen[value] = struct{}{}
 			mu.Unlock()
