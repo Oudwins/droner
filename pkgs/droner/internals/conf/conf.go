@@ -48,11 +48,11 @@ var providersSchema = z.Struct(z.Shape{
 })
 
 var worktreesSchema = z.Struct(z.Shape{
-	"Dir": z.String().Default("~/.local/share/droner/worktrees"),
+	"Dir": z.String().Default("~/.local/share/droner/worktrees").Transform(expandPathTransform),
 })
 
 var serverSchema = z.Struct(z.Shape{
-	"DataDir": z.String().Default("~/.local/share/droner"),
+	"DataDir": z.String().Default("~/.local/share/droner").Transform(expandPathTransform),
 })
 
 var agentSchema = z.Struct(z.Shape{
@@ -108,6 +108,12 @@ func GetConfig() *Config {
 	}
 
 	return config
+}
+
+func expandPathTransform(ptr *string, c z.Ctx) error {
+	expanded, err := expandPath(*ptr)
+	*ptr = expanded
+	return err
 }
 
 func expandPath(path string) (string, error) {
