@@ -8,13 +8,13 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 
 	z "github.com/Oudwins/zog"
 )
@@ -64,7 +64,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repoPath := filepath.Clean(request.Path)
-	info, err := os.Stat(repoPath)
+	info, err := s.Workspace.Stat(repoPath)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path not found", nil), Render.Status(http.StatusBadRequest))
 		return
@@ -74,20 +74,20 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := gitIsInsideWorkTree(repoPath); err != nil {
+	if err := s.Workspace.GitIsInsideWorkTree(repoPath); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path not to a git repo", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
 
 	worktreeRoot, _ := expandPath(s.Base.Config.Worktrees.Dir)
-	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+	if err := s.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	baseName := filepath.Base(repoPath)
 	if request.SessionID == "" {
-		generatedID, err := generateSessionID(baseName, worktreeRoot)
+		generatedID, err := generateSessionID(s.Workspace, baseName, worktreeRoot)
 		if err != nil {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
 			return
@@ -99,7 +99,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 
 	if request.SessionID != "" {
-		if _, err := os.Stat(worktreePath); err == nil {
+		if _, err := s.Workspace.Stat(worktreePath); err == nil {
 			response, err := s.enqueueCreateSession(request, repoPath, worktreePath, true)
 			if err != nil {
 				RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
@@ -139,7 +139,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreePath, err := resolveDeleteWorktreePath(worktreeRoot, reqbody)
+	worktreePath, err := resolveDeleteWorktreePath(s.Workspace, worktreeRoot, reqbody)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Couldn't find the worktree", nil), Render.Status(http.StatusNotFound))
@@ -162,18 +162,6 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
 }
 
-func gitIsInsideWorkTree(repoPath string) error {
-	cmd := execCommand("git", "-C", repoPath, "rev-parse", "--is-inside-work-tree")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git check failed: %s", strings.TrimSpace(string(output)))
-	}
-	if strings.TrimSpace(string(output)) != "true" {
-		return fmt.Errorf("not a git worktree")
-	}
-	return nil
-}
-
 func expandPath(path string) (string, error) {
 	if path == "" {
 		return path, nil
@@ -191,7 +179,7 @@ func expandPath(path string) (string, error) {
 	return path, nil
 }
 
-func generateSessionID(baseName string, worktreeRoot string) (string, error) {
+func generateSessionID(host workspace.Host, baseName string, worktreeRoot string) (string, error) {
 	random := rand.New(rand.NewSource(time.Now().UnixNano()))
 	letters := []rune("abcdefghijklmnopqrstuvwxyz")
 	for range 100 {
@@ -201,7 +189,7 @@ func generateSessionID(baseName string, worktreeRoot string) (string, error) {
 		}
 		candidate := fmt.Sprintf("%s-%02d", string(chars), random.Intn(100))
 		worktreePath := filepath.Join(worktreeRoot, baseName+"#"+candidate)
-		if _, err := os.Stat(worktreePath); err != nil {
+		if _, err := host.Stat(worktreePath); err != nil {
 			if os.IsNotExist(err) {
 				return candidate, nil
 			}
@@ -209,140 +197,6 @@ func generateSessionID(baseName string, worktreeRoot string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no available session id")
-}
-
-func createGitWorktree(sessionId string, repoPath string, worktreePath string) error {
-	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", sessionId, worktreePath) // create worktree with branch name = sessionid
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create worktree: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func removeGitWorktree(worktreePath string) error {
-	cmd := execCommand("git", "-C", worktreePath, "worktree", "remove", "--force", worktreePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to remove worktree: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func gitCommonDirFromWorktree(worktreePath string) (string, error) {
-	cmd := execCommand("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine git common dir: %s", strings.TrimSpace(string(output)))
-	}
-	commonDir := strings.TrimSpace(string(output))
-	if commonDir == "" {
-		return "", errors.New("failed to determine git common dir")
-	}
-	if !filepath.IsAbs(commonDir) {
-		commonDir = filepath.Join(worktreePath, commonDir)
-	}
-	return commonDir, nil
-}
-
-func deleteGitBranch(commonGitDir string, sessionID string) error {
-	if sessionID == "" {
-		return nil
-	}
-	check := execCommand("git", "--git-dir", commonGitDir, "show-ref", "--verify", "--quiet", "refs/heads/"+sessionID)
-	if err := check.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return nil
-		}
-		return fmt.Errorf("failed to check branch: %w", err)
-	}
-	cmd := execCommand("git", "--git-dir", commonGitDir, "branch", "-D", sessionID)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to delete branch: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-type worktreeConfig struct {
-	SetupWorktree []string `json:"setup-worktree"`
-}
-
-func runWorktreeSetup(repoPath string, worktreePath string) error {
-	configPath := filepath.Join(repoPath, ".cursor", "worktrees.json")
-	if _, err := os.Stat(configPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to read worktree config")
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read worktree config")
-	}
-
-	var config worktreeConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse worktree config")
-	}
-
-	for _, command := range config.SetupWorktree {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			continue
-		}
-		cmd := execCommand("sh", "-c", command)
-		cmd.Dir = worktreePath
-		cmd.Env = append(os.Environ(), fmt.Sprintf("ROOT_WORKTREE_PATH=%s", repoPath))
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			message := strings.TrimSpace(string(output))
-			if message != "" {
-				return fmt.Errorf("setup command failed: %s: %s", command, message)
-			}
-			return fmt.Errorf("setup command failed: %s", command)
-		}
-	}
-
-	return nil
-}
-
-func createTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
-	newSession := execCommand("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
-	if output, err := newSession.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create tmux session: %s", strings.TrimSpace(string(output)))
-	}
-
-	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode"}
-	if model != "" {
-		opencodeArgs = append(opencodeArgs, "--model", model)
-	}
-	if prompt != "" {
-		opencodeArgs = append(opencodeArgs, "--prompt", prompt)
-	}
-
-	newOpencode := execCommand("tmux", opencodeArgs...)
-	if output, err := newOpencode.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
-	}
-
-	newTerminal := execCommand("tmux", "new-window", "-t", sessionName, "-n", "terminal", "-c", worktreePath)
-	if output, err := newTerminal.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create tmux terminal window: %s", strings.TrimSpace(string(output)))
-	}
-
-	return nil
-}
-
-func killTmuxSession(sessionName string) error {
-	check := execCommand("tmux", "has-session", "-t", sessionName)
-	if err := check.Run(); err != nil {
-		return nil
-	}
-	cmd := execCommand("tmux", "kill-session", "-t", sessionName)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to kill tmux session: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 func sessionIDFromName(worktreeName string) string {
@@ -353,8 +207,8 @@ func sessionIDFromName(worktreeName string) string {
 	return ""
 }
 
-func findWorktreeBySessionID(worktreeRoot string, sessionID string) (string, error) {
-	entries, err := os.ReadDir(worktreeRoot)
+func findWorktreeBySessionID(host workspace.Host, worktreeRoot string, sessionID string) (string, error) {
+	entries, err := host.ReadDir(worktreeRoot)
 	if err != nil {
 		return "", fmt.Errorf("failed to read worktree root")
 	}
@@ -420,19 +274,19 @@ func (s *Server) enqueueDeleteSession(request schemas.SessionDeleteRequest, work
 
 func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if err := createGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+	if err := s.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := runWorktreeSetup(repoPath, worktreePath); err != nil {
+	if err := s.Workspace.RunWorktreeSetup(repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := createTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
+	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
 		return nil, err
 	}
 
-	if remoteURL, err := getRemoteURL(repoPath); err == nil {
+	if remoteURL, err := s.Workspace.GetRemoteURL(repoPath); err == nil {
 		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
 			s.deleteSessionBySessionID(sessionID)
 		}); err != nil {
@@ -458,12 +312,12 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 		request.SessionID = sessionIDFromName(worktreeName)
 	}
 
-	commonGitDir, err := gitCommonDirFromWorktree(worktreePath)
+	commonGitDir, err := s.Workspace.GitCommonDirFromWorktree(worktreePath)
 	if err != nil {
 		return nil, err
 	}
 
-	if remoteURL, err := getRemoteURLFromWorktree(worktreePath); err == nil {
+	if remoteURL, err := s.Workspace.GetRemoteURLFromWorktree(worktreePath); err == nil {
 		if err := s.subs.unsubscribe(ctx, remoteURL, request.SessionID, s.Base.Logger); err != nil {
 			s.Base.Logger.Warn("Failed to unsubscribe from remote events",
 				"error", err,
@@ -473,25 +327,25 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 		}
 	}
 
-	if err := killTmuxSession(worktreeName); err != nil {
+	if err := s.Workspace.KillTmuxSession(worktreeName); err != nil {
 		return nil, err
 	}
 
-	if err := removeGitWorktree(worktreePath); err != nil {
+	if err := s.Workspace.RemoveGitWorktree(worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := deleteGitBranch(commonGitDir, request.SessionID); err != nil {
+	if err := s.Workspace.DeleteGitBranch(commonGitDir, request.SessionID); err != nil {
 		return nil, err
 	}
 
 	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
 }
 
-func resolveDeleteWorktreePath(worktreeRoot string, request schemas.SessionDeleteRequest) (string, error) {
+func resolveDeleteWorktreePath(host workspace.Host, worktreeRoot string, request schemas.SessionDeleteRequest) (string, error) {
 	if request.Path != "" {
 		worktreePath := filepath.Clean(request.Path)
-		if _, err := os.Stat(worktreePath); err != nil {
+		if _, err := host.Stat(worktreePath); err != nil {
 			if os.IsNotExist(err) {
 				return "", os.ErrNotExist
 			}
@@ -500,7 +354,7 @@ func resolveDeleteWorktreePath(worktreeRoot string, request schemas.SessionDelet
 		return worktreePath, nil
 	}
 
-	matchedPath, err := findWorktreeBySessionID(worktreeRoot, request.SessionID)
+	matchedPath, err := findWorktreeBySessionID(host, worktreeRoot, request.SessionID)
 	if err != nil {
 		return "", os.ErrNotExist
 	}
