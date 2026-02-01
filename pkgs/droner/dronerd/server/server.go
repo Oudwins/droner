@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
@@ -20,7 +20,7 @@ import (
 )
 
 type Server struct {
-	Base       *baseserver.BaseServer
+	Base       *core.BaseServer
 	Logbuf     *logbuf.Logger
 	subs       *subscriptionManager
 	oauth      *oauthStateStore
@@ -30,7 +30,7 @@ type Server struct {
 }
 
 func New() *Server {
-	base := baseserver.New()
+	base := core.New()
 	dataDir := base.Config.Server.DataDir
 	if dataDir != "" {
 		dataDir = filepath.Clean(dataDir)

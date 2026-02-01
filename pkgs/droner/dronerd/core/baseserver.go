@@ -1,4 +1,4 @@
-package baseserver
+package core
 
 import (
 	"log/slog"
