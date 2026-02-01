@@ -2,16 +2,12 @@ package server
 
 import (
 	"errors"
-	"io"
 	"log"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/baseserver"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
@@ -19,6 +15,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
+	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 type Server struct {
@@ -68,7 +65,7 @@ func New() *Server {
 }
 
 func (s *Server) SafeStart() error {
-	if s.IsRunning() {
+	if sdk.IsRunning(s.Base.Env.BASE_URL) {
 		return nil
 	}
 
@@ -81,44 +78,11 @@ func (s *Server) SafeStart() error {
 		}
 	}()
 
-	if s.waitForStart() {
+	if sdk.WaitForStart(s.Base.Env.BASE_URL, s.Base.Logger) {
 		return nil
 	}
 
 	return errors.New("Couldn't start server")
-}
-
-func (s *Server) waitForStart() bool {
-	time.Sleep(2 * time.Second)
-	for i := range 6 {
-		s.Base.Logger.Info("Waiting for server to start", "attempt", i)
-		if isRunning := s.IsRunning(); isRunning {
-			return true
-		}
-		time.Sleep(time.Duration(math.Pow(2, float64(i))) * time.Second)
-	}
-
-	return false
-}
-
-func (s *Server) IsRunning() bool {
-	client := &http.Client{Timeout: 200 * time.Millisecond}
-	resp, err := client.Get(s.Base.Env.BASE_URL + "/version")
-	if err != nil {
-		return false
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false
-	}
-	_ = strings.TrimSpace(string(body))
-	resp.Body.Close()
-	return true
 }
 
 func (s *Server) Start() error {
