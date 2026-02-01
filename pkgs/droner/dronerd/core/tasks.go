@@ -3,19 +3,23 @@ package core
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/backends/tasky_sqlite3"
 	"github.com/Oudwins/zog"
 	"github.com/Oudwins/zog/parsers/zjson"
+	"github.com/google/uuid"
 )
 
 type Jobs string
@@ -42,23 +46,69 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			ws := base.Workspace
 			payload := schemas.SessionCreateRequest{}
-			errs := schemas.SessionCreateSchema.Parse(zjson.Decode(bytes.NewReader(task.Payload)), &payload)
+			errs := schemas.SessionCreateSchema.Parse(
+				zjson.Decode(bytes.NewReader(task.Payload)),
+				&payload,
+				zog.WithCtxValue("workspace", base.Workspace),
+			)
 			if errs != nil {
-				return fmt.Errorf("[queue] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
+				return fmt.Errorf("[create session] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
 			repoName := filepath.Base(payload.Path)
 			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
 
+			sessionID, err := uuid.NewV7()
+			if err != nil {
+				return fmt.Errorf("[create session] failed to create session id: %w", err)
+			}
+
+			agentModel := sql.NullString{}
+			agentPrompt := sql.NullString{}
+			if payload.Agent != nil {
+				agentModel = sql.NullString{String: payload.Agent.Model, Valid: payload.Agent.Model != ""}
+				agentPrompt = sql.NullString{String: payload.Agent.Prompt, Valid: payload.Agent.Prompt != ""}
+			}
+			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
+			_, err = base.DB.CreateSession(ctx, db.CreateSessionParams{
+				ID:           sessionID.String(),
+				SimpleID:     payload.SessionID,
+				Status:       db.SessionStatusQueued,
+				RepoPath:     payload.Path,
+				WorktreePath: sql.NullString{String: worktreePath, Valid: true},
+				AgentModel:   agentModel,
+				AgentPrompt:  agentPrompt,
+				Error:        sql.NullString{},
+			})
+			if err != nil {
+				return fmt.Errorf("[create session] failed to create session record: %w", err)
+			}
+
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: payload.SessionID,
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", payload.SessionID))
+				}
 				return err
 			}
 
 			// create tmux sesion
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, payload.Agent.Model, payload.Agent.Prompt); err != nil {
-				base.Logger.Error("[queue] Failed to create tmux session", slog.String("taskId", task.TaskID), slog.String("error", err.Error()))
+				base.Logger.Error("[create session] Failed to create tmux session", slog.String("taskId", task.TaskID), slog.String("error", err.Error()))
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: payload.SessionID,
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", payload.SessionID))
+				}
 				return err
 			}
 
@@ -67,14 +117,24 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 					data, _ := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionId})
 					taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobDeleteSession, data))
 					if err != nil {
-						base.Logger.Error("[queue] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+						base.Logger.Error("[create session] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
 					}
 				})
 				if err != nil {
-					base.Logger.Error("[queue] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+					base.Logger.Error("[create session] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
 				}
 			}
-			// DO STUFF
+
+			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+				SimpleID: payload.SessionID,
+				Status:   db.SessionStatusRunning,
+				Error:    sql.NullString{},
+			})
+			if err != nil {
+				base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+				return err
+			}
+
 			return nil
 		},
 	})
@@ -85,40 +145,74 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			data := schemas.SessionDeleteRequest{}
 			errs := schemas.SessionDeleteSchema.Parse(zjson.Decode(bytes.NewReader(task.Payload)), &data)
 			if errs != nil {
-				return fmt.Errorf("[queue] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
+				return fmt.Errorf("[delete sesssion] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
-			// TODO: get the path from the session ID from the DB somewhere. Right now we only have sessionId but we are storing {parent}#{sessionId} as folder name
-			// worktreePath := path.Join(base.Config.Worktrees.Dir)
+			session, err := base.DB.GetSessionBySimpleID(ctx, data.SessionID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil // no op
+				}
+				return fmt.Errorf("[delete session] failed to load session: %w", err)
+			}
+
 			worktreePath := base.Config.Worktrees.Dir
+			if session.WorktreePath.Valid {
+				worktreePath = session.WorktreePath.String
+			} else if session.RepoPath != "" {
+				repoName := filepath.Base(session.RepoPath)
+				worktreePath = path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(data.SessionID))
+			}
 
 			commonGitDir, err := ws.GitCommonDirFromWorktree(worktreePath)
 			if err != nil {
 				return err
 			}
-			worktreeName := "" // TODO
+			worktreeName := data.SessionID
 
 			if err := ws.KillTmuxSession(worktreeName); err != nil {
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: data.SessionID,
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					base.Logger.Error("[delete session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", data.SessionID))
+				}
 				return err
 			}
 			if err := ws.RemoveGitWorktree(worktreePath); err != nil {
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: data.SessionID,
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					base.Logger.Error("[queue] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", data.SessionID))
+				}
 				return err
 			}
 			if err := ws.DeleteGitBranch(commonGitDir, data.SessionID); err != nil {
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: data.SessionID,
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					base.Logger.Error("[queue] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", data.SessionID))
+				}
 				return err
 			}
 
-			// Should be the last thing we do actually
-			// remoteUrl, err := ws.GetRemoteURLFromWorktree(worktreePath)
-			// if remoteURL, err := s.Base.Workspace.GetRemoteURLFromWorktree(worktreePath); err == nil {
-			// 	if err := s.subs.unsubscribe(ctx, remoteURL, payload.SessionID, s.Base.Logger); err != nil {
-			// 		s.Base.Logger.Warn("Failed to unsubscribe from remote events",
-			// 			"error", err,
-			// 			"remote_url", remoteURL,
-			// 			"session_id", payload.SessionID,
-			// 		)
-			// 	}
-			// }
+			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+				SimpleID: data.SessionID,
+				Status:   db.SessionStatusDeleted,
+				Error:    sql.NullString{},
+			})
+			if err != nil {
+				base.Logger.Error("[queue] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", data.SessionID))
+				return err
+			}
 			return nil
 		},
 	})
