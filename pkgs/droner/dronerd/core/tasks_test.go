@@ -242,6 +242,28 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 			Prompt: "test-prompt",
 		},
 	}
+
+	newID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("failed to create uuid: %v", err)
+	}
+
+	repoName := filepath.Base(payload.Path)
+	worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
+
+	_, err = base.DB.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:           newID.String(),
+		SimpleID:     payload.SessionID,
+		Status:       db.SessionStatusQueued,
+		RepoPath:     payload.Path,
+		WorktreePath: worktreePath,
+		Payload:      sql.NullString{},
+		Error:        sql.NullString{},
+	})
+	if err != nil {
+		t.Fatalf("failed to create session record: %v", err)
+	}
+
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("failed to marshal payload: %v", err)
@@ -261,20 +283,14 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	if session.RepoPath != payload.Path {
 		t.Fatalf("expected repo path %s, got %s", payload.Path, session.RepoPath)
 	}
-	if !session.WorktreePath.Valid {
-		t.Fatalf("expected worktree path to be set")
-	}
-
-	repoName := filepath.Base(payload.Path)
-	expectedWorktree := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
-	if session.WorktreePath.String != expectedWorktree {
-		t.Fatalf("expected worktree path %s, got %s", expectedWorktree, session.WorktreePath.String)
+	if session.WorktreePath != worktreePath {
+		t.Fatalf("expected worktree path %s, got %s", worktreePath, session.WorktreePath)
 	}
 	if ws.createdWorktreeRepo != payload.Path {
 		t.Fatalf("expected git worktree repo %s, got %s", payload.Path, ws.createdWorktreeRepo)
 	}
-	if ws.createdWorktreePath != expectedWorktree {
-		t.Fatalf("expected git worktree path %s, got %s", expectedWorktree, ws.createdWorktreePath)
+	if ws.createdWorktreePath != worktreePath {
+		t.Fatalf("expected git worktree path %s, got %s", worktreePath, ws.createdWorktreePath)
 	}
 	if ws.createdTmuxName != payload.SessionID {
 		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID, ws.createdTmuxName)
@@ -298,9 +314,8 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 		SimpleID:     simpleID,
 		Status:       db.SessionStatusRunning,
 		RepoPath:     repoDir,
-		WorktreePath: sql.NullString{String: worktreePath, Valid: true},
-		AgentModel:   sql.NullString{},
-		AgentPrompt:  sql.NullString{},
+		WorktreePath: worktreePath,
+		Payload:      sql.NullString{},
 		Error:        sql.NullString{},
 	})
 	if err != nil {

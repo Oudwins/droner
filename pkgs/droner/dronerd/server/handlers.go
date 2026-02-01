@@ -2,16 +2,19 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/zog/zhttp"
+	"github.com/google/uuid"
 
 	z "github.com/Oudwins/zog"
 )
@@ -68,11 +71,51 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID, err := uuid.NewV7()
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	payloadValue := sql.NullString{}
+	if payload.Agent != nil {
+		payloadBytes, err := json.Marshal(payload.Agent)
+		if err != nil {
+			s.Logbuf.Error("Failed to serialize agent payload", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		payloadValue = sql.NullString{String: string(payloadBytes), Valid: true}
+	}
+
+	_, err = s.Base.DB.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:           sessionID.String(),
+		SimpleID:     payload.SessionID,
+		Status:       db.SessionStatusQueued,
+		RepoPath:     payload.Path,
+		WorktreePath: worktreePath,
+		Payload:      payloadValue,
+		Error:        sql.NullString{},
+	})
+	if err != nil {
+		s.Logbuf.Error("Failed to create session record", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
 	// Enqueue task
 	bytes, _ := json.Marshal(payload)
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
 	if err != nil {
 		s.Logbuf.Error("Failed to enque task", slog.String("error", err.Error()))
+		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
+			SimpleID: payload.SessionID,
+			Status:   db.SessionStatusFailed,
+			Error:    sql.NullString{String: err.Error(), Valid: true},
+		})
+		if updateErr != nil {
+			s.Logbuf.Error("Failed to update session status", slog.String("error", updateErr.Error()))
+		}
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 	}
 

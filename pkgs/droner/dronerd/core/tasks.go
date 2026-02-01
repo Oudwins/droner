@@ -19,7 +19,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/backends/tasky_sqlite3"
 	"github.com/Oudwins/zog"
 	"github.com/Oudwins/zog/parsers/zjson"
-	"github.com/google/uuid"
 )
 
 type Jobs string
@@ -57,32 +56,6 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 			repoName := filepath.Base(payload.Path)
 			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
-
-			sessionID, err := uuid.NewV7()
-			if err != nil {
-				return fmt.Errorf("[create session] failed to create session id: %w", err)
-			}
-
-			agentModel := sql.NullString{}
-			agentPrompt := sql.NullString{}
-			if payload.Agent != nil {
-				agentModel = sql.NullString{String: payload.Agent.Model, Valid: payload.Agent.Model != ""}
-				agentPrompt = sql.NullString{String: payload.Agent.Prompt, Valid: payload.Agent.Prompt != ""}
-			}
-			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			_, err = base.DB.CreateSession(ctx, db.CreateSessionParams{
-				ID:           sessionID.String(),
-				SimpleID:     payload.SessionID,
-				Status:       db.SessionStatusQueued,
-				RepoPath:     payload.Path,
-				WorktreePath: sql.NullString{String: worktreePath, Valid: true},
-				AgentModel:   agentModel,
-				AgentPrompt:  agentPrompt,
-				Error:        sql.NullString{},
-			})
-			if err != nil {
-				return fmt.Errorf("[create session] failed to create session record: %w", err)
-			}
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
@@ -125,7 +98,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				}
 			}
 
-			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+			_, err := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 				SimpleID: payload.SessionID,
 				Status:   db.SessionStatusRunning,
 				Error:    sql.NullString{},
@@ -156,14 +129,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf("[delete session] failed to load session: %w", err)
 			}
 
-			worktreePath := base.Config.Worktrees.Dir
-			if session.WorktreePath.Valid {
-				worktreePath = session.WorktreePath.String
-			} else if session.RepoPath != "" {
-				repoName := filepath.Base(session.RepoPath)
-				worktreePath = path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(data.SessionID))
-			}
-
+			worktreePath := session.WorktreePath
 			commonGitDir, err := ws.GitCommonDirFromWorktree(worktreePath)
 			if err != nil {
 				return err
@@ -206,7 +172,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 				SimpleID: data.SessionID,
-				Status:   db.SessionStatusDeleted,
+				Status:   db.SessionStatusDeleted, // TODO: Might want to set this to completed in the future. So I can reuse the worktrees
 				Error:    sql.NullString{},
 			})
 			if err != nil {
