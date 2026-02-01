@@ -22,9 +22,7 @@ import (
 type Server struct {
 	Base       *core.BaseServer
 	Logbuf     *logbuf.Logger
-	subs       *subscriptionManager
 	oauth      *oauthStateStore
-	tasks      *taskManager
 	httpServer *http.Server
 	tasky      *tasky.Queue[tasks.Jobs]
 }
@@ -45,9 +43,6 @@ func New() *Server {
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		assert.AssertNil(err, "[SERVER] Failed to create data directory")
 	}
-	store, err := newTaskStore(storePath)
-	assert.AssertNil(err, "[SERVER] Failed to initialize task store")
-	manager := newTaskManager(store, base.Logger)
 
 	q, err := tasks.NewQueue(base)
 	assert.AssertNil(err, "[SERVER] Failed to initialize queue")
@@ -55,9 +50,7 @@ func New() *Server {
 	return &Server{
 		Base:   base,
 		Logbuf: buffer,
-		subs:   newSubscriptionManager(),
 		oauth:  newOAuthStateStore(),
-		tasks:  manager,
 		tasky:  q,
 	}
 }

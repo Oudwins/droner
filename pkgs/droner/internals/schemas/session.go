@@ -36,7 +36,6 @@ type SessionCreateResponse struct {
 }
 
 type SessionDeleteRequest struct {
-	Path      string `json:"path" zog:"path"`
 	SessionID string `json:"sessionId" zog:"sessionId"`
 }
 
