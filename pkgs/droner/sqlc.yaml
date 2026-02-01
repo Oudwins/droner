@@ -1,0 +1,9 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    queries: "dronerd/core/db/queries"
+    schema: "dronerd/core/db/schemas"
+    gen:
+      go:
+        package: "db"
+        out: "dronerd/core/db"
