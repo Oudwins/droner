@@ -33,8 +33,7 @@ type Server struct {
 
 func New() *Server {
 	base := baseserver.New()
-	dataDir, err := expandPath(base.Config.Server.DataDir)
-	assert.AssertNil(err, "[SERVER] Failed to expand data dir")
+	dataDir := base.Config.Server.DataDir
 	if dataDir != "" {
 		dataDir = filepath.Clean(dataDir)
 		base.Config.Server.DataDir = dataDir
