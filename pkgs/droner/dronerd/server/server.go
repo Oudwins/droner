@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -24,7 +23,7 @@ type Server struct {
 	Logbuf     *logbuf.Logger
 	oauth      *oauthStateStore
 	httpServer *http.Server
-	tasky      *tasky.Queue[tasks.Jobs]
+	tasky      *tasky.Queue[core.Jobs]
 }
 
 func New() *Server {
@@ -44,7 +43,7 @@ func New() *Server {
 		assert.AssertNil(err, "[SERVER] Failed to create data directory")
 	}
 
-	q, err := tasks.NewQueue(base)
+	q, err := core.NewQueue(base)
 	assert.AssertNil(err, "[SERVER] Failed to initialize queue")
 
 	return &Server{

@@ -1,4 +1,4 @@
-package tasks
+package core
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -24,7 +23,7 @@ const (
 	JobDeleteSession Jobs = "session_create_job"
 )
 
-func NewQueue(base *core.BaseServer) (*tasky.Queue[Jobs], error) {
+func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig[Jobs]{
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
