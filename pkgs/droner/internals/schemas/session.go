@@ -16,7 +16,7 @@ type SessionAgentConfig struct {
 
 type SessionCreateRequest struct {
 	Path      string              `json:"path" zog:"path"`
-	SessionID string              `json:"session_id" zog:"session_id"`
+	SessionID string              `json:"sessionId" zog:"sessionId"`
 	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
 }
 
@@ -37,21 +37,17 @@ type SessionCreateResponse struct {
 
 type SessionDeleteRequest struct {
 	Path      string `json:"path" zog:"path"`
-	SessionID string `json:"session_id" zog:"session_id"`
+	SessionID string `json:"sessionId" zog:"sessionId"`
 }
 
 type SessionDeleteResponse struct {
-	WorktreePath string `json:"worktree_path"`
-	SessionID    string `json:"session_id"`
+	SessionID string `json:"sessionId"`
+	TaskId    string `json:"taskId"`
 }
 
 var SessionDeleteSchema = z.Struct(z.Shape{
-	"Path":      z.String().Optional().Trim().Transform(cleanPathTransform).TestFunc(isGitRepoTest, z.Message("Is not a valid git repo")),
 	"SessionID": z.String().Optional().Trim(),
-}).TestFunc(func(valPtr any, ctx z.Ctx) bool {
-	v := valPtr.(*SessionDeleteRequest)
-	return v.Path != "" || v.SessionID != ""
-}, z.Message("At least one of path or sessionId are required"))
+})
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {
 	*valPtr = filepath.Clean(*valPtr)
