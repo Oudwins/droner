@@ -32,5 +32,10 @@ test:
 cli: build
 	$(DRONER_BIN) $(filter-out $@,$(MAKECMDGOALS))
 
+gen-sqlc:
+	cd ./pkgs/droner && sqlc generate
+
+gen: gen-sqlc
+
 %:
 	@:
