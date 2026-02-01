@@ -84,7 +84,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	res := schemas.SessionCreateResponse{
 		WorktreePath: worktreePath,
 		SessionID:    payload.SessionID,
-		TaskID:       taskId.(string),
+		TaskID:       taskId,
 	}
 	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
 }
@@ -108,7 +108,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	RenderJSON(w, r, schemas.SessionDeleteResponse{
 		SessionID: payload.SessionID,
-		TaskId:    taskId.(string),
+		TaskId:    taskId,
 	}, Render.Status(http.StatusAccepted))
 }
 

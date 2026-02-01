@@ -65,7 +65,7 @@ func (q *Queue[T]) Enqueue(ctx context.Context, task *Task[T]) (TaskID, error) {
 	if taskID == "" {
 		taskID = q.taskIDGen.Next(task.JobID)
 		if taskID == "" {
-			return "", errors.New("task id generator returned nil")
+			return "", errors.New("task id generator returned empty")
 		}
 	}
 	//

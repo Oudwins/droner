@@ -28,7 +28,7 @@ func (b *stubBackend[T]) Dequeue(ctx context.Context) (T, TaskID, []byte, error)
 		return b.dequeue(ctx)
 	}
 	var zero T
-	return zero, nil, nil, context.Canceled
+	return zero, "", nil, context.Canceled
 }
 
 func (b *stubBackend[T]) Ack(ctx context.Context, taskID TaskID) error {
@@ -101,12 +101,23 @@ func TestEnqueueValidation(t *testing.T) {
 		t.Fatal("expected error for unknown job id")
 	}
 
+	queue, err = NewQueue(QueueConfig[string]{
+		Backend: backend,
+		Jobs: []Job[string]{
+			NewJob("alpha", JobConfig[string]{Run: func(ctx context.Context, task *Task[string]) error { return nil }}),
+		},
+		TaskIDGen: TaskIDGeneratorFunc[string](func(jobID string) TaskID {
+			return ""
+		}),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	_, err = queue.Enqueue(context.Background(), &Task[string]{
-		JobID:  "alpha",
-		TaskID: map[string]int{"bad": 1},
+		JobID: "alpha",
 	})
 	if err == nil {
-		t.Fatal("expected error for non-comparable task id")
+		t.Fatal("expected error for empty task id")
 	}
 }
 
@@ -165,7 +176,7 @@ func TestConsumerRunAckNack(t *testing.T) {
 		dequeue: func(ctx context.Context) (string, TaskID, []byte, error) {
 			select {
 			case <-ctx.Done():
-				return "", nil, nil, ctx.Err()
+				return "", "", nil, ctx.Err()
 			case item := <-dequeueCh:
 				return item.jobID, item.taskID, item.payload, item.err
 			}
@@ -273,7 +284,7 @@ func TestConsumerDefaultsWorkers(t *testing.T) {
 	backend := &stubBackend[string]{
 		dequeue: func(ctx context.Context) (string, TaskID, []byte, error) {
 			calls++
-			return "", nil, nil, context.Canceled
+			return "", "", nil, context.Canceled
 		},
 	}
 	queue, err := NewQueue(QueueConfig[string]{
