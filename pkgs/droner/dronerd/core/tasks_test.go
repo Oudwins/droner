@@ -175,10 +175,7 @@ func runQueueUntil(t *testing.T, queue *tasky.Queue[Jobs], waitFn func() bool) {
 	defer cancel()
 
 	consumer := tasky.NewConsumer(queue, tasky.ConsumerOptions{Workers: 1})
-	done := make(chan error, 1)
-	go func() {
-		done <- consumer.Run(ctx)
-	}()
+	consumer.Start(ctx)
 
 	deadline := time.Now().Add(2 * time.Second)
 	completed := false
@@ -190,11 +187,13 @@ func runQueueUntil(t *testing.T, queue *tasky.Queue[Jobs], waitFn func() bool) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !completed {
-		cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer shutdownCancel()
+	if err := consumer.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("consumer shutdown failed: %v", err)
 	}
 
-	err := <-done
+	err := <-consumer.Err()
 	if err != nil && ctx.Err() == nil {
 		t.Fatalf("consumer error: %v", err)
 	}

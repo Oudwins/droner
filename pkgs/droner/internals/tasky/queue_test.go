@@ -202,14 +202,8 @@ func TestConsumerRunAckNack(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	consumer := NewConsumer(queue, ConsumerOptions{Workers: 1})
-	done := make(chan error, 1)
-	go func() {
-		done <- consumer.Run(ctx)
-	}()
+	consumer.Start(context.Background())
 
 	dequeueCh <- struct {
 		jobID   string
@@ -242,9 +236,16 @@ func TestConsumerRunAckNack(t *testing.T) {
 		t.Fatal("timeout waiting for nack")
 	}
 
-	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer shutdownCancel()
+	if err := consumer.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
 	select {
-	case <-done:
+	case err := <-consumer.Err():
+		if err != nil {
+			t.Fatalf("consumer error: %v", err)
+		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for consumer shutdown")
 	}
@@ -274,7 +275,9 @@ func TestConsumerOnErrorStops(t *testing.T) {
 	}
 
 	consumer := NewConsumer(queue, ConsumerOptions{Workers: 1})
-	if err := consumer.Run(context.Background()); !errors.Is(err, stopErr) {
+	consumer.Start(context.Background())
+	err = <-consumer.Err()
+	if !errors.Is(err, stopErr) {
 		t.Fatalf("expected stop error, got %v", err)
 	}
 }
@@ -298,7 +301,8 @@ func TestConsumerDefaultsWorkers(t *testing.T) {
 	}
 
 	consumer := NewConsumer(queue, ConsumerOptions{})
-	_ = consumer.Run(context.Background())
+	consumer.Start(context.Background())
+	<-consumer.Err()
 	if calls != 1 {
 		t.Fatalf("expected 1 dequeue call, got %d", calls)
 	}

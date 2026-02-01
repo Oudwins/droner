@@ -24,6 +24,10 @@ type ConsumerOptions struct {
 type Consumer[T JobID] struct {
 	queue   *Queue[T]
 	options ConsumerOptions
+	started atomic.Bool
+	cancel  context.CancelFunc
+	done    chan struct{}
+	errCh   chan error
 }
 
 func NewQueue[T JobID](cfg QueueConfig[T]) (*Queue[T], error) {
@@ -86,7 +90,46 @@ func NewConsumer[T JobID](queue *Queue[T], options ConsumerOptions) *Consumer[T]
 	}
 }
 
-func (c *Consumer[T]) Run(ctx context.Context) error {
+func (c *Consumer[T]) Start(ctx context.Context) {
+	if !c.started.CompareAndSwap(false, true) {
+		panic("consumer already started")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.done = make(chan struct{})
+	c.errCh = make(chan error, 1)
+	go func() {
+		defer close(c.done)
+		c.errCh <- c.run(runCtx)
+	}()
+}
+
+func (c *Consumer[T]) Shutdown(ctx context.Context) error {
+	if !c.started.Load() {
+		return nil
+	}
+	if c.cancel != nil {
+		c.cancel()
+	}
+	if c.done == nil {
+		return nil
+	}
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Consumer[T]) Err() <-chan error {
+	return c.errCh
+}
+
+func (c *Consumer[T]) run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

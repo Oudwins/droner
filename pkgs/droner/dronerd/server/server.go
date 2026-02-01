@@ -14,6 +14,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -22,6 +23,8 @@ type Server struct {
 	Logbuf     *logbuf.Logger
 	oauth      *oauthStateStore
 	httpServer *http.Server
+	canceler   context.CancelFunc
+	consumer   *tasky.Consumer[core.Jobs]
 }
 
 func New() *Server {
@@ -37,9 +40,10 @@ func New() *Server {
 	}
 
 	return &Server{
-		Base:   base,
-		Logbuf: buffer,
-		oauth:  newOAuthStateStore(),
+		Base:     base,
+		Logbuf:   buffer,
+		oauth:    newOAuthStateStore(),
+		canceler: func() {},
 	}
 }
 
@@ -73,27 +77,51 @@ func (s *Server) Start() error {
 		Handler: s.Router(),
 	}
 	s.httpServer = server
-	err = server.Serve(listener)
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.canceler = cancel
+	consumer := tasky.NewConsumer(s.Base.TaskQueue, tasky.ConsumerOptions{Workers: 1})
+	s.consumer = consumer
+	consumer.Start(ctx)
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- <-consumer.Err()
+	}()
+	go func() {
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		errCh <- err
+	}()
+
+	runErr := <-errCh
+	s.Shutdown()
+	secondErr := <-errCh
+	if runErr == nil {
+		runErr = secondErr
 	}
-	return err
+	return runErr
 }
 
 func (s *Server) Shutdown() {
-	// TODO: Handle graceful shutdown of all componets
+	s.canceler()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if s.consumer != nil {
+		if err := s.consumer.Shutdown(ctx); err != nil {
+			s.Base.Logger.Error("[shutdown] Consumer shutdown failed", "error", err)
+		}
+	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if s.httpServer == nil {
-			s.Base.Logger.Error("shutdown failed", "error", errors.New("server not initialized"))
-			return
-		}
+	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
-			s.Base.Logger.Error("shutdown failed", "error", err)
+			if !errors.Is(err, http.ErrServerClosed) {
+				s.Base.Logger.Error("[shutdown] server shutdown failed", "error", err)
+			}
 		}
-	}()
+	}
 
 	if s.Base != nil {
 		s.Base.Close()
