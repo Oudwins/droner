@@ -14,9 +14,8 @@ type Session struct {
 	SimpleID     string
 	Status       SessionStatus
 	RepoPath     string
-	WorktreePath sql.NullString
-	AgentModel   sql.NullString
-	AgentPrompt  sql.NullString
+	WorktreePath string
+	Payload      sql.NullString
 	Error        sql.NullString
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
