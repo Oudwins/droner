@@ -14,6 +14,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 	"github.com/Oudwins/zog/zhttp"
@@ -50,7 +51,14 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	// LOGIC
 	baseName := filepath.Base(payload.Path)
 	if payload.SessionID == "" {
-		generatedID, err := generateSessionID(s.Workspace, baseName, worktreeRoot)
+		generatedID, err := sessionids.New(baseName, &sessionids.GeneratorConfig{
+			MaxAttempts: 100,
+			IsValid: func(id string) error {
+				worktreePath := filepath.Join(worktreeRoot, baseName+"#"+id)
+				_, err := s.Workspace.Stat(worktreePath)
+				return err
+			},
+		})
 		if err != nil || generatedID == "" {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
 			return
@@ -103,26 +111,6 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		SessionID: payload.SessionID,
 		TaskId:    taskId.(string),
 	}, Render.Status(http.StatusAccepted))
-}
-
-func generateSessionID(host workspace.Host, baseName string, worktreeRoot string) (string, error) {
-	random := rand.New(rand.NewSource(time.Now().UnixNano()))
-	letters := []rune("abcdefghijklmnopqrstuvwxyz")
-	for range 100 {
-		chars := make([]rune, 3)
-		for i := range chars {
-			chars[i] = letters[random.Intn(len(letters))]
-		}
-		candidate := fmt.Sprintf("%s-%02d", string(chars), random.Intn(100))
-		worktreePath := filepath.Join(worktreeRoot, baseName+"#"+candidate)
-		if _, err := host.Stat(worktreePath); err != nil {
-			if os.IsNotExist(err) {
-				return candidate, nil
-			}
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("no available session id")
 }
 
 func sessionIDFromName(worktreeName string) string {
