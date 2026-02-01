@@ -1,7 +1,10 @@
 package schemas
 
 import (
+	"path/filepath"
+
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 
 	z "github.com/Oudwins/zog"
 )
@@ -17,9 +20,44 @@ type SessionCreateRequest struct {
 	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
 }
 
+var SessionCreateSchema = z.Struct(z.Shape{
+	"Path": z.String().Required().Trim().Transform(func(valPtr *string, ctx z.Ctx) error {
+		*valPtr = filepath.Clean(*valPtr)
+		return nil
+	},
+	).TestFunc(func(valPtr *string, ctx z.Ctx) bool {
+		w, ok := ctx.Get("workspace").(workspace.Host)
+		if !ok {
+			ctx.AddIssue(ctx.Issue().SetMessage("Something wen't wrong trying to get workspace from context. Internal error"))
+			return true
+		}
+		file, err := w.Stat(*valPtr)
+		if err != nil {
+			ctx.AddIssue(ctx.Issue().SetMessage("Failed to stat path"))
+			return true
+		}
+
+		if !file.IsDir() {
+			ctx.AddIssue(ctx.Issue().SetMessage("Path is not a directory"))
+			return true
+		}
+		err = w.GitIsInsideWorkTree(*valPtr)
+		if err != nil {
+			ctx.AddIssue(ctx.Issue().SetMessage("Path is not to a git repo").SetError(err))
+		}
+		return true
+	}, z.Message("Path is not a git repo")),
+	"SessionID": z.String().Optional().Trim(),
+	"Agent": z.Ptr(z.Struct(z.Shape{
+		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
+		"Prompt": z.String().Optional().Trim(),
+	})),
+})
+
 type SessionCreateResponse struct {
-	WorktreePath string `json:"worktree_path"`
-	SessionID    string `json:"session_id"`
+	WorktreePath string `json:"worktreePath"`
+	SessionID    string `json:"sessionId"`
+	TaskID       string `json:"taskId"`
 }
 
 type SessionDeleteRequest struct {
@@ -31,25 +69,6 @@ type SessionDeleteResponse struct {
 	WorktreePath string `json:"worktree_path"`
 	SessionID    string `json:"session_id"`
 }
-
-var SessionCreateSchema = z.Struct(z.Shape{
-	"Path":      z.String().Required().Trim(),
-	"SessionID": z.String().Optional().Trim(),
-	"Agent": z.Ptr(z.Struct(z.Shape{
-		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
-		"Prompt": z.String().Optional().Trim(),
-	})),
-}).Transform(func(valPtr any, _ z.Ctx) error {
-	request := valPtr.(*SessionCreateRequest)
-	if request.Agent == nil {
-		request.Agent = &SessionAgentConfig{Model: conf.GetConfig().Agent.DefaultModel}
-		return nil
-	}
-	if request.Agent.Model == "" {
-		request.Agent.Model = conf.GetConfig().Agent.DefaultModel
-	}
-	return nil
-})
 
 var SessionDeleteSchema = z.Struct(z.Shape{
 	"Path":      z.String().Optional().Trim(),

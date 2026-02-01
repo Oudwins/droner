@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -12,9 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
+	"github.com/Oudwins/zog/zhttp"
 
 	z "github.com/Oudwins/zog"
 )
@@ -31,41 +34,11 @@ func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
-	var request schemas.SessionCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid JSON", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
+	var payload schemas.SessionCreateRequest
 
-	request.Path = strings.TrimSpace(request.Path)
-	request.SessionID = strings.TrimSpace(request.SessionID)
-	if request.Path == "" {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path is required", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-	if request.Agent == nil {
-		request.Agent = &schemas.SessionAgentConfig{}
-	}
-	request.Agent.Model = strings.TrimSpace(request.Agent.Model)
-	request.Agent.Prompt = strings.TrimSpace(request.Agent.Prompt)
-	if request.Agent.Model == "" {
-		request.Agent.Model = conf.GetConfig().Agent.DefaultModel
-	}
-
-	repoPath := filepath.Clean(request.Path)
-	info, err := s.Workspace.Stat(repoPath)
-	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path not found", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-	if !info.IsDir() {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path not a directory", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-
-	if err := s.Workspace.GitIsInsideWorkTree(repoPath); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "path not to a git repo", nil), Render.Status(http.StatusBadRequest))
-		return
+	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Workspace))
+	if errs != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
 	}
 
 	worktreeRoot, _ := expandPath(s.Base.Config.Worktrees.Dir)
@@ -74,39 +47,40 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseName := filepath.Base(repoPath)
-	if request.SessionID == "" {
+	// LOGIC
+	baseName := filepath.Base(payload.Path)
+	if payload.SessionID == "" {
 		generatedID, err := generateSessionID(s.Workspace, baseName, worktreeRoot)
-		if err != nil {
+		if err != nil || generatedID == "" {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		request.SessionID = generatedID
+		payload.SessionID = generatedID
 	}
 
-	worktreeName := baseName + "#" + request.SessionID
+	worktreeName := baseName + "#" + payload.SessionID
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
-
-	if request.SessionID != "" {
-		if _, err := s.Workspace.Stat(worktreePath); err == nil {
-			response, err := s.enqueueCreateSession(request, repoPath, worktreePath, true)
-			if err != nil {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-				return
-			}
-			response.Result = &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}
-			RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
-			return
-		}
-	}
-
-	response, err := s.enqueueCreateSession(request, repoPath, worktreePath, false)
-	if err != nil {
+	if _, err := s.Workspace.Stat(worktreePath); err != nil {
+		s.Logbuf.Error("Stat at worktree path failed")
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
-	response.Result = &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}
-	RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
+
+	// Enqueue task
+	bytes, _ := json.Marshal(payload)
+	taskId, err := s.tasky.Enqueue(context.Background(), tasky.NewTask(tasks.JobCreateSession, bytes))
+	if err != nil {
+		s.Logbuf.Error("Failed to enque task", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+	}
+
+	// Response
+	res := schemas.SessionCreateResponse{
+		WorktreePath: worktreePath,
+		SessionID:    payload.SessionID,
+		TaskID:       taskId.(string),
+	}
+	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
 }
 
 func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +209,7 @@ type deleteSessionPayload struct {
 	SessionID    string `json:"session_id"`
 }
 
-func (s *Server) enqueueCreateSession(request schemas.SessionCreateRequest, repoPath string, worktreePath string, existing bool) (*schemas.TaskResponse, error) {
+func (s *Server) enqueueCreateSession(payload schemas.SessionCreateRequest, repoPath string, worktreePath string, existing bool) (*schemas.TaskResponse, error) {
 	payload := createSessionPayload{
 		RepoPath:     repoPath,
 		WorktreePath: worktreePath,
@@ -245,9 +219,9 @@ func (s *Server) enqueueCreateSession(request schemas.SessionCreateRequest, repo
 	}
 	return s.tasks.Enqueue(taskTypeSessionCreate, payload, func(ctx context.Context) (any, error) {
 		if existing {
-			return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+			return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
 		}
-		return s.runCreateSession(ctx, request, repoPath, worktreePath)
+		return s.runCreateSession(ctx, payload, repoPath, worktreePath)
 	})
 }
 
@@ -257,13 +231,13 @@ func (s *Server) enqueueDeleteSession(request schemas.SessionDeleteRequest, work
 		SessionID:    request.SessionID,
 	}
 	return s.tasks.Enqueue(taskTypeSessionDelete, payload, func(ctx context.Context) (any, error) {
-		return s.runDeleteSession(ctx, request, worktreePath)
+		return s.runDeleteSession(ctx, payload, worktreePath)
 	})
 }
 
 func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if err := s.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+	if err := s.Workspace.CreateGitWorktree(payload.SessionID, repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
@@ -271,18 +245,18 @@ func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCr
 		return nil, err
 	}
 
-	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
+	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, payload.Agent.Model, payload.Agent.Prompt); err != nil {
 		return nil, err
 	}
 
 	if remoteURL, err := s.Workspace.GetRemoteURL(repoPath); err == nil {
-		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
+		if err := s.subs.subscribe(ctx, remoteURL, payload.SessionID, s.Base.Logger, func(sessionID string) {
 			s.deleteSessionBySessionID(sessionID)
 		}); err != nil {
 			s.Base.Logger.Warn("Failed to subscribe to remote events",
 				"error", err,
 				"remote_url", remoteURL,
-				"session_id", request.SessionID,
+				"session_id", payload.SessionID,
 			)
 		}
 	} else {
@@ -292,13 +266,13 @@ func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCr
 		)
 	}
 
-	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+	return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
 }
 
 func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDeleteRequest, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if request.SessionID == "" {
-		request.SessionID = sessionIDFromName(worktreeName)
+	if payload.SessionID == "" {
+		payload.SessionID = sessionIDFromName(worktreeName)
 	}
 
 	commonGitDir, err := s.Workspace.GitCommonDirFromWorktree(worktreePath)
@@ -307,11 +281,11 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 	}
 
 	if remoteURL, err := s.Workspace.GetRemoteURLFromWorktree(worktreePath); err == nil {
-		if err := s.subs.unsubscribe(ctx, remoteURL, request.SessionID, s.Base.Logger); err != nil {
+		if err := s.subs.unsubscribe(ctx, remoteURL, payload.SessionID, s.Base.Logger); err != nil {
 			s.Base.Logger.Warn("Failed to unsubscribe from remote events",
 				"error", err,
 				"remote_url", remoteURL,
-				"session_id", request.SessionID,
+				"session_id", payload.SessionID,
 			)
 		}
 	}
@@ -324,16 +298,16 @@ func (s *Server) runDeleteSession(ctx context.Context, request schemas.SessionDe
 		return nil, err
 	}
 
-	if err := s.Workspace.DeleteGitBranch(commonGitDir, request.SessionID); err != nil {
+	if err := s.Workspace.DeleteGitBranch(commonGitDir, payload.SessionID); err != nil {
 		return nil, err
 	}
 
-	return &schemas.TaskResult{SessionID: request.SessionID, WorktreePath: worktreePath}, nil
+	return &schemas.TaskResult{SessionID: payload.SessionID, WorktreePath: worktreePath}, nil
 }
 
 func resolveDeleteWorktreePath(host workspace.Host, worktreeRoot string, request schemas.SessionDeleteRequest) (string, error) {
-	if request.Path != "" {
-		worktreePath := filepath.Clean(request.Path)
+	if payload.Path != "" {
+		worktreePath := filepath.Clean(payload.Path)
 		if _, err := host.Stat(worktreePath); err != nil {
 			if os.IsNotExist(err) {
 				return "", os.ErrNotExist

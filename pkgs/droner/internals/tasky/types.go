@@ -54,8 +54,8 @@ func NewJob[T JobID](id T, config JobConfig[T]) Job[T] {
 	}
 }
 
-func NewTask[T JobID](jobID T, payload []byte) Task[T] {
-	return Task[T]{
+func NewTask[T JobID](jobID T, payload []byte) *Task[T] {
+	return &Task[T]{
 		JobID:   jobID,
 		Payload: payload,
 	}
