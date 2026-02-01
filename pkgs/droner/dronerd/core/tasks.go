@@ -3,10 +3,12 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
@@ -23,6 +25,17 @@ const (
 	JobDeleteSession Jobs = "session_create_job"
 )
 
+// file system will do weird things if we pass a sessionId with /
+func sessionIdToPathIdentifier(id string) string {
+	return strings.ReplaceAll(id, "/", ".") // guranteed to have no more than one / together
+}
+
+// func pathIndentifierToSessionId(id string) string {
+// 	return strings.ReplaceAll(id, ".", "/")
+// }
+
+var delimiter = ".."
+
 func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig[Jobs]{
@@ -35,7 +48,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			}
 
 			repoName := filepath.Base(payload.Path)
-			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+"."+payload.SessionID)
+			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
@@ -49,19 +62,18 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return err
 			}
 
-			// TODO: try to subscribe for updates to this branch. Delete it once its removed. Cleanup
-			//
-			// if remoteURL, err := s.Workspace.GetRemoteURL(repoPath); err == nil {
-			// 	if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
-			// 		s.deleteSessionBySessionID(sessionID)
-			// 	}); err != nil {
-			// 		s.Base.Logger.Warn("Failed to subscribe to remote events",
-			// 			"error", err,
-			// 			"remote_url", remoteURL,
-			// 			"session_id", request.SessionID,
-			// 		)
-			// 	}
-
+			if remoteURL, err := ws.GetRemoteURL(payload.Path); err != nil {
+				err := base.Subscriptions.subscribe(context.Background(), remoteURL, payload.SessionID, func(sessionId string) {
+					data, _ := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionId})
+					taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobDeleteSession, data))
+					if err != nil {
+						base.Logger.Error("[queue] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+					}
+				})
+				if err != nil {
+					base.Logger.Error("[queue] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+				}
+			}
 			// DO STUFF
 			return nil
 		},
