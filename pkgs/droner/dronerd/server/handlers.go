@@ -70,7 +70,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	// Enqueue task
 	bytes, _ := json.Marshal(payload)
-	taskId, err := s.tasky.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
+	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
 	if err != nil {
 		s.Logbuf.Error("Failed to enque task", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
@@ -95,7 +95,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bytes, _ := json.Marshal(payload)
-	taskId, err := s.tasky.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
+	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
 	if err != nil {
 		s.Base.Logger.Error("Failed to enque job", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))

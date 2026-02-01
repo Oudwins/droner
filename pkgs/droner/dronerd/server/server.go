@@ -14,7 +14,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -23,16 +22,10 @@ type Server struct {
 	Logbuf     *logbuf.Logger
 	oauth      *oauthStateStore
 	httpServer *http.Server
-	tasky      *tasky.Queue[core.Jobs]
 }
 
 func New() *Server {
 	base := core.New()
-	dataDir := base.Config.Server.DataDir
-	if dataDir != "" {
-		dataDir = filepath.Clean(dataDir)
-		base.Config.Server.DataDir = dataDir
-	}
 	buffer := logbuf.New(
 		slog.String("version", base.Config.Version),
 		slog.Int("port", base.Env.PORT),
@@ -43,14 +36,10 @@ func New() *Server {
 		assert.AssertNil(err, "[SERVER] Failed to create data directory")
 	}
 
-	q, err := core.NewQueue(base)
-	assert.AssertNil(err, "[SERVER] Failed to initialize queue")
-
 	return &Server{
 		Base:   base,
 		Logbuf: buffer,
 		oauth:  newOAuthStateStore(),
-		tasky:  q,
 	}
 }
 

@@ -2,6 +2,7 @@ package schemas
 
 import (
 	"path/filepath"
+	"regexp"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
@@ -20,9 +21,11 @@ type SessionCreateRequest struct {
 	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
 }
 
+var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/-]+$`)
+
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform).TestFunc(isGitRepoTest, z.Message("Path is not a git repo")),
-	"SessionID": z.String().Optional().Trim(),
+	"SessionID": z.String().Optional().Trim().Match(sessionIDRegex),
 	"Agent": z.Ptr(z.Struct(z.Shape{
 		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
 		"Prompt": z.String().Optional().Trim(),
