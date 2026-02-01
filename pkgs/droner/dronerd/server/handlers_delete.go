@@ -19,7 +19,7 @@ func (s *Server) deleteSessionBySessionID(sessionID string) {
 		return
 	}
 
-	worktreePath, err := resolveDeleteWorktreePath(worktreeRoot, schemas.SessionDeleteRequest{SessionID: sessionID})
+	worktreePath, err := resolveDeleteWorktreePath(s.Workspace, worktreeRoot, schemas.SessionDeleteRequest{SessionID: sessionID})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			s.Base.Logger.Warn("Worktree not found for event-driven cleanup",

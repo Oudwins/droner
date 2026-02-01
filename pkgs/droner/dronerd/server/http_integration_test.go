@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,59 +23,67 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/testutil"
 )
 
-type execBehavior struct {
+type testHost struct {
 	failGitCheck bool
 }
 
-func setExecCommandFake(t *testing.T, behavior execBehavior) {
-	original := execCommand
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		if name == "git" {
-			if hasArgs(args, "rev-parse", "--is-inside-work-tree") {
-				if behavior.failGitCheck {
-					return exec.Command("sh", "-c", "printf false; exit 1")
-				}
-				return exec.Command("sh", "-c", "printf true")
-			}
-			if hasArgs(args, "rev-parse", "--git-common-dir") {
-				return exec.Command("sh", "-c", "printf .git")
-			}
-			if hasArgs(args, "remote", "get-url", "origin") {
-				return exec.Command("sh", "-c", "printf git@github.com:org/repo.git")
-			}
-			return exec.Command("sh", "-c", "true")
-		}
-		if name == "tmux" {
-			return exec.Command("sh", "-c", "true")
-		}
-		if name == "sh" {
-			return exec.Command("sh", "-c", "true")
-		}
-		return exec.Command("sh", "-c", "true")
-	}
-
-	t.Cleanup(func() {
-		execCommand = original
-	})
+func (h testHost) Stat(path string) (os.FileInfo, error) {
+	return os.Stat(path)
 }
 
-func hasArgs(args []string, needle ...string) bool {
-	if len(needle) == 0 {
-		return true
+func (h testHost) ReadDir(path string) ([]os.DirEntry, error) {
+	return os.ReadDir(path)
+}
+
+func (h testHost) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+func (h testHost) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+func (h testHost) GitIsInsideWorkTree(repoPath string) error {
+	if h.failGitCheck {
+		return errors.New("not a git worktree")
 	}
-	for i := 0; i+len(needle) <= len(args); i++ {
-		match := true
-		for j := range needle {
-			if args[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
+	return nil
+}
+
+func (h testHost) CreateGitWorktree(sessionID string, repoPath string, worktreePath string) error {
+	return nil
+}
+
+func (h testHost) RemoveGitWorktree(worktreePath string) error {
+	return nil
+}
+
+func (h testHost) GitCommonDirFromWorktree(worktreePath string) (string, error) {
+	return filepath.Join(worktreePath, ".git"), nil
+}
+
+func (h testHost) DeleteGitBranch(commonGitDir string, sessionID string) error {
+	return nil
+}
+
+func (h testHost) GetRemoteURL(repoPath string) (string, error) {
+	return "git@github.com:org/repo.git", nil
+}
+
+func (h testHost) GetRemoteURLFromWorktree(worktreePath string) (string, error) {
+	return "git@github.com:org/repo.git", nil
+}
+
+func (h testHost) RunWorktreeSetup(repoPath string, worktreePath string) error {
+	return nil
+}
+
+func (h testHost) CreateTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
+	return nil
+}
+
+func (h testHost) KillTmuxSession(sessionName string) error {
+	return nil
 }
 
 func newTestServer(t *testing.T) (*Server, *taskStore) {
@@ -110,10 +118,11 @@ func newTestServer(t *testing.T) (*Server, *taskStore) {
 			Env:    dataEnv,
 			Logger: logger,
 		},
-		Logbuf: logbuf.New(),
-		subs:   newSubscriptionManager(),
-		oauth:  newOAuthStateStore(),
-		tasks:  manager,
+		Logbuf:    logbuf.New(),
+		subs:      newSubscriptionManager(),
+		oauth:     newOAuthStateStore(),
+		tasks:     manager,
+		Workspace: testHost{},
 	}
 
 	t.Cleanup(func() {
@@ -143,7 +152,6 @@ func newTestServer(t *testing.T) (*Server, *taskStore) {
 
 func TestHTTPVersion(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -171,7 +179,6 @@ func TestHTTPVersion(t *testing.T) {
 
 func TestHTTPCreateSessionInvalidJSON(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -189,7 +196,6 @@ func TestHTTPCreateSessionInvalidJSON(t *testing.T) {
 
 func TestHTTPCreateSessionValidation(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -207,7 +213,6 @@ func TestHTTPCreateSessionValidation(t *testing.T) {
 
 func TestHTTPCreateSessionPathNotFound(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -226,7 +231,7 @@ func TestHTTPCreateSessionPathNotFound(t *testing.T) {
 
 func TestHTTPCreateSessionNotGitRepo(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{failGitCheck: true})
+	server.Workspace = testHost{failGitCheck: true}
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -246,7 +251,6 @@ func TestHTTPCreateSessionNotGitRepo(t *testing.T) {
 
 func TestHTTPCreateSessionSuccess(t *testing.T) {
 	server, store := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -281,7 +285,6 @@ func TestHTTPCreateSessionSuccess(t *testing.T) {
 
 func TestHTTPDeleteSession(t *testing.T) {
 	server, store := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()
@@ -347,7 +350,6 @@ func TestHTTPDeleteSession(t *testing.T) {
 
 func TestHTTPTaskStatus(t *testing.T) {
 	server, _ := newTestServer(t)
-	setExecCommandFake(t, execBehavior{})
 
 	client := httptest.NewServer(server.Router())
 	defer client.Close()

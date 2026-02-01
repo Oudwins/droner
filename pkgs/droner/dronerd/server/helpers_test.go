@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 )
 
 func TestHelperExpandPath(t *testing.T) {
@@ -41,7 +42,8 @@ func TestHelperExpandPath(t *testing.T) {
 
 func TestHelperGenerateSessionID(t *testing.T) {
 	root := t.TempDir()
-	id, err := generateSessionID("repo", root)
+	host := workspace.NewLocalHost()
+	id, err := generateSessionID(host, "repo", root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +66,8 @@ func TestHelperSessionIDFromName(t *testing.T) {
 
 func TestHelperFindWorktreeBySessionID(t *testing.T) {
 	root := t.TempDir()
-	if _, err := findWorktreeBySessionID(root, "abc"); err == nil {
+	host := workspace.NewLocalHost()
+	if _, err := findWorktreeBySessionID(host, root, "abc"); err == nil {
 		t.Fatalf("expected error for missing session")
 	}
 
@@ -72,7 +75,7 @@ func TestHelperFindWorktreeBySessionID(t *testing.T) {
 	if err := os.MkdirAll(first, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path, err := findWorktreeBySessionID(root, "abc")
+	path, err := findWorktreeBySessionID(host, root, "abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,19 +87,20 @@ func TestHelperFindWorktreeBySessionID(t *testing.T) {
 	if err := os.MkdirAll(second, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := findWorktreeBySessionID(root, "abc"); err == nil {
+	if _, err := findWorktreeBySessionID(host, root, "abc"); err == nil {
 		t.Fatalf("expected error for multiple matches")
 	}
 }
 
 func TestHelperResolveDeleteWorktreePath(t *testing.T) {
 	root := t.TempDir()
+	host := workspace.NewLocalHost()
 	path := filepath.Join(root, "repo#abc")
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	got, err := resolveDeleteWorktreePath(root, schemas.SessionDeleteRequest{Path: path})
+	got, err := resolveDeleteWorktreePath(host, root, schemas.SessionDeleteRequest{Path: path})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +108,7 @@ func TestHelperResolveDeleteWorktreePath(t *testing.T) {
 		t.Fatalf("expected %q, got %q", path, got)
 	}
 
-	got, err = resolveDeleteWorktreePath(root, schemas.SessionDeleteRequest{SessionID: "abc"})
+	got, err = resolveDeleteWorktreePath(host, root, schemas.SessionDeleteRequest{SessionID: "abc"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,7 +116,7 @@ func TestHelperResolveDeleteWorktreePath(t *testing.T) {
 		t.Fatalf("expected %q, got %q", path, got)
 	}
 
-	_, err = resolveDeleteWorktreePath(root, schemas.SessionDeleteRequest{SessionID: "missing"})
+	_, err = resolveDeleteWorktreePath(host, root, schemas.SessionDeleteRequest{SessionID: "missing"})
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected os.ErrNotExist, got %v", err)
 	}
