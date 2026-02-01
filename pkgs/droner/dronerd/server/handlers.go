@@ -85,37 +85,25 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
-	var reqbody schemas.SessionDeleteRequest
-	errs := schemas.SessionDeleteSchema.Parse(zhttp.Request(r), &reqbody)
+	var payload schemas.SessionDeleteRequest
+	errs := schemas.SessionDeleteSchema.Parse(zhttp.Request(r), &payload)
 	if errs != nil {
 		payload := JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs))
 		RenderJSON(w, r, payload, Render.Status(http.StatusBadRequest))
 		return
 	}
 
-	worktreeRoot := s.Base.Config.Worktrees.Dir
-
-	worktreePath, err := resolveDeleteWorktreePath(s.Workspace, worktreeRoot, reqbody)
+	bytes, _ := json.Marshal(payload)
+	taskId, err := s.tasky.Enqueue(context.Background(), tasky.NewTask(tasks.JobDeleteSession, bytes))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Couldn't find the worktree", nil), Render.Status(http.StatusNotFound))
-			return
-		}
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
-	worktreeName := filepath.Base(worktreePath)
-	if reqbody.SessionID == "" {
-		reqbody.SessionID = sessionIDFromName(worktreeName)
-	}
 
-	// response, err := s.enqueueDeleteSession(reqbody, worktreePath)
-	// if err != nil {
-	// 	RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-	// 	return
-	// }
-	// response.Result = &schemas.TaskResult{SessionID: reqbody.SessionID, WorktreePath: worktreePath}
-	// RenderJSON(w, r, response, Render.Status(http.StatusAccepted))
+	RenderJSON(w, r, schemas.SessionDeleteResponse{
+		SessionID: payload.SessionID,
+		TaskId:    taskId.(string),
+	}, Render.Status(http.StatusAccepted))
 }
 
 func generateSessionID(host workspace.Host, baseName string, worktreeRoot string) (string, error) {
