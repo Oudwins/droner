@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -19,6 +20,7 @@ type BaseServer struct {
 	Workspace     workspace.Host
 	TaskQueue     *tasky.Queue[Jobs]
 	Subscriptions *subscriptionManager
+	DB            *db.Queries
 }
 
 func New() *BaseServer {
@@ -39,6 +41,10 @@ func New() *BaseServer {
 		Logger:    logger,
 		Workspace: w,
 	}
+
+	queries, err := InitDB(config)
+	assert.AssertNil(err, "[CORE] Failed to initialize DB")
+	base.DB = queries
 
 	queue, err := NewQueue(base)
 	assert.AssertNil(err, "[CORE] Failed to initialize queue")
