@@ -1,5 +1,0 @@
-package remotes
-
-func NewRemote() {
-
-}

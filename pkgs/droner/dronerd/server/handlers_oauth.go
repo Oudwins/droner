@@ -88,7 +88,7 @@ func newOAuthStateStore() *oauthStateStore {
 }
 
 func (s *oauthStateStore) create(deviceCode string, interval time.Duration, expiresAt time.Time) (string, error) {
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		state, err := randomString(16)
 		if err != nil {
 			return "", err
