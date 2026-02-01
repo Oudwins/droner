@@ -3,9 +3,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   simple_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'deleted')),
   repo_path TEXT NOT NULL,
-  worktree_path TEXT,
-  agent_model TEXT,
-  agent_prompt TEXT,
+  worktree_path TEXT NOT NULL,
+  payload TEXT,
   error TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
