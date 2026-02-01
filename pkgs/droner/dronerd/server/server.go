@@ -16,7 +16,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
-	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -28,7 +27,6 @@ type Server struct {
 	tasks      *taskManager
 	httpServer *http.Server
 	tasky      *tasky.Queue[tasks.Jobs]
-	Workspace  workspace.Host
 }
 
 func New() *Server {
@@ -55,13 +53,12 @@ func New() *Server {
 	assert.AssertNil(err, "[SERVER] Failed to initialize queue")
 
 	return &Server{
-		Base:      base,
-		Logbuf:    buffer,
-		subs:      newSubscriptionManager(),
-		oauth:     newOAuthStateStore(),
-		tasks:     manager,
-		tasky:     q,
-		Workspace: workspace.NewLocalHost(),
+		Base:   base,
+		Logbuf: buffer,
+		subs:   newSubscriptionManager(),
+		oauth:  newOAuthStateStore(),
+		tasks:  manager,
+		tasky:  q,
 	}
 }
 

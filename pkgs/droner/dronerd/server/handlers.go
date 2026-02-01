@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/tasks"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
@@ -36,14 +34,14 @@ func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	var payload schemas.SessionCreateRequest
 
-	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Workspace))
+	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Base.Workspace))
 	if errs != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
 		return
 	}
 
 	worktreeRoot := s.Base.Config.Worktrees.Dir
-	if err := s.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
+	if err := s.Base.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -55,7 +53,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
 				worktreePath := filepath.Join(worktreeRoot, baseName+"#"+id)
-				_, err := s.Workspace.Stat(worktreePath)
+				_, err := s.Base.Workspace.Stat(worktreePath)
 				return err
 			},
 		})
@@ -68,7 +66,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	worktreeName := baseName + "#" + payload.SessionID
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
-	if _, err := s.Workspace.Stat(worktreePath); err != nil {
+	if _, err := s.Base.Workspace.Stat(worktreePath); err != nil {
 		s.Logbuf.Error("Stat at worktree path failed")
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -103,6 +101,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	bytes, _ := json.Marshal(payload)
 	taskId, err := s.tasky.Enqueue(context.Background(), tasky.NewTask(tasks.JobDeleteSession, bytes))
 	if err != nil {
+		s.Base.Logger.Error("Failed to enque job", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -112,6 +111,8 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 		TaskId:    taskId.(string),
 	}, Render.Status(http.StatusAccepted))
 }
+
+// TODO: cleanup this fns
 
 func sessionIDFromName(worktreeName string) string {
 	parts := strings.SplitN(worktreeName, "#", 2)
@@ -149,19 +150,19 @@ func findWorktreeBySessionID(host workspace.Host, worktreeRoot string, sessionID
 
 func (s *Server) runCreateSession(ctx context.Context, request schemas.SessionCreateRequest, repoPath string, worktreePath string) (*schemas.TaskResult, error) {
 	worktreeName := filepath.Base(worktreePath)
-	if err := s.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
+	if err := s.Base.Workspace.CreateGitWorktree(request.SessionID, repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := s.Workspace.RunWorktreeSetup(repoPath, worktreePath); err != nil {
+	if err := s.Base.Workspace.RunWorktreeSetup(repoPath, worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := s.Workspace.CreateTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
+	if err := s.Base.Workspace.CreateTmuxSession(worktreeName, worktreePath, request.Agent.Model, request.Agent.Prompt); err != nil {
 		return nil, err
 	}
 
-	if remoteURL, err := s.Workspace.GetRemoteURL(repoPath); err == nil {
+	if remoteURL, err := s.Base.Workspace.GetRemoteURL(repoPath); err == nil {
 		if err := s.subs.subscribe(ctx, remoteURL, request.SessionID, s.Base.Logger, func(sessionID string) {
 			s.deleteSessionBySessionID(sessionID)
 		}); err != nil {
@@ -187,12 +188,12 @@ func (s *Server) runDeleteSession(ctx context.Context, payload schemas.SessionDe
 		payload.SessionID = sessionIDFromName(worktreeName)
 	}
 
-	commonGitDir, err := s.Workspace.GitCommonDirFromWorktree(worktreePath)
+	commonGitDir, err := s.Base.Workspace.GitCommonDirFromWorktree(worktreePath)
 	if err != nil {
 		return nil, err
 	}
 
-	if remoteURL, err := s.Workspace.GetRemoteURLFromWorktree(worktreePath); err == nil {
+	if remoteURL, err := s.Base.Workspace.GetRemoteURLFromWorktree(worktreePath); err == nil {
 		if err := s.subs.unsubscribe(ctx, remoteURL, payload.SessionID, s.Base.Logger); err != nil {
 			s.Base.Logger.Warn("Failed to unsubscribe from remote events",
 				"error", err,
@@ -202,15 +203,15 @@ func (s *Server) runDeleteSession(ctx context.Context, payload schemas.SessionDe
 		}
 	}
 
-	if err := s.Workspace.KillTmuxSession(worktreeName); err != nil {
+	if err := s.Base.Workspace.KillTmuxSession(worktreeName); err != nil {
 		return nil, err
 	}
 
-	if err := s.Workspace.RemoveGitWorktree(worktreePath); err != nil {
+	if err := s.Base.Workspace.RemoveGitWorktree(worktreePath); err != nil {
 		return nil, err
 	}
 
-	if err := s.Workspace.DeleteGitBranch(commonGitDir, payload.SessionID); err != nil {
+	if err := s.Base.Workspace.DeleteGitBranch(commonGitDir, payload.SessionID); err != nil {
 		return nil, err
 	}
 
