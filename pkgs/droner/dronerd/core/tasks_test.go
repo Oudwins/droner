@@ -274,8 +274,8 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	}
 
 	runQueueUntil(t, base.TaskQueue, func() bool {
-		_, err := base.DB.GetSessionBySimpleID(context.Background(), payload.SessionID)
-		return err == nil
+		row, err := base.DB.GetSessionBySimpleID(context.Background(), payload.SessionID)
+		return err == nil && row.Status == db.SessionStatusRunning
 	})
 
 	session := waitForSessionStatusBySimpleID(t, base.DB, payload.SessionID, db.SessionStatusRunning)
