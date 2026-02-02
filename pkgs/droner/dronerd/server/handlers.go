@@ -4,14 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
-	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -21,19 +20,18 @@ import (
 	z "github.com/Oudwins/zog"
 )
 
-func (s *Server) HandlerVersion(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlerVersion(_ *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(s.Base.Config.Version))
 }
 
-func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlerShutdown(_ *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	s.Shutdown()
 	_, _ = w.Write([]byte("Shutdown"))
 }
 
-func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
-	logger := logbuf.FromContext(r.Context())
+func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	logger.Info("Creating session")
 	var payload schemas.SessionCreateRequest
 
@@ -56,9 +54,13 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		generatedID, err := sessionids.New(baseName, &sessionids.GeneratorConfig{
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
-				worktreePath := filepath.Join(worktreeRoot, baseName+"#"+id)
+				worktreePath := filepath.Join(worktreeRoot, baseName+".."+id) // TODO: this conversion is done in multiple places. Brittle
 				_, err := s.Base.Workspace.Stat(worktreePath)
-				return err
+				if err == nil {
+					return errors.New("Session folder already exists")
+				}
+
+				return nil
 			},
 		})
 		if err != nil {
@@ -74,10 +76,10 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		payload.SessionID = generatedID
 	}
 
-	worktreeName := baseName + "#" + payload.SessionID
+	worktreeName := baseName + "..." + payload.SessionID // TODO: again duplicated logic here
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 	if _, err := s.Base.Workspace.Stat(worktreePath); err != nil {
-		s.Logbuf.Error("Stat at worktree path failed")
+		logger.Error("Stat at worktree path failed")
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -109,7 +111,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		Error:        sql.NullString{},
 	})
 	if err != nil {
-		s.Logbuf.Error("Failed to create session record", slog.String("error", err.Error()))
+		logger.Error("Failed to create session record", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
@@ -139,7 +141,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
 }
 
-func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	var payload schemas.SessionDeleteRequest
 	errs := schemas.SessionDeleteSchema.Parse(zhttp.Request(r), &payload)
 	if errs != nil {
@@ -151,7 +153,7 @@ func (s *Server) HandlerDeleteSession(w http.ResponseWriter, r *http.Request) {
 	bytes, _ := json.Marshal(payload)
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
 	if err != nil {
-		s.Base.Logger.Error("Failed to enque job", slog.String("error", err.Error()))
+		logger.Error("Failed to enque job", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}

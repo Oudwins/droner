@@ -18,5 +18,12 @@ func InitLogger(config *conf.Config) (*slog.Logger, *os.File) {
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	assert.AssertNil(err, "[CORE] Failed to open log file")
 	logWriter := io.MultiWriter(os.Stdout, logFile)
-	return slog.New(slog.NewJSONHandler(logWriter, nil)), logFile
+	handler := slog.NewJSONHandler(logWriter, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+	})
+	logger := slog.New(handler)
+
+	slog.SetDefault(logger)
+	return logger, logFile
 }

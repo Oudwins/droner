@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -175,7 +176,7 @@ func (s *oauthStateStore) updatePoll(state string, interval time.Duration) {
 	s.mu.Unlock()
 }
 
-func (s *Server) HandlerGitHubOAuthStart(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlerGitHubOAuthStart(_ *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	config := githubOAuthConfig()
 	deviceResp, err := s.requestGitHubDeviceCode(r, config)
 	if err != nil {
@@ -201,7 +202,7 @@ func (s *Server) HandlerGitHubOAuthStart(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (s *Server) HandlerGitHubOAuthStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandlerGitHubOAuthStatus(_ *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	if state == "" {
 		RenderJSON(w, r, oauthStatusResponse{Status: string(oauthStatusFailed), Error: "missing_state"})
