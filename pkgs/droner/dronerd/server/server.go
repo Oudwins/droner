@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -13,14 +12,12 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
-	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 type Server struct {
 	Base       *core.BaseServer
-	Logbuf     *logbuf.Logger
 	oauth      *oauthStateStore
 	httpServer *http.Server
 	canceler   context.CancelFunc
@@ -29,10 +26,6 @@ type Server struct {
 
 func New() *Server {
 	base := core.New()
-	buffer := logbuf.New(
-		slog.String("version", base.Config.Version),
-		slog.Int("port", base.Env.PORT),
-	)
 
 	storePath := filepath.Join(base.Config.Server.DataDir, "tasks", "tasks.db")
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
@@ -41,7 +34,6 @@ func New() *Server {
 
 	return &Server{
 		Base:     base,
-		Logbuf:   buffer,
 		oauth:    newOAuthStateStore(),
 		canceler: func() {},
 	}

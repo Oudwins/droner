@@ -17,11 +17,11 @@ type SessionAgentConfig struct {
 
 type SessionCreateRequest struct {
 	Path      string              `json:"path" zog:"path"`
-	SessionID string              `json:"sessionId,omitempty" zog:"sessionId"`
-	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
+	SessionID string              `json:"sessionId" zog:"sessionId"`
+	Agent     *SessionAgentConfig `json:"agent" zog:"agent"`
 }
 
-var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/-]+$`)
+var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
 var multiupleSlashes = regexp.MustCompile(`//+`)
 
 var SessionCreateSchema = z.Struct(z.Shape{

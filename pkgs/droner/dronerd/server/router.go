@@ -8,19 +8,18 @@ import (
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(s.MiddlewareLogger)
 	r.Group(func(r chi.Router) {
-		r.Get("/version", s.HandlerVersion)
-		r.Post("/shutdown", s.HandlerShutdown)
+		r.Get("/version", HandlerWithLogger(s.HandlerVersion))
+		r.Post("/shutdown", HandlerWithLogger(s.HandlerShutdown))
 	})
 	r.Group(func(r chi.Router) {
-		r.Get("/oauth/github/start", s.HandlerGitHubOAuthStart)
-		r.Get("/oauth/github/status", s.HandlerGitHubOAuthStatus)
+		r.Get("/oauth/github/start", HandlerWithLogger(s.HandlerGitHubOAuthStart))
+		r.Get("/oauth/github/status", HandlerWithLogger(s.HandlerGitHubOAuthStatus))
 	})
 
 	r.Group(func(r chi.Router) {
-		r.Post("/sessions", s.HandlerCreateSession)
-		r.Delete("/sessions", s.HandlerDeleteSession)
+		r.Post("/sessions", HandlerWithLogger(s.HandlerCreateSession))
+		r.Delete("/sessions", HandlerWithLogger(s.HandlerDeleteSession))
 	})
 	return r
 }
