@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -45,7 +44,6 @@ func New() *BaseServer {
 		Workspace: w,
 	}
 
-	fmt.Printf("Config %v", config)
 	queries, err := InitDB(config)
 	assert.AssertNil(err, "[CORE] Failed to initialize DB")
 	base.DB = queries
