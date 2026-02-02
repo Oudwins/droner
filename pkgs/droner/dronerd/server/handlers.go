@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -33,6 +34,7 @@ func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	logger := logbuf.FromContext(r.Context())
+	logger.Info("Creating session")
 	var payload schemas.SessionCreateRequest
 
 	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Base.Workspace))
