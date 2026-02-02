@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -182,6 +183,10 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			return nil
 		},
 	})
+
+	basePath := path.Join(base.Config.Server.DataDir, "queue")
+	err := os.MkdirAll(basePath, 0o755)
+	assert.AssertNil(err, "[QUEUE] Failed to initialize. Could not create dirs", err)
 
 	sqliteBackend, err := taskysqlite3.New[Jobs](taskysqlite3.Config{
 		Path:      path.Join(base.Config.Server.DataDir, "queue/queue.db"),
