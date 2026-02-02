@@ -1,5 +1,7 @@
 package assert
 
+import "fmt"
+
 func Assert(condition bool, msg string, other ...any) {
 	if condition {
 		panic(msg)
@@ -7,5 +9,8 @@ func Assert(condition bool, msg string, other ...any) {
 }
 
 func AssertNil(value any, msg string, other ...any) {
-	Assert(value == nil, msg, other...)
+	if value == nil {
+		return
+	}
+	panic(fmt.Sprintf("%s:%v:%v", msg, value, other))
 }

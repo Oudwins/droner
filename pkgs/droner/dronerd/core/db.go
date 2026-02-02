@@ -3,6 +3,7 @@ package core
 import (
 	"database/sql"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
@@ -12,12 +13,12 @@ import (
 )
 
 func InitDB(config *conf.Config) (*db.Queries, error) {
-	dbPath := filepath.Join(config.Server.DataDir, "db", "droner.db")
+	dbPath := filepath.Join(config.Server.DataDir, "db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
 
-	conn, err := sql.Open("sqlite", dbPath)
+	conn, err := sql.Open("sqlite", path.Join(dbPath, "droner.db"))
 	if err != nil {
 		return nil, err
 	}
