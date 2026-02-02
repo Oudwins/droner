@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -123,9 +122,16 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeWorkspace, string) {
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
-	if _, err := conn.Exec(readSchema(t)); err != nil {
+	schemas, err := loadSchemas()
+	if err != nil {
 		_ = conn.Close()
-		t.Fatalf("failed to apply schema: %v", err)
+		t.Fatalf("failed to load schemas: %v", err)
+	}
+	for _, schema := range schemas {
+		if _, err := conn.Exec(schema); err != nil {
+			_ = conn.Close()
+			t.Fatalf("failed to apply schema: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		_ = conn.Close()
@@ -152,21 +158,6 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeWorkspace, string) {
 	base.Subscriptions = newSubscriptionManager(base)
 
 	return base, ws, repoDir
-}
-
-func readSchema(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to resolve test file path")
-	}
-	coreDir := filepath.Dir(file)
-	schemaPath := filepath.Join(coreDir, "db", "schemas", "sessions.sql")
-	data, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("failed to read schema: %v", err)
-	}
-	return string(data)
 }
 
 func runQueueUntil(t *testing.T, queue *tasky.Queue[Jobs], waitFn func() bool) {

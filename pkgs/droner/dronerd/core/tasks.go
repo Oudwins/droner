@@ -73,7 +73,15 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 			// create tmux sesion
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, payload.Agent.Model, payload.Agent.Prompt); err != nil {
+			model := base.Config.Agent.DefaultModel
+			prompt := ""
+			if payload.Agent != nil {
+				if payload.Agent.Model != "" {
+					model = payload.Agent.Model
+				}
+				prompt = payload.Agent.Prompt
+			}
+			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, model, prompt); err != nil {
 				base.Logger.Error("[create session] Failed to create tmux session", slog.String("taskId", task.TaskID), slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID,
