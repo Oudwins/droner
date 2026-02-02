@@ -29,6 +29,15 @@ type NewArgs struct {
 	Timeout string `zog:"timeout"`
 }
 
+var newArgsSchema = z.Struct(z.Shape{
+	"Path":    z.String().Optional().Trim(),
+	"ID":      z.String().Optional().Trim(),
+	"Model":   z.String().Optional().Trim(),
+	"Prompt":  z.String().Optional().Trim(),
+	"Wait":    z.Bool().Optional(),
+	"Timeout": z.String().Optional().Trim(),
+})
+
 type ServeArgs struct {
 	Detach bool
 }
@@ -38,15 +47,6 @@ type DelArgs struct {
 	Wait    bool   `zog:"wait"`
 	Timeout string `zog:"timeout"`
 }
-
-var newArgsSchema = z.Struct(z.Shape{
-	"Path":    z.String().Optional().Trim(),
-	"ID":      z.String().Optional().Trim(),
-	"Model":   z.String().Optional().Trim(),
-	"Prompt":  z.String().Optional().Trim(),
-	"Wait":    z.Bool().Optional(),
-	"Timeout": z.String().Optional().Trim(),
-})
 
 var delArgsSchema = z.Struct(z.Shape{
 	"ID":      z.String().Required().Trim(),

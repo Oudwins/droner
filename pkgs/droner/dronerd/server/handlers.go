@@ -10,6 +10,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/internals/logbuf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -31,6 +32,7 @@ func (s *Server) HandlerShutdown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
+	logger := logbuf.FromContext(r.Context())
 	var payload schemas.SessionCreateRequest
 
 	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Base.Workspace))
@@ -39,6 +41,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: This needs to be moved out of here
 	worktreeRoot := s.Base.Config.Worktrees.Dir
 	if err := s.Base.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
@@ -56,8 +59,14 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 				return err
 			},
 		})
-		if err != nil || generatedID == "" {
+		if err != nil {
+			logger.Error("Failed to generate session id", slog.String("error", err.Error()))
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		if generatedID == "" {
+			logger.Error("Generated empty session id")
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Generated ID that was empty", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
 		payload.SessionID = generatedID
@@ -81,7 +90,7 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	if payload.Agent != nil {
 		payloadBytes, err := json.Marshal(payload.Agent)
 		if err != nil {
-			s.Logbuf.Error("Failed to serialize agent payload", slog.String("error", err.Error()))
+			logger.Error("Failed to serialize agent payload", slog.String("error", err.Error()))
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
@@ -107,14 +116,14 @@ func (s *Server) HandlerCreateSession(w http.ResponseWriter, r *http.Request) {
 	bytes, _ := json.Marshal(payload)
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
 	if err != nil {
-		s.Logbuf.Error("Failed to enque task", slog.String("error", err.Error()))
+		logger.Error("Failed to enque task", slog.String("error", err.Error()))
 		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
 			SimpleID: payload.SessionID,
 			Status:   db.SessionStatusFailed,
 			Error:    sql.NullString{String: err.Error(), Valid: true},
 		})
 		if updateErr != nil {
-			s.Logbuf.Error("Failed to update session status", slog.String("error", updateErr.Error()))
+			logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
 		}
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 	}

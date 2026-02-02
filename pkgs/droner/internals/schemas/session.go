@@ -17,7 +17,7 @@ type SessionAgentConfig struct {
 
 type SessionCreateRequest struct {
 	Path      string              `json:"path" zog:"path"`
-	SessionID string              `json:"sessionId" zog:"sessionId"`
+	SessionID string              `json:"sessionId,omitempty" zog:"sessionId"`
 	Agent     *SessionAgentConfig `json:"agent,omitempty" zog:"agent"`
 }
 
