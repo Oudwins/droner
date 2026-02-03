@@ -75,7 +75,7 @@ func TestClientTaskFlows(t *testing.T) {
 		t.Fatalf("expected succeeded, got %s", statusResp.Status)
 	}
 
-	deleteResp, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: "abc"})
+	deleteResp, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID("abc")})
 	if err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
