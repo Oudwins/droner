@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,8 +46,12 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			ws := base.Workspace
 			payload := schemas.SessionCreateRequest{}
-			errs := schemas.SessionCreateSchema.Parse(
-				zjson.Decode(bytes.NewReader(task.Payload)),
+			err2 := json.Unmarshal(task.Payload, &payload)
+			if err2 != nil {
+				base.Logger.Error("[create session] Failed to unmarshal payload", slog.String("error", err2.Error()))
+				return err2
+			}
+			errs := schemas.SessionCreateSchema.Validate(
 				&payload,
 				zog.WithCtxValue("workspace", base.Workspace),
 			)
@@ -119,6 +124,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return err
 			}
 
+			base.Logger.Debug("[create session] Success", slog.Any("payload", payload))
 			return nil
 		},
 	})
