@@ -42,36 +42,38 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig[Jobs]{
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
+			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
 			ws := base.Workspace
 			payload := schemas.SessionCreateRequest{}
 			err2 := json.Unmarshal(task.Payload, &payload)
 			if err2 != nil {
-				base.Logger.Error("[create session] Failed to unmarshal payload", slog.String("error", err2.Error()))
+				logger.Error("Failed to unmarshal payload", slog.String("error", err2.Error()))
 				return err2
 			}
+			logger = logger.With(slog.Any("payload", payload))
 			errs := schemas.SessionCreateSchema.Validate(
 				&payload,
 				zog.WithCtxValue("workspace", base.Workspace),
 			)
 			if errs != nil {
-				return fmt.Errorf("[create session] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
+				return fmt.Errorf("failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
-			base.Logger.Debug("[create session] Starting with payload", slog.Any("payload", payload))
+			logger.Debug("Starting with payload")
 
 			repoName := filepath.Base(payload.Path)
 			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
-				base.Logger.Error("[create session] Failed to create worktree", slog.Any("payload", payload), slog.String("error", err.Error()))
+				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID,
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
 				if updateErr != nil {
-					base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", payload.SessionID))
+					logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
 				}
 				return err
 			}
@@ -87,14 +89,14 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				prompt = payload.Agent.Prompt
 			}
 			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, model, prompt); err != nil {
-				base.Logger.Error("[create session] Failed to create tmux session", slog.String("taskId", task.TaskID), slog.String("error", err.Error()))
+				logger.Error("Failed to create tmux session", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID,
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
 				if updateErr != nil {
-					base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", updateErr.Error()), slog.String("sessionId", payload.SessionID))
+					logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
 				}
 				return err
 			}
@@ -118,11 +120,11 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				Error:    sql.NullString{},
 			})
 			if err != nil {
-				base.Logger.Error("[create session] Failed to update session status to running", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+				logger.Error("Failed to update session status to running", slog.String("error", err.Error()))
 				return err
 			}
 
-			base.Logger.Debug("[create session] Success", slog.Any("payload", payload))
+			logger.Debug("Success")
 			return nil
 		},
 	})
