@@ -122,7 +122,7 @@ func newNewCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: args.ID}
+			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 			if args.Model != "" || args.Prompt != "" {
 				request.Agent = &schemas.SessionAgentConfig{Model: args.Model, Prompt: args.Prompt}
 			}
@@ -184,7 +184,7 @@ func newDelCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: args.ID})
+			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
 			if err != nil {
 				return err
 			}

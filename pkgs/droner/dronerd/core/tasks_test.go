@@ -226,7 +226,7 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 
 	payload := schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: "session-1",
+		SessionID: schemas.NewSSessionID("session-1"),
 		Agent: &schemas.SessionAgentConfig{
 			Model:  "test-model",
 			Prompt: "test-prompt",
@@ -239,11 +239,11 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	}
 
 	repoName := filepath.Base(payload.Path)
-	worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
+	worktreePath := path.Join(base.Config.Worktrees.Dir, payload.SessionID.SessionWorktreeName(repoName))
 
 	_, err = base.DB.CreateSession(context.Background(), db.CreateSessionParams{
 		ID:           newID.String(),
-		SimpleID:     payload.SessionID,
+		SimpleID:     payload.SessionID.String(),
 		Status:       db.SessionStatusQueued,
 		RepoPath:     payload.Path,
 		WorktreePath: worktreePath,
@@ -265,11 +265,11 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	}
 
 	runQueueUntil(t, base.TaskQueue, func() bool {
-		row, err := base.DB.GetSessionBySimpleID(context.Background(), payload.SessionID)
+		row, err := base.DB.GetSessionBySimpleID(context.Background(), payload.SessionID.String())
 		return err == nil && row.Status == db.SessionStatusRunning
 	})
 
-	session := waitForSessionStatusBySimpleID(t, base.DB, payload.SessionID, db.SessionStatusRunning)
+	session := waitForSessionStatusBySimpleID(t, base.DB, payload.SessionID.String(), db.SessionStatusRunning)
 	if session.RepoPath != payload.Path {
 		t.Fatalf("expected repo path %s, got %s", payload.Path, session.RepoPath)
 	}
@@ -282,8 +282,8 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	if ws.createdWorktreePath != worktreePath {
 		t.Fatalf("expected git worktree path %s, got %s", worktreePath, ws.createdWorktreePath)
 	}
-	if ws.createdTmuxName != payload.SessionID {
-		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID, ws.createdTmuxName)
+	if ws.createdTmuxName != payload.SessionID.String() {
+		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID.String(), ws.createdTmuxName)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 
 	simpleID := "session-delete"
 	repoName := filepath.Base(repoDir)
-	worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(simpleID))
+	worktreePath := path.Join(base.Config.Worktrees.Dir, schemas.NewSSessionID(simpleID).SessionWorktreeName(repoName))
 
 	created, err := base.DB.CreateSession(context.Background(), db.CreateSessionParams{
 		ID:           newID.String(),
@@ -312,7 +312,7 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	deletePayload := schemas.SessionDeleteRequest{SessionID: simpleID}
+	deletePayload := schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID(simpleID)}
 	bytes, err := json.Marshal(deletePayload)
 	if err != nil {
 		t.Fatalf("failed to marshal payload: %v", err)
