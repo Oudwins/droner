@@ -50,12 +50,13 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	// LOGIC
-	baseName := filepath.Base(payload.Path)
+	repoName := filepath.Base(payload.Path)
 	if payload.SessionID == "" {
-		generatedID, err := sessionids.New(baseName, &sessionids.GeneratorConfig{
+		generatedID, err := sessionids.New(repoName, &sessionids.GeneratorConfig{
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
-				worktreePath := filepath.Join(worktreeRoot, baseName+".."+id) // TODO: this conversion is done in multiple places. Brittle
+				sid := schemas.NewSSessionID(id)
+				worktreePath := filepath.Join(worktreeRoot, sid.SessionWorktreeName(repoName)) // TODO: this conversion is done in multiple places. Brittle
 				_, err := s.Base.Workspace.Stat(worktreePath)
 				if err == nil {
 					return errors.New("Session folder already exists")
@@ -74,10 +75,10 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Generated ID that was empty", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		payload.SessionID = generatedID
+		payload.SessionID = schemas.NewSSessionID(generatedID)
 	}
 
-	worktreeName := baseName + "..." + payload.SessionID // TODO: again duplicated logic here
+	worktreeName := payload.SessionID.SessionWorktreeName(repoName)
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 
 	sessionID, err := uuid.NewV7()
@@ -98,7 +99,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 	sessionData := db.CreateSessionParams{
 		ID:           sessionID.String(),
-		SimpleID:     payload.SessionID,
+		SimpleID:     payload.SessionID.String(),
 		Status:       db.SessionStatusQueued,
 		RepoPath:     payload.Path,
 		WorktreePath: worktreePath,
@@ -119,7 +120,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
 		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
-			SimpleID: payload.SessionID,
+			SimpleID: payload.SessionID.String(),
 			Status:   db.SessionStatusFailed,
 			Error:    sql.NullString{String: err.Error(), Valid: true},
 		})

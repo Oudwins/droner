@@ -10,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
@@ -26,17 +25,6 @@ const (
 	JobCreateSession Jobs = "session_delete_job"
 	JobDeleteSession Jobs = "session_create_job"
 )
-
-// file system will do weird things if we pass a sessionId with /
-func sessionIdToPathIdentifier(id string) string {
-	return strings.ReplaceAll(id, "/", ".") // guranteed to have no more than one / together
-}
-
-// func pathIndentifierToSessionId(id string) string {
-// 	return strings.ReplaceAll(id, ".", "/")
-// }
-
-var delimiter = ".."
 
 func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
@@ -62,13 +50,13 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			logger.Debug("Starting with payload")
 
 			repoName := filepath.Base(payload.Path)
-			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
+			worktreePath := path.Join(base.Config.Worktrees.Dir, payload.SessionID.SessionWorktreeName(repoName))
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
+			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID.String()); err != nil {
 				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: payload.SessionID,
+					SimpleID: payload.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
@@ -88,10 +76,10 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				}
 				prompt = payload.Agent.Prompt
 			}
-			if err := ws.CreateTmuxSession(payload.SessionID, worktreePath, model, prompt); err != nil {
+			if err := ws.CreateTmuxSession(payload.SessionID.String(), worktreePath, model, prompt); err != nil {
 				logger.Error("Failed to create tmux session", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: payload.SessionID,
+					SimpleID: payload.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
@@ -115,7 +103,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			// }
 
 			_, err := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-				SimpleID: payload.SessionID,
+				SimpleID: payload.SessionID.String(),
 				Status:   db.SessionStatusRunning,
 				Error:    sql.NullString{},
 			})
@@ -146,7 +134,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf("failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
-			session, err := base.DB.GetSessionBySimpleID(ctx, data.SessionID)
+			session, err := base.DB.GetSessionBySimpleID(ctx, data.SessionID.String())
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					logger.Info("No session by that ID found in database. Exiting")
@@ -161,12 +149,12 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				logger.Error("Failed to get common dir from worktree", slog.String("error", err.Error()))
 				return err
 			}
-			worktreeName := data.SessionID
+			tmuxSessionName := data.SessionID.String()
 
-			if err := ws.KillTmuxSession(worktreeName); err != nil {
+			if err := ws.KillTmuxSession(tmuxSessionName); err != nil {
 				logger.Error("Failed to kill tmux session", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: data.SessionID,
+					SimpleID: data.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
@@ -177,7 +165,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			}
 			if err := ws.RemoveGitWorktree(worktreePath); err != nil {
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: data.SessionID,
+					SimpleID: data.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
@@ -186,10 +174,10 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				}
 				return err
 			}
-			if err := ws.DeleteGitBranch(commonGitDir, data.SessionID); err != nil {
+			if err := ws.DeleteGitBranch(commonGitDir, data.SessionID.String()); err != nil {
 				logger.Error("Failed to delete git branch", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: data.SessionID,
+					SimpleID: data.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
 				})
@@ -200,7 +188,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			}
 
 			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-				SimpleID: data.SessionID,
+				SimpleID: data.SessionID.String(),
 				Status:   db.SessionStatusDeleted, // TODO: Might want to set this to completed in the future. So I can reuse the worktrees
 				Error:    sql.NullString{},
 			})
