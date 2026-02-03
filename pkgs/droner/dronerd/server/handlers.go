@@ -143,12 +143,14 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 	var payload schemas.SessionDeleteRequest
 	errs := schemas.SessionDeleteSchema.Parse(zhttp.Request(r), &payload)
 	if errs != nil {
+		logger.Error("Schema validation failed")
 		payload := JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs))
 		RenderJSON(w, r, payload, Render.Status(http.StatusBadRequest))
 		return
 	}
 
 	bytes, _ := json.Marshal(payload)
+	logger.Debug("Enqueueing task", slog.Any("payload", payload))
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
 	if err != nil {
 		logger.Error("Failed to enque job", slog.String("error", err.Error()))
