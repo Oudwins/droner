@@ -114,6 +114,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// Enqueue task
 	bytes, _ := json.Marshal(payload)
+	logger.Debug("Enequeued", slog.Any("payload", payload))
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
