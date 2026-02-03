@@ -16,9 +16,9 @@ type SessionAgentConfig struct {
 }
 
 type SessionCreateRequest struct {
-	Path      string              `json:"path" zog:"path"`
-	SessionID string              `json:"sessionId" zog:"sessionId"`
-	Agent     *SessionAgentConfig `json:"agent" zog:"agent"`
+	Path      string              `json:"path"`
+	SessionID string              `json:"sessionId,omitempty"`
+	Agent     *SessionAgentConfig `json:"agent,omitempty"`
 }
 
 var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
@@ -34,8 +34,9 @@ var SessionCreateSchema = z.Struct(z.Shape{
 })
 
 type SessionCreateResponse struct {
-	WorktreePath string `json:"worktreePath"`
 	SessionID    string `json:"sessionId"`
+	SimpleID     string `json:"simpleId"`
+	WorktreePath string `json:"worktreePath"`
 	TaskID       string `json:"taskId"`
 }
 

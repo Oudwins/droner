@@ -37,6 +37,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Base.Workspace))
 	if errs != nil {
+		logger.Info("Schema validation failed", "errors", errs)
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
 		return
 	}
@@ -78,11 +79,6 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	worktreeName := baseName + "..." + payload.SessionID // TODO: again duplicated logic here
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
-	if _, err := s.Base.Workspace.Stat(worktreePath); err != nil {
-		logger.Error("Stat at worktree path failed")
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
 
 	sessionID, err := uuid.NewV7()
 	if err != nil {
@@ -100,8 +96,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		}
 		payloadValue = sql.NullString{String: string(payloadBytes), Valid: true}
 	}
-
-	_, err = s.Base.DB.CreateSession(context.Background(), db.CreateSessionParams{
+	sessionData := db.CreateSessionParams{
 		ID:           sessionID.String(),
 		SimpleID:     payload.SessionID,
 		Status:       db.SessionStatusQueued,
@@ -109,7 +104,8 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		WorktreePath: worktreePath,
 		Payload:      payloadValue,
 		Error:        sql.NullString{},
-	})
+	}
+	_, err = s.Base.DB.CreateSession(context.Background(), sessionData)
 	if err != nil {
 		logger.Error("Failed to create session record", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
@@ -134,8 +130,9 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// Response
 	res := schemas.SessionCreateResponse{
-		WorktreePath: worktreePath,
 		SessionID:    payload.SessionID,
+		SimpleID:     sessionData.ID,
+		WorktreePath: worktreePath,
 		TaskID:       taskId,
 	}
 	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
