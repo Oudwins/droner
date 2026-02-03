@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -55,11 +54,14 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf("[create session] failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
+			base.Logger.Debug("[create session] Starting with payload", slog.Any("payload", payload))
+
 			repoName := filepath.Base(payload.Path)
 			worktreePath := path.Join(base.Config.Worktrees.Dir, repoName+delimiter+sessionIdToPathIdentifier(payload.SessionID))
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID); err != nil {
+				base.Logger.Error("[create session] Failed to create worktree", slog.Any("payload", payload), slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID,
 					Status:   db.SessionStatusFailed,
@@ -94,18 +96,18 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return err
 			}
 
-			if remoteURL, err := ws.GetRemoteURL(payload.Path); err != nil {
-				err := base.Subscriptions.subscribe(context.Background(), remoteURL, payload.SessionID, func(sessionId string) {
-					data, _ := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionId})
-					taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobDeleteSession, data))
-					if err != nil {
-						base.Logger.Error("[create session] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
-					}
-				})
-				if err != nil {
-					base.Logger.Error("[create session] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
-				}
-			}
+			// if remoteURL, err := ws.GetRemoteURL(payload.Path); err != nil {
+			// 	err := base.Subscriptions.subscribe(context.Background(), remoteURL, payload.SessionID, func(sessionId string) {
+			// 		data, _ := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionId})
+			// 		taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobDeleteSession, data))
+			// 		if err != nil {
+			// 			base.Logger.Error("[create session] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+			// 		}
+			// 	})
+			// 	if err != nil {
+			// 		base.Logger.Error("[create session] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+			// 	}
+			// }
 
 			_, err := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 				SimpleID: payload.SessionID,
@@ -113,7 +115,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				Error:    sql.NullString{},
 			})
 			if err != nil {
-				base.Logger.Error("[create session] Failed to update session status", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
+				base.Logger.Error("[create session] Failed to update session status to running", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
 				return err
 			}
 
