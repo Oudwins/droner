@@ -98,7 +98,7 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 		case "/sessions":
 			if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-new", Status: schemas.TaskStatusPending})
+				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{SessionID: schemas.NewSSessionID("simple-new"), SimpleID: "simple-new", TaskID: "task-new"})
 				return
 			}
 			if r.Method == http.MethodDelete {
@@ -124,7 +124,7 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run new: %v", err)
 	}
-	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
+	if !strings.Contains(output, "session: simple-new") || !strings.Contains(output, "status: succeeded") {
 		t.Fatalf("unexpected new output: %s", output)
 	}
 

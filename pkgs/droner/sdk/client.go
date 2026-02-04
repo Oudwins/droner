@@ -112,7 +112,7 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return responseError(resp)
 }
 
-func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.TaskResponse, error) {
+func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreateRequest) (*schemas.SessionCreateResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func (c *Client) CreateSession(ctx context.Context, request schemas.SessionCreat
 		return nil, responseError(resp)
 	}
 
-	var payload schemas.TaskResponse
+	var payload schemas.SessionCreateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}

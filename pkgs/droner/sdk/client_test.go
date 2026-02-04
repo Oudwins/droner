@@ -41,7 +41,7 @@ func TestClientTaskFlows(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /sessions":
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task1", Status: schemas.TaskStatusPending, Type: "session_create"})
+			_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{SessionID: schemas.NewSSessionID("simple-1"), SimpleID: "simple-1", TaskID: "task1"})
 		case http.MethodDelete + " /sessions":
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task2", Status: schemas.TaskStatusPending, Type: "session_delete"})
@@ -62,6 +62,9 @@ func TestClientTaskFlows(t *testing.T) {
 	createResp, err := client.CreateSession(ctx, schemas.SessionCreateRequest{Path: "/repo"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
+	}
+	if createResp.SimpleID != "simple-1" {
+		t.Fatalf("unexpected simple id %s", createResp.SimpleID)
 	}
 	if createResp.TaskID != "task1" {
 		t.Fatalf("unexpected task id %s", createResp.TaskID)

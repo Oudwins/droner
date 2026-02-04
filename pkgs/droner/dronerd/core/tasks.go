@@ -76,6 +76,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				}
 				prompt = payload.AgentConfig.Prompt
 			}
+
 			if err := ws.CreateTmuxSession(payload.SessionID.String(), worktreePath, model, prompt); err != nil {
 				logger.Error("Failed to create tmux session", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{

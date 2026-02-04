@@ -135,7 +135,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	// Response
 	res := schemas.SessionCreateResponse{
 		SessionID:    request.SessionID,
-		SimpleID:     sessionData.ID,
+		SimpleID:     sessionData.SimpleID,
 		WorktreePath: worktreePath,
 		TaskID:       taskId,
 	}
