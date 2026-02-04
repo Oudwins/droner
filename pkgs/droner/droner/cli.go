@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -147,7 +148,7 @@ func newNewCmd() *cobra.Command {
 					return err
 				}
 			}
-			printTaskSummary(response)
+			printSessionCreated(response)
 			if args.Wait {
 				timeout, err := parseWaitTimeout(args.Timeout)
 				if err != nil {
@@ -505,8 +506,8 @@ func waitForTask(client *sdk.Client, taskID string, timeout time.Duration) (*sch
 func printTaskSummary(response *schemas.TaskResponse) {
 	fmt.Printf("task: %s\nstatus: %s\n", response.TaskID, response.Status)
 	if response.Result != nil {
-		if response.Result.SessionID != "" {
-			fmt.Printf("session: %s\n", response.Result.SessionID)
+		if sessionID := taskSimpleSessionID(response.Result); sessionID != "" {
+			fmt.Printf("session: %s\n", sessionID)
 		}
 		if response.Result.WorktreePath != "" {
 			fmt.Printf("worktree: %s\n", response.Result.WorktreePath)
@@ -514,6 +515,39 @@ func printTaskSummary(response *schemas.TaskResponse) {
 	}
 	if response.Error != "" {
 		fmt.Printf("error: %s\n", response.Error)
+	}
+}
+
+func taskSimpleSessionID(result *schemas.TaskResult) string {
+	if result == nil {
+		return ""
+	}
+	if result.SessionID != "" && !looksLikeUUID(result.SessionID) {
+		return result.SessionID
+	}
+	if result.WorktreePath != "" {
+		base := filepath.Base(result.WorktreePath)
+		if parts := strings.SplitN(base, schemas.SimpleSessionDelimiter, 2); len(parts) == 2 && parts[1] != "" {
+			return parts[1]
+		}
+	}
+	return result.SessionID
+}
+
+func looksLikeUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	return value[8] == '-' && value[13] == '-' && value[18] == '-' && value[23] == '-'
+}
+
+func printSessionCreated(response *schemas.SessionCreateResponse) {
+	simpleID := strings.TrimSpace(response.SimpleID)
+	if simpleID == "" && response.SessionID != "" {
+		simpleID = response.SessionID.String()
+	}
+	if simpleID != "" {
+		fmt.Printf("session: %s\n", simpleID)
 	}
 }
 
