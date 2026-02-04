@@ -33,9 +33,9 @@ func (s *Server) HandlerShutdown(_ *slog.Logger, w http.ResponseWriter, r *http.
 
 func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	logger.Info("Creating session")
-	var payload schemas.SessionCreateRequest
+	var request schemas.SessionCreateRequest
 
-	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &payload, z.WithCtxValue("workspace", s.Base.Workspace))
+	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &request, z.WithCtxValue("workspace", s.Base.Workspace))
 	if errs != nil {
 		logger.Info("Schema validation failed", "errors", errs)
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
@@ -50,8 +50,8 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	// LOGIC
-	repoName := filepath.Base(payload.Path)
-	if payload.SessionID == "" {
+	repoName := filepath.Base(request.Path)
+	if request.SessionID == "" {
 		generatedID, err := sessionids.New(repoName, &sessionids.GeneratorConfig{
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
@@ -75,10 +75,10 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Generated ID that was empty", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		payload.SessionID = schemas.NewSSessionID(generatedID)
+		request.SessionID = schemas.NewSSessionID(generatedID)
 	}
 
-	worktreeName := payload.SessionID.SessionWorktreeName(repoName)
+	worktreeName := request.SessionID.SessionWorktreeName(repoName)
 	worktreePath := filepath.Join(worktreeRoot, worktreeName)
 
 	sessionID, err := uuid.NewV7()
@@ -87,23 +87,23 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		return
 	}
 
-	payloadValue := sql.NullString{}
-	if payload.Agent != nil {
-		payloadBytes, err := json.Marshal(payload.Agent)
+	agentConfigValue := sql.NullString{}
+	if request.AgentConfig != nil {
+		agentConfigBytes, err := json.Marshal(request.AgentConfig)
 		if err != nil {
-			logger.Error("Failed to serialize agent payload", slog.String("error", err.Error()))
+			logger.Error("Failed to serialize agent config", slog.String("error", err.Error()))
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		payloadValue = sql.NullString{String: string(payloadBytes), Valid: true}
+		agentConfigValue = sql.NullString{String: string(agentConfigBytes), Valid: true}
 	}
 	sessionData := db.CreateSessionParams{
 		ID:           sessionID.String(),
-		SimpleID:     payload.SessionID.String(),
+		SimpleID:     request.SessionID.String(),
 		Status:       db.SessionStatusQueued,
-		RepoPath:     payload.Path,
+		RepoPath:     request.Path,
 		WorktreePath: worktreePath,
-		Payload:      payloadValue,
+		AgentConfig:  agentConfigValue,
 		Error:        sql.NullString{},
 	}
 	_, err = s.Base.DB.CreateSession(context.Background(), sessionData)
@@ -114,13 +114,13 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	// Enqueue task
-	bytes, _ := json.Marshal(payload)
-	logger.Debug("Enequeued", slog.Any("payload", payload))
+	bytes, _ := json.Marshal(request)
+	logger.Debug("Enequeued", slog.Any("request", request))
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
 		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
-			SimpleID: payload.SessionID.String(),
+			SimpleID: request.SessionID.String(),
 			Status:   db.SessionStatusFailed,
 			Error:    sql.NullString{String: err.Error(), Valid: true},
 		})
@@ -132,7 +132,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// Response
 	res := schemas.SessionCreateResponse{
-		SessionID:    payload.SessionID,
+		SessionID:    request.SessionID,
 		SimpleID:     sessionData.ID,
 		WorktreePath: worktreePath,
 		TaskID:       taskId,
