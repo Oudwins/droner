@@ -79,6 +79,15 @@ type SessionDeleteResponse struct {
 	TaskId    string     `json:"taskId"`
 }
 
+type SessionListItem struct {
+	SimpleID SSessionID `json:"simpleId"`
+	State    string     `json:"state"`
+}
+
+type SessionListResponse struct {
+	Sessions []SessionListItem `json:"sessions"`
+}
+
 var SessionDeleteSchema = z.Struct(z.Shape{
 	"SessionID": sessionID().Optional().Trim(),
 })

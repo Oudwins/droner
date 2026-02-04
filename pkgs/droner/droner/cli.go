@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
@@ -70,6 +71,7 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		newNewCmd(),
 		newDelCmd(),
+		newSessionsCmd(),
 		newTaskCmd(),
 		newAuthCmd(),
 	)
@@ -123,8 +125,11 @@ func newNewCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
-			if args.Model != "" || args.Prompt != "" {
-				request.AgentConfig = &schemas.SessionAgentConfig{Model: args.Model, Prompt: args.Prompt}
+			if cmd.Flags().Changed("model") || cmd.Flags().Changed("prompt") || args.Model != "" || args.Prompt != "" {
+				request.AgentConfig = &schemas.SessionAgentConfig{
+					Model:  strings.TrimSpace(args.Model),
+					Prompt: strings.TrimSpace(args.Prompt),
+				}
 			}
 			response, err := client.CreateSession(ctx, request)
 			if err != nil {
@@ -206,6 +211,51 @@ func newDelCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
 	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
+	return cmd
+}
+
+func newSessionsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "List queued and running sessions",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client := sdk.NewClient()
+			if err := ensureDaemonRunning(client); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			response, err := client.ListSessions(ctx)
+			if err != nil {
+				if errors.Is(err, sdk.ErrAuthRequired) {
+					if err := runGitHubAuthFlow(client); err != nil {
+						return err
+					}
+					ctx, retryCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					defer retryCancel()
+					response, err = client.ListSessions(ctx)
+					if err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
+			}
+			if len(response.Sessions) == 0 {
+				fmt.Println("No queued or running sessions.")
+				return nil
+			}
+			writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "simpleId\tstate")
+			for _, session := range response.Sessions {
+				fmt.Fprintf(writer, "%s\t%s\n", session.SimpleID, session.State)
+			}
+			writer.Flush()
+			return nil
+		},
+	}
+
 	return cmd
 }
 

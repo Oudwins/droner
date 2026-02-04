@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sort"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
@@ -128,6 +129,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 			logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
 		}
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
 	}
 
 	// Response
@@ -163,4 +165,35 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 		SessionID: payload.SessionID,
 		TaskId:    taskId,
 	}, Render.Status(http.StatusAccepted))
+}
+
+func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	queued, err := s.Base.DB.ListSessionsByStatus(context.Background(), db.SessionStatusQueued)
+	if err != nil {
+		logger.Error("Failed to list queued sessions", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list queued sessions", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	running, err := s.Base.DB.ListSessionsByStatus(context.Background(), db.SessionStatusRunning)
+	if err != nil {
+		logger.Error("Failed to list running sessions", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list running sessions", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	sessions := append(queued, running...)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+	})
+
+	items := make([]schemas.SessionListItem, 0, len(sessions))
+	for _, session := range sessions {
+		items = append(items, schemas.SessionListItem{
+			SimpleID: schemas.NewSSessionID(session.SimpleID),
+			State:    string(session.Status),
+		})
+	}
+
+	RenderJSON(w, r, schemas.SessionListResponse{Sessions: items})
 }
