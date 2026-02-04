@@ -1,6 +1,6 @@
 # AGENTS.md
 # Guidance for coding agents working in this repository.
-# Keep instructions in sync with the repo and Makefile.
+# Keep instructions in sync with the repo and justfile.
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
@@ -13,16 +13,16 @@
 
 ## Environment setup
 - `direnv` is used; `.envrc` calls `use flake`.
-- `flake.nix` provides Go, gopls, git, make, and psmisc.
-- Optional env vars can be set in `.env` (loaded by Makefile).
+- `flake.nix` provides Go, gopls, git, just, sqlc, and psmisc.
+- Optional env vars can be set in `.env` (loaded by justfile).
 
 ## Build and run
-- Run server (kills port 57876 first): `make dev`.
+- Run server (kills port 57876 first): `just dev`.
 - Manual server run: `go run ./pkgs/droner/dronerd`.
-- Build binaries into `./bin`: `make build`.
+- Build binaries into `./bin`: `just build`.
 - Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd`.
 - Build CLI only: `go build -o ./bin/droner ./pkgs/droner/droner`.
-- Run CLI (builds first): `make cli <args>`.
+- Run CLI (builds first): `just cli <args>`.
 
 ## Tests
 - Run all tests: `go test ./pkgs/droner/...`.
@@ -117,6 +117,6 @@
 - Update this file if you add new build/test tooling.
 
 ## Quick sanity checks
-- `make dev` starts the server and frees port 57876.
+- `just dev` starts the server and frees port 57876.
 - `go test ./pkgs/droner/...` should pass before PRs.
 - `gofmt -w` should produce no diffs on committed Go files.
