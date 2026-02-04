@@ -48,11 +48,11 @@ var providersSchema = z.Struct(z.Shape{
 })
 
 var worktreesSchema = z.Struct(z.Shape{
-	"Dir": z.String().Default("~/.local/share/droner/worktrees").Transform(expandPathTransform),
+	"Dir": z.String().Default("~/.droner/worktrees").Transform(expandPathTransform),
 })
 
 var serverSchema = z.Struct(z.Shape{
-	"DataDir": z.String().Default("~/.local/share/droner").Transform(expandPathTransform),
+	"DataDir": z.String().Default("~/.droner").Transform(expandPathTransform),
 })
 
 var agentSchema = z.Struct(z.Shape{
