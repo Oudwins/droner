@@ -124,7 +124,7 @@ func newNewCmd() *cobra.Command {
 			defer cancel()
 			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 			if args.Model != "" || args.Prompt != "" {
-				request.Agent = &schemas.SessionAgentConfig{Model: args.Model, Prompt: args.Prompt}
+				request.AgentConfig = &schemas.SessionAgentConfig{Model: args.Model, Prompt: args.Prompt}
 			}
 			response, err := client.CreateSession(ctx, request)
 			if err != nil {

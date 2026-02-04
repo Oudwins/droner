@@ -227,7 +227,7 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	payload := schemas.SessionCreateRequest{
 		Path:      repoDir,
 		SessionID: schemas.NewSSessionID("session-1"),
-		Agent: &schemas.SessionAgentConfig{
+		AgentConfig: &schemas.SessionAgentConfig{
 			Model:  "test-model",
 			Prompt: "test-prompt",
 		},
@@ -247,7 +247,7 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 		Status:       db.SessionStatusQueued,
 		RepoPath:     payload.Path,
 		WorktreePath: worktreePath,
-		Payload:      sql.NullString{},
+		AgentConfig:  sql.NullString{},
 		Error:        sql.NullString{},
 	})
 	if err != nil {
@@ -305,7 +305,7 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 		Status:       db.SessionStatusRunning,
 		RepoPath:     repoDir,
 		WorktreePath: worktreePath,
-		Payload:      sql.NullString{},
+		AgentConfig:  sql.NullString{},
 		Error:        sql.NullString{},
 	})
 	if err != nil {

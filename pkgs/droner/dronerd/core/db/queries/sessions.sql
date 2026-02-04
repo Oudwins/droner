@@ -5,7 +5,7 @@ INSERT INTO sessions (
   status,
   repo_path,
   worktree_path,
-  payload,
+  agent_config,
   error
 ) VALUES (
   ?,

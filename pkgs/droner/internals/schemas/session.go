@@ -46,9 +46,9 @@ type SessionAgentConfig struct {
 }
 
 type SessionCreateRequest struct {
-	Path      string              `json:"path"`
-	SessionID SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
-	Agent     *SessionAgentConfig `json:"agent,omitempty"`
+	Path        string              `json:"path"`
+	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
+	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty" zog:"agentConfig"`
 }
 
 var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
@@ -57,7 +57,7 @@ var multiupleSlashes = regexp.MustCompile(`//+`)
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform).TestFunc(isGitRepoTest, z.Message("Path is not a git repo")),
 	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
-	"Agent": z.Ptr(z.Struct(z.Shape{
+	"AgentConfig": z.Ptr(z.Struct(z.Shape{
 		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
 		"Prompt": z.String().Optional().Trim(),
 	})),

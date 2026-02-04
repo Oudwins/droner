@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'deleted')),
   repo_path TEXT NOT NULL,
   worktree_path TEXT NOT NULL,
-  payload TEXT,
+  agent_config TEXT,
   error TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
