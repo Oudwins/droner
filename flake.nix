@@ -11,7 +11,7 @@
       let pkgs = import nixpkgs { inherit system; };
       in {
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [ go gopls git gnumake psmisc sqlc ];
+          packages = with pkgs; [ go gopls git gnumake psmisc sqlc just ];
         };
       });
 }
