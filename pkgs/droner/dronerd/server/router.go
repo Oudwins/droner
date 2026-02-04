@@ -18,6 +18,7 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Group(func(r chi.Router) {
+		r.Get("/sessions", HandlerWithLogger(s.HandlerListSessions))
 		r.Post("/sessions", HandlerWithLogger(s.HandlerCreateSession))
 		r.Delete("/sessions", HandlerWithLogger(s.HandlerDeleteSession))
 	})
