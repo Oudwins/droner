@@ -16,6 +16,9 @@ kill:
 dev: kill
     cd ./pkgs/droner && go run ./dronerd
 
+serve:
+    cd ./pkgs/droner && go run ./dronerd serve
+
 build:
     mkdir -p {{bin_dir}}
     cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd
