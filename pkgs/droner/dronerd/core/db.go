@@ -5,7 +5,6 @@ import (
 	"embed"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,12 +19,12 @@ import (
 var schemaFS embed.FS
 
 func InitDB(config *conf.Config) (*db.Queries, error) {
-	dbPath := filepath.Join(config.Server.DataDir, "db")
+	dbPath := filepath.Join(config.Server.DataDir, "db", "droner.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
 
-	conn, err := sql.Open("sqlite", path.Join(dbPath, "droner.db"))
+	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
