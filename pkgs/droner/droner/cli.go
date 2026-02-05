@@ -298,8 +298,8 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 	if includeAgentConfig {
 		request.AgentConfig = &schemas.SessionAgentConfig{
-			Model:  strings.TrimSpace(args.Model),
-			Prompt: strings.TrimSpace(args.Prompt),
+			Model:  args.Model,
+			Prompt: args.Prompt,
 		}
 	}
 	response, err := client.CreateSession(ctx, request)

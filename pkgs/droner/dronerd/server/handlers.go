@@ -33,15 +33,23 @@ func (s *Server) HandlerShutdown(_ *slog.Logger, w http.ResponseWriter, r *http.
 }
 
 func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	logger.Info("Creating session")
 	var request schemas.SessionCreateRequest
 
-	errs := schemas.SessionCreateSchema.Parse(zhttp.Request(r), &request, z.WithCtxValue("workspace", s.Base.Workspace))
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		logger.Info("Json decoding failed", slog.String("err", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid json", nil), Render.Status(http.StatusBadRequest))
+	}
+
+	errs := schemas.SessionCreateSchema.Validate(&request, z.WithCtxValue("workspace", s.Base.Workspace))
 	if errs != nil {
 		logger.Info("Schema validation failed", "errors", errs)
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
 		return
 	}
+
+	logger = logger.With(slog.Any("request", request))
+	logger.Debug("Successful validation")
 
 	// TODO: This needs to be moved out of here
 	worktreeRoot := s.Base.Config.Worktrees.Dir
