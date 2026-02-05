@@ -5,18 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/desktop"
+	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
-	"github.com/Oudwins/droner/pkgs/droner/internals/term"
+	"github.com/Oudwins/droner/pkgs/droner/internals/tui"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	z "github.com/Oudwins/zog"
@@ -66,6 +65,16 @@ func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "droner",
 		Short: "Droner CLI",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return cmd.Usage()
+			}
+			if !isInteractiveTerminal() {
+				return cmd.Usage()
+			}
+			client := sdk.NewClient()
+			return tui.Run(client)
+		},
 	}
 
 	cmd.AddCommand(
@@ -88,7 +97,7 @@ func newServeCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if args.Detach {
-				return startDaemon()
+				return cliutil.StartDaemon()
 			}
 			serverInstance := server.New()
 			if err := serverInstance.Start(); err != nil {
@@ -109,58 +118,8 @@ func newNewCmd() *cobra.Command {
 		Short: "Create a new session",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client := sdk.NewClient()
-			if args.Path == "" {
-				repoRoot, err := repoRootFromCwd()
-				if err != nil {
-					return err
-				}
-				args.Path = repoRoot
-			}
-			if err := validateNewArgs(&args); err != nil {
-				return err
-			}
-			if err := ensureDaemonRunning(client); err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
-			if cmd.Flags().Changed("model") || cmd.Flags().Changed("prompt") || args.Model != "" || args.Prompt != "" {
-				request.AgentConfig = &schemas.SessionAgentConfig{
-					Model:  strings.TrimSpace(args.Model),
-					Prompt: strings.TrimSpace(args.Prompt),
-				}
-			}
-			response, err := client.CreateSession(ctx, request)
-			if err != nil {
-				if errors.Is(err, sdk.ErrAuthRequired) {
-					if err := runGitHubAuthFlow(client); err != nil {
-						return err
-					}
-					ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer retryCancel()
-					response, err = client.CreateSession(ctx, request)
-					if err != nil {
-						return err
-					}
-				} else {
-					return err
-				}
-			}
-			printSessionCreated(response)
-			if args.Wait {
-				timeout, err := parseWaitTimeout(args.Timeout)
-				if err != nil {
-					return err
-				}
-				final, err := waitForTask(client, response.TaskID, timeout)
-				if err != nil {
-					return err
-				}
-				printTaskSummary(final)
-			}
-			return nil
+			includeAgentConfig := cmd.Flags().Changed("model") || cmd.Flags().Changed("prompt") || args.Model != "" || args.Prompt != ""
+			return runCreateSession(&args, includeAgentConfig)
 		},
 	}
 
@@ -185,7 +144,7 @@ func newDelCmd() *cobra.Command {
 			if err := validateDelArgs(&args); err != nil {
 				return err
 			}
-			if err := ensureDaemonRunning(client); err != nil {
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -222,7 +181,7 @@ func newSessionsCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := sdk.NewClient()
-			if err := ensureDaemonRunning(client); err != nil {
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -230,7 +189,7 @@ func newSessionsCmd() *cobra.Command {
 			response, err := client.ListSessions(ctx)
 			if err != nil {
 				if errors.Is(err, sdk.ErrAuthRequired) {
-					if err := runGitHubAuthFlow(client); err != nil {
+					if err := cliutil.RunGitHubAuthFlow(client); err != nil {
 						return err
 					}
 					ctx, retryCancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -267,7 +226,7 @@ func newTaskCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, inputs []string) error {
 			client := sdk.NewClient()
-			if err := ensureDaemonRunning(client); err != nil {
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -295,10 +254,10 @@ func newAuthCmd() *cobra.Command {
 				return fmt.Errorf("unsupported auth provider: %s", provider)
 			}
 			client := sdk.NewClient()
-			if err := ensureDaemonRunning(client); err != nil {
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
-			return runGitHubAuthFlow(client)
+			return cliutil.RunGitHubAuthFlow(client)
 		},
 	}
 
@@ -319,152 +278,66 @@ func validateDelArgs(payload *DelArgs) error {
 	return nil
 }
 
-func ensureDaemonRunning(client *sdk.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-
-	if version, err := client.Version(ctx); err == nil {
-		localVersion := conf.GetConfig().Version
-		if strings.TrimSpace(version) == strings.TrimSpace(localVersion) {
-			return nil
-		}
-		return replaceDaemon(client, version, localVersion)
-	}
-
-	if err := startDaemon(); err != nil {
-		return err
-	}
-
-	return waitForDaemon(client)
-}
-
-func runGitHubAuthFlow(client *sdk.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	start, err := client.StartGitHubOAuth(ctx)
-	if err != nil {
-		return err
-	}
-
-	url := start.VerificationURIComplete
-	if url == "" {
-		url = start.VerificationURI
-	}
-
-	if url != "" {
-		_ = desktop.OpenURL(url)
-		fmt.Printf("Authenticate with GitHub to continue:\nURL: %s\n", term.ClickableLink(url, url))
-	} else {
-		fmt.Println("Authenticate with GitHub to continue:")
-	}
-	if start.UserCode != "" {
-		fmt.Printf("User code: %s\n", start.UserCode)
-	}
-
-	deadline := time.Now().Add(2 * time.Minute)
-	if start.ExpiresIn > 0 {
-		expiry := time.Now().Add(time.Duration(start.ExpiresIn) * time.Second)
-		if expiry.Before(deadline) {
-			deadline = expiry
-		}
-	}
-	pollInterval := 2 * time.Second
-	if start.Interval > 0 {
-		pollInterval = time.Duration(start.Interval) * time.Second
-		if pollInterval < 2*time.Second {
-			pollInterval = 2 * time.Second
-		}
-	}
-	for time.Now().Before(deadline) {
-		pollCtx, pollCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		status, err := client.GitHubOAuthStatus(pollCtx, start.State)
-		pollCancel()
+func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
+	client := sdk.NewClient()
+	if args.Path == "" {
+		repoRoot, err := cliutil.RepoRootFromCwd()
 		if err != nil {
 			return err
 		}
-		switch status.Status {
-		case "complete":
-			fmt.Println("GitHub auth complete.")
-			return nil
-		case "failed":
-			if status.Error != "" {
-				return fmt.Errorf("github auth failed: %s", status.Error)
-			}
-			return errors.New("github auth failed")
-		default:
-			time.Sleep(pollInterval)
-		}
+		args.Path = repoRoot
 	}
-
-	return errors.New("timed out waiting for github auth")
-}
-
-func startDaemon() error {
-	path, err := findServeBinary()
-	if err != nil {
+	if err := validateNewArgs(args); err != nil {
 		return err
 	}
-
-	cmd := exec.Command(path, "serve")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Start()
-}
-
-func waitForDaemon(client *sdk.Client) error {
-	var lastErr error
-	for i := 0; i < 8; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		_, err := client.Version(ctx)
-		cancel()
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		time.Sleep(time.Duration(i+1) * 150 * time.Millisecond)
+	if err := cliutil.EnsureDaemonRunning(client); err != nil {
+		return err
 	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-	return errors.New("failed to reach droner server")
-}
-
-func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	if err := client.Shutdown(ctx); err != nil {
-		if errors.Is(err, sdk.ErrShutdownUnsupported) {
-			return fmt.Errorf("dronerd %s is running; please stop it and retry", strings.TrimSpace(remoteVersion))
+	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
+	if includeAgentConfig {
+		request.AgentConfig = &schemas.SessionAgentConfig{
+			Model:  strings.TrimSpace(args.Model),
+			Prompt: strings.TrimSpace(args.Prompt),
 		}
-		return fmt.Errorf("failed to shutdown dronerd %s: %w", strings.TrimSpace(remoteVersion), err)
 	}
-
-	if err := waitForDaemonStop(client); err != nil {
-		return fmt.Errorf("dronerd %s did not stop: %w", strings.TrimSpace(remoteVersion), err)
+	response, err := client.CreateSession(ctx, request)
+	if err != nil {
+		if errors.Is(err, sdk.ErrAuthRequired) {
+			if err := cliutil.RunGitHubAuthFlow(client); err != nil {
+				return err
+			}
+			ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer retryCancel()
+			response, err = client.CreateSession(ctx, request)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
-
-	if err := startDaemon(); err != nil {
-		return err
+	cliutil.PrintSessionCreated(response)
+	if args.Wait {
+		timeout, err := parseWaitTimeout(args.Timeout)
+		if err != nil {
+			return err
+		}
+		final, err := waitForTask(client, response.TaskID, timeout)
+		if err != nil {
+			return err
+		}
+		printTaskSummary(final)
 	}
-
-	return waitForDaemon(client)
+	return nil
 }
 
-func waitForDaemonStop(client *sdk.Client) error {
-	for i := 0; i < 8; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		_, err := client.Version(ctx)
-		cancel()
-		if err != nil {
-			return nil
-		}
-		time.Sleep(time.Duration(i+1) * 150 * time.Millisecond)
-	}
-
-	return errors.New("failed to stop dronerd")
+func isInteractiveTerminal() bool {
+	stdin := os.Stdin.Fd()
+	stdout := os.Stdout.Fd()
+	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
+		(isatty.IsTerminal(stdout) || isatty.IsCygwinTerminal(stdout))
 }
 
 func parseWaitTimeout(raw string) (time.Duration, error) {
@@ -539,40 +412,4 @@ func looksLikeUUID(value string) bool {
 		return false
 	}
 	return value[8] == '-' && value[13] == '-' && value[18] == '-' && value[23] == '-'
-}
-
-func printSessionCreated(response *schemas.SessionCreateResponse) {
-	simpleID := strings.TrimSpace(response.SimpleID)
-	if simpleID == "" && response.SessionID != "" {
-		simpleID = response.SessionID.String()
-	}
-	if simpleID != "" {
-		fmt.Printf("session: %s\n", simpleID)
-	}
-}
-
-func findServeBinary() (string, error) {
-	executable, err := os.Executable()
-	if err == nil && executable != "" {
-		return executable, nil
-	}
-
-	path, err := exec.LookPath("droner")
-	if err != nil {
-		return "", fmt.Errorf("droner not found in PATH")
-	}
-	return path, nil
-}
-
-func repoRootFromCwd() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine repo root: %s", strings.TrimSpace(string(output)))
-	}
-	root := strings.TrimSpace(string(output))
-	if root == "" {
-		return "", errors.New("failed to determine repo root")
-	}
-	return root, nil
 }
