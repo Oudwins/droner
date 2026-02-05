@@ -13,8 +13,8 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
-	"github.com/Oudwins/droner/pkgs/droner/internals/tui"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
+	"github.com/Oudwins/droner/pkgs/droner/tui"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
