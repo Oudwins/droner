@@ -48,7 +48,7 @@ type SessionAgentConfig struct {
 type SessionCreateRequest struct {
 	Path        string              `json:"path"`
 	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
-	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty" zog:"agentConfig"`
+	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
 }
 
 var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
