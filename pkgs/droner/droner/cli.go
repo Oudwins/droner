@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +51,12 @@ type DelArgs struct {
 	Timeout string `zog:"timeout"`
 }
 
+type NukeArgs struct {
+	Yes     bool
+	Wait    bool
+	Timeout string
+}
+
 var delArgsSchema = z.Struct(z.Shape{
 	"ID":      z.String().Required().Trim(),
 	"Wait":    z.Bool().Optional(),
@@ -81,6 +89,7 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		newNewCmd(),
 		newDelCmd(),
+		newNukeCmd(),
 		newSessionsCmd(),
 		newTaskCmd(),
 		newAuthCmd(),
@@ -169,6 +178,58 @@ func newDelCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
+	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
+	return cmd
+}
+
+func newNukeCmd() *cobra.Command {
+	args := NukeArgs{}
+	cmd := &cobra.Command{
+		Use:   "nuke",
+		Short: "Delete all sessions",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client := sdk.NewClient()
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
+				return err
+			}
+			if !args.Yes {
+				if !isInteractiveTerminal() {
+					return errors.New("refusing to delete all sessions without --yes in non-interactive mode")
+				}
+				confirmed, err := confirmAction("This will delete all sessions. Continue? [y/N]: ")
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					fmt.Println("Aborted.")
+					return nil
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			response, err := client.NukeSessions(ctx)
+			if err != nil {
+				return err
+			}
+			printTaskSummary(response)
+			if args.Wait {
+				timeout, err := parseWaitTimeout(args.Timeout)
+				if err != nil {
+					return err
+				}
+				final, err := waitForTask(client, response.TaskID, timeout)
+				if err != nil {
+					return err
+				}
+				printTaskSummary(final)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&args.Yes, "dangerously-skip-confirmation", false, "skip confirmation prompt")
 	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
 	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
@@ -349,6 +410,17 @@ func parseWaitTimeout(raw string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid wait timeout: %w", err)
 	}
 	return value, nil
+}
+
+func confirmAction(prompt string) (bool, error) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Fprint(os.Stdout, prompt)
+	input, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes", nil
 }
 
 func waitForTask(client *sdk.Client, taskID string, timeout time.Duration) (*schemas.TaskResponse, error) {

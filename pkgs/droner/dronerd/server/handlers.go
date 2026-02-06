@@ -175,6 +175,21 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 	}, Render.Status(http.StatusAccepted))
 }
 
+func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteAllSessions, []byte("{}")))
+	if err != nil {
+		logger.Error("Failed to enque job", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	RenderJSON(w, r, schemas.TaskResponse{
+		TaskID: taskId,
+		Type:   "session_nuke",
+		Status: schemas.TaskStatusPending,
+	}, Render.Status(http.StatusAccepted))
+}
+
 func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	queued, err := s.Base.DB.ListSessionsByStatus(context.Background(), db.SessionStatusQueued)
 	if err != nil {

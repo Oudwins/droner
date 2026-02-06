@@ -22,8 +22,9 @@ import (
 type Jobs string
 
 const (
-	JobCreateSession Jobs = "session_delete_job"
-	JobDeleteSession Jobs = "session_create_job"
+	JobCreateSession     Jobs = "session_delete_job"
+	JobDeleteSession     Jobs = "session_create_job"
+	JobDeleteAllSessions Jobs = "session_nuke_job"
 )
 
 func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
@@ -202,6 +203,40 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 		},
 	})
 
+	nukeSessionsJob := tasky.NewJob(JobDeleteAllSessions, tasky.JobConfig[Jobs]{
+		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
+			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
+			ids := make([]string, 0)
+			runningIDs, err := base.DB.ListRunningSessionIDs(ctx)
+			if err != nil {
+				logger.Error("Failed to list running sessions", slog.String("error", err.Error()))
+				return err
+			}
+			ids = append(ids, runningIDs...)
+			failures := 0
+			for _, rawID := range ids {
+				if rawID == "" {
+					continue
+				}
+				sessionID := schemas.NewSSessionID(rawID)
+				payload, err := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionID})
+				if err != nil {
+					logger.Error("Failed to serialize session delete payload", slog.String("error", err.Error()))
+					failures++
+					continue
+				}
+				_, err = base.TaskQueue.Enqueue(ctx, tasky.NewTask(JobDeleteSession, payload))
+				if err != nil {
+					logger.Error("Failed to enqueue delete session task", slog.String("sessionId", sessionID.String()), slog.String("error", err.Error()))
+					failures++
+					continue
+				}
+			}
+			logger.Debug("Nuke sessions success", slog.Int("failures", failures))
+			return nil
+		},
+	})
+
 	basePath := path.Join(base.Config.Server.DataDir, "queue")
 	err := os.MkdirAll(basePath, 0o755)
 	assert.AssertNil(err, "[QUEUE] Failed to initialize. Could not create dirs", err)
@@ -215,7 +250,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	q, err := tasky.NewQueue(
 		tasky.QueueConfig[Jobs]{
-			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob},
+			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob, nukeSessionsJob},
 			Backend: sqliteBackend,
 			OnError: func(err error, task *tasky.Task[Jobs], payload []byte) error {
 				base.Logger.Error("[QUEUE] Task failed to complete", slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)), slog.String("error", err.Error()))

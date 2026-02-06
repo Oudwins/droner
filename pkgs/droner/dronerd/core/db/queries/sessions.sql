@@ -40,6 +40,12 @@ FROM sessions
 WHERE status = ?
 ORDER BY updated_at DESC;
 
+-- name: ListRunningSessionIDs :many
+SELECT simple_id
+FROM sessions
+WHERE status = 'running'
+ORDER BY updated_at DESC;
+
 -- name: UpdateSessionStatusByID :one
 UPDATE sessions
 SET status = ?,
