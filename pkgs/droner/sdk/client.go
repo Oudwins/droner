@@ -160,6 +160,25 @@ func (c *Client) DeleteSession(ctx context.Context, request schemas.SessionDelet
 	return &payload, nil
 }
 
+func (c *Client) NukeSessions(ctx context.Context) (*schemas.TaskResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/sessions/nuke", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, responseError(resp)
+	}
+
+	var payload schemas.TaskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return &payload, nil
+}
+
 func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {

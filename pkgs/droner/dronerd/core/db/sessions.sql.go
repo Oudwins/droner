@@ -123,6 +123,36 @@ func (q *Queries) GetSessionBySimpleID(ctx context.Context, simpleID string) (Se
 	return i, err
 }
 
+const listRunningSessionIDs = `-- name: ListRunningSessionIDs :many
+SELECT simple_id
+FROM sessions
+WHERE status = 'running'
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListRunningSessionIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listRunningSessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var simple_id string
+		if err := rows.Scan(&simple_id); err != nil {
+			return nil, err
+		}
+		items = append(items, simple_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT id, simple_id, status, repo_path, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
