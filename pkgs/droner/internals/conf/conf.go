@@ -63,7 +63,7 @@ var serverSchema = z.Struct(z.Shape{
 })
 
 var sessionsSchema = z.Struct(z.Shape{
-	"DefaultBackend": z.StringLike[backends.BackendID]().Default(backends.BackendLocal).OneOf(backends.DefaultIDs()),
+	"DefaultBackend": z.StringLike[backends.BackendID]().Default(backends.BackendLocal).OneOf(backends.AllBackendIDs),
 })
 
 var agentSchema = z.Struct(z.Shape{
