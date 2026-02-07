@@ -41,7 +41,10 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid json", nil), Render.Status(http.StatusBadRequest))
 	}
 
-	errs := schemas.SessionCreateSchema.Validate(&request, z.WithCtxValue("workspace", s.Base.Workspace))
+	errs := schemas.SessionCreateSchema.Validate(
+		&request,
+		z.WithCtxValue("workspace", s.Base.Workspace),
+	)
 	if errs != nil {
 		logger.Info("Schema validation failed", "errors", errs)
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
@@ -110,6 +113,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		ID:           sessionID.String(),
 		SimpleID:     request.SessionID.String(),
 		Status:       db.SessionStatusQueued,
+		BackendID:    request.BackendID.String(),
 		RepoPath:     request.Path,
 		WorktreePath: worktreePath,
 		AgentConfig:  agentConfigValue,
@@ -144,6 +148,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	res := schemas.SessionCreateResponse{
 		SessionID:    request.SessionID,
 		SimpleID:     sessionData.SimpleID,
+		BackendID:    request.BackendID,
 		WorktreePath: worktreePath,
 		TaskID:       taskId,
 	}

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 
@@ -48,6 +49,7 @@ type SessionAgentConfig struct {
 type SessionCreateRequest struct {
 	Path        string              `json:"path"`
 	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
+	BackendID   backends.BackendID  `json:"backendId,omitempty" zog:"backendId"`
 	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
 }
 
@@ -57,6 +59,7 @@ var multiupleSlashes = regexp.MustCompile(`//+`)
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform).TestFunc(isGitRepoTest, z.Message("Path is not a git repo")),
 	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
+	"BackendID": z.StringLike[backends.BackendID]().Default(conf.GetConfig().Sessions.DefaultBackend).OneOf(backends.AllBackendIDs),
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
 		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
 		"Prompt": z.String().Optional().Trim(),
@@ -64,10 +67,11 @@ var SessionCreateSchema = z.Struct(z.Shape{
 })
 
 type SessionCreateResponse struct {
-	SessionID    SSessionID `json:"sessionId"`
-	SimpleID     string     `json:"simpleId"`
-	WorktreePath string     `json:"worktreePath"`
-	TaskID       string     `json:"taskId"`
+	SessionID    SSessionID         `json:"sessionId"`
+	SimpleID     string             `json:"simpleId"`
+	BackendID    backends.BackendID `json:"backendId"`
+	WorktreePath string             `json:"worktreePath"`
+	TaskID       string             `json:"taskId"`
 }
 
 type SessionDeleteRequest struct {

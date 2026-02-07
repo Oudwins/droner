@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
+
 	z "github.com/Oudwins/zog"
 )
 
@@ -16,6 +18,7 @@ type Config struct {
 	Providers ProvidersConfig `json:"providers"`
 	Worktrees WorktreesConfig `json:"worktrees" `
 	Server    ServerConfig    `json:"server"`
+	Sessions  SessionsConfig  `json:"sessions"`
 	Agent     AgentConfig     `json:"agent"`
 }
 
@@ -33,6 +36,10 @@ type WorktreesConfig struct {
 
 type ServerConfig struct {
 	DataDir string `json:"data_dir"`
+}
+
+type SessionsConfig struct {
+	DefaultBackend backends.BackendID `json:"default_backend"`
 }
 
 type AgentConfig struct {
@@ -55,6 +62,10 @@ var serverSchema = z.Struct(z.Shape{
 	"DataDir": z.String().Default("~/.droner").Transform(expandPathTransform),
 })
 
+var sessionsSchema = z.Struct(z.Shape{
+	"DefaultBackend": z.StringLike[backends.BackendID]().Default(backends.BackendLocal).OneOf(backends.DefaultIDs()),
+})
+
 var agentSchema = z.Struct(z.Shape{
 	"DefaultModel": z.String().Default("openai/gpt-5.2-codex"),
 })
@@ -63,6 +74,7 @@ var ConfigSchema = z.Struct(z.Shape{
 	"providers": providersSchema,
 	"worktrees": worktreesSchema,
 	"server":    serverSchema,
+	"sessions":  sessionsSchema,
 	"agent":     agentSchema,
 })
 var config *Config
