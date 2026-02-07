@@ -13,6 +13,7 @@ type Session struct {
 	ID           string
 	SimpleID     string
 	Status       SessionStatus
+	BackendID    string
 	RepoPath     string
 	WorktreePath string
 	AgentConfig  sql.NullString

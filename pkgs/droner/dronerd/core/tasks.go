@@ -9,10 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"path"
-	"path/filepath"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/backends/tasky_sqlite3"
@@ -32,7 +32,6 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 	createSessionJob := tasky.NewJob(JobCreateSession, tasky.JobConfig[Jobs]{
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
-			ws := base.Workspace
 			payload := schemas.SessionCreateRequest{}
 			err2 := json.Unmarshal(task.Payload, &payload)
 			if err2 != nil {
@@ -40,36 +39,23 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return err2
 			}
 			logger = logger.With(slog.Any("payload", payload))
-			errs := schemas.SessionCreateSchema.Validate(
-				&payload,
-				zog.WithCtxValue("workspace", base.Workspace),
-			)
+			errs := schemas.SessionCreateSchema.Validate(&payload)
 			if errs != nil {
 				return fmt.Errorf("failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
 			}
 
 			logger.Debug("Starting with payload")
 
-			repoName := filepath.Base(payload.Path)
-			worktreePath := path.Join(base.Config.Worktrees.Dir, payload.SessionID.SessionWorktreeName(repoName))
-
-			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			if err := ws.CreateGitWorktree(payload.Path, worktreePath, payload.SessionID.String()); err != nil {
-				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
-				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: payload.SessionID.String(),
-					Status:   db.SessionStatusFailed,
-					Error:    sql.NullString{String: err.Error(), Valid: true},
-				})
-				if updateErr != nil {
-					logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
-				}
-				return err
+			backend, err := base.BackendStore.Get(payload.BackendID)
+			if err != nil {
+				return fmt.Errorf("failed to resolve backend: %w", err)
+			}
+			worktreePath, err := backend.WorktreePath(payload.Path, payload.SessionID.String())
+			if err != nil {
+				return fmt.Errorf("failed to resolve worktree path: %w", err)
 			}
 
-			// create tmux sesion
-			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			model := base.Config.Agent.DefaultModel
+			model := base.Config.Sessions.Agent.DefaultModel
 			prompt := ""
 			if payload.AgentConfig != nil {
 				if payload.AgentConfig.Model != "" {
@@ -78,8 +64,9 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				prompt = payload.AgentConfig.Prompt
 			}
 
-			if err := ws.CreateTmuxSession(payload.SessionID.String(), worktreePath, model, prompt); err != nil {
-				logger.Error("Failed to create tmux session", slog.String("error", err.Error()))
+			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
+			if err := backend.CreateSession(ctx, payload.Path, worktreePath, payload.SessionID.String(), backends.AgentConfig{Model: model, Prompt: prompt}); err != nil {
+				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID.String(),
 					Status:   db.SessionStatusFailed,
@@ -104,7 +91,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			// 	}
 			// }
 
-			_, err := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 				SimpleID: payload.SessionID.String(),
 				Status:   db.SessionStatusRunning,
 				Error:    sql.NullString{},
@@ -122,7 +109,6 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 	deleteSessionJob := tasky.NewJob(JobDeleteSession, tasky.JobConfig[Jobs]{
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
-			ws := base.Workspace
 			data := schemas.SessionDeleteRequest{}
 			err2 := json.Unmarshal(task.Payload, &data)
 			if err2 != nil {
@@ -145,39 +131,13 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf(" failed to load session: %w", err)
 			}
 
-			worktreePath := session.WorktreePath
-			commonGitDir, err := ws.GitCommonDirFromWorktree(worktreePath)
+			backend, err := base.BackendStore.Get(backends.BackendID(session.BackendID))
 			if err != nil {
-				logger.Error("Failed to get common dir from worktree", slog.String("error", err.Error()))
+				logger.Error("Failed to resolve backend", slog.String("error", err.Error()))
 				return err
 			}
-			tmuxSessionName := data.SessionID.String()
-
-			if err := ws.KillTmuxSession(tmuxSessionName); err != nil {
-				logger.Error("Failed to kill tmux session", slog.String("error", err.Error()))
-				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: data.SessionID.String(),
-					Status:   db.SessionStatusFailed,
-					Error:    sql.NullString{String: err.Error(), Valid: true},
-				})
-				if updateErr != nil {
-					logger.Error("Failed to update session status", slog.String("error", err.Error()))
-				}
-				return err
-			}
-			if err := ws.RemoveGitWorktree(worktreePath); err != nil {
-				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-					SimpleID: data.SessionID.String(),
-					Status:   db.SessionStatusFailed,
-					Error:    sql.NullString{String: err.Error(), Valid: true},
-				})
-				if updateErr != nil {
-					logger.Error("Failed to update session status", slog.String("error", err.Error()))
-				}
-				return err
-			}
-			if err := ws.DeleteGitBranch(commonGitDir, data.SessionID.String()); err != nil {
-				logger.Error("Failed to delete git branch", slog.String("error", err.Error()))
+			if err := backend.DeleteSession(ctx, session.WorktreePath, data.SessionID.String()); err != nil {
+				logger.Error("Failed to cleanup session", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: data.SessionID.String(),
 					Status:   db.SessionStatusFailed,

@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   simple_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'deleted')),
+  backend_id TEXT NOT NULL,
   repo_path TEXT NOT NULL,
   worktree_path TEXT NOT NULL,
   agent_config TEXT,

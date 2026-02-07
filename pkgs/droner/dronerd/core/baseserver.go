@@ -7,10 +7,10 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
-	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 )
 
 type BaseServer struct {
@@ -18,7 +18,7 @@ type BaseServer struct {
 	Env           *env.EnvStruct
 	Logger        *slog.Logger
 	LogFile       *os.File
-	Workspace     workspace.Host
+	BackendStore  *backends.Store
 	TaskQueue     *tasky.Queue[Jobs]
 	Subscriptions *subscriptionManager
 	DB            *db.Queries
@@ -34,14 +34,14 @@ func New() *BaseServer {
 	}
 
 	logger, logFile := InitLogger(config)
-	w := workspace.NewLocalHost()
+	backendStore := backends.NewStore(config.Sessions)
 
 	base := &BaseServer{
-		Config:    config,
-		Env:       env,
-		Logger:    logger,
-		LogFile:   logFile,
-		Workspace: w,
+		Config:       config,
+		Env:          env,
+		Logger:       logger,
+		LogFile:      logFile,
+		BackendStore: backendStore,
 	}
 
 	queries, err := InitDB(config)
