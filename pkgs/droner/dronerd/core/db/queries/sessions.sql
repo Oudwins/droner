@@ -3,11 +3,13 @@ INSERT INTO sessions (
   id,
   simple_id,
   status,
+  backend_id,
   repo_path,
   worktree_path,
   agent_config,
   error
 ) VALUES (
+  ?,
   ?,
   ?,
   ?,

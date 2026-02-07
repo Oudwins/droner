@@ -1,6 +1,8 @@
-# AGENTS.md
 # Guidance for coding agents working in this repository.
-# Keep instructions in sync with the repo and justfile.
+
+## CRITICAL INSTRUCTIONS
+1. After you think you have completed a task always aim to verify your work by running the tests, build, etc before handing control back to the user.
+2. This file is for you. Please update it if you figure out something important about the codebase or find that some information is out of date. We should try to keep it small with only the most important details 
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
@@ -105,7 +107,7 @@
 - Avoid hard-coding OS-specific separators or paths.
 
 ## Worktrees and sessions
-- Worktrees are named `<repo>#<sessionID>`.
+- Worktrees are named `<repo>..<sessionID>`.
 - Worktree setup can read `.cursor/worktrees.json` in the root repo.
 - Use `git worktree add`/`remove` helpers in `server`.
 
@@ -120,3 +122,5 @@
 - `just dev` starts the server and frees port 57876.
 - `go test ./pkgs/droner/...` should pass before PRs.
 - `gofmt -w` should produce no diffs on committed Go files.
+
+

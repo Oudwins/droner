@@ -8,15 +8,16 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
+
 	z "github.com/Oudwins/zog"
 )
 
 type Config struct {
-	Version   string          `json:"-"`
-	Providers ProvidersConfig `json:"providers"`
-	Worktrees WorktreesConfig `json:"worktrees" `
-	Server    ServerConfig    `json:"server"`
-	Agent     AgentConfig     `json:"agent"`
+	Version   string                  `json:"-"`
+	Providers ProvidersConfig         `json:"providers"`
+	Server    ServerConfig            `json:"server"`
+	Sessions  backends.SessionsConfig `json:"sessions"`
 }
 
 type ProvidersConfig struct {
@@ -27,16 +28,8 @@ type GitHubConfig struct {
 	PollInterval string `json:"poll_interval"`
 }
 
-type WorktreesConfig struct {
-	Dir string `json:"dir"`
-}
-
 type ServerConfig struct {
 	DataDir string `json:"data_dir"`
-}
-
-type AgentConfig struct {
-	DefaultModel string `json:"default_model"`
 }
 
 var gitHubSchema = z.Struct(z.Shape{
@@ -47,12 +40,18 @@ var providersSchema = z.Struct(z.Shape{
 	"github": gitHubSchema,
 })
 
-var worktreesSchema = z.Struct(z.Shape{
-	"Dir": z.String().Default("~/.droner/worktrees").Transform(expandPathTransform),
-})
-
 var serverSchema = z.Struct(z.Shape{
 	"DataDir": z.String().Default("~/.droner").Transform(expandPathTransform),
+})
+
+var sessionsSchema = z.Struct(z.Shape{
+	"DefaultBackend": z.StringLike[backends.BackendID]().Default(backends.BackendLocal).OneOf(backends.AllBackendIDs),
+	"Agent":          agentSchema,
+	"Backends": z.Struct(z.Shape{
+		"Local": z.Struct(z.Shape{
+			"WorktreeDir": z.String().Default("~/.droner/worktrees").Transform(expandPathTransform),
+		}),
+	}),
 })
 
 var agentSchema = z.Struct(z.Shape{
@@ -61,9 +60,8 @@ var agentSchema = z.Struct(z.Shape{
 
 var ConfigSchema = z.Struct(z.Shape{
 	"providers": providersSchema,
-	"worktrees": worktreesSchema,
 	"server":    serverSchema,
-	"agent":     agentSchema,
+	"sessions":  sessionsSchema,
 })
 var config *Config
 
