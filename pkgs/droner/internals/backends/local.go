@@ -1,14 +1,16 @@
 package backends
 
-type LocalBackend struct{}
+type LocalBackend struct {
+	worktreeRoot string
+}
 
-func (LocalBackend) ID() BackendID {
+func (l LocalBackend) ID() BackendID {
 	return BackendLocal
 }
 
-func RegisterLocal(store *Store) {
+func RegisterLocal(store *Store, worktreeRoot string) {
 	if store == nil {
 		return
 	}
-	store.Register(LocalBackend{})
+	store.Register(LocalBackend{worktreeRoot: worktreeRoot})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/internals/repo"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -41,40 +41,36 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid json", nil), Render.Status(http.StatusBadRequest))
 	}
 
-	errs := schemas.SessionCreateSchema.Validate(
-		&request,
-		z.WithCtxValue("workspace", s.Base.Workspace),
-	)
+	errs := schemas.SessionCreateSchema.Validate(&request)
 	if errs != nil {
 		logger.Info("Schema validation failed", "errors", errs)
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
 		return
 	}
 
-	logger = logger.With(slog.Any("request", request))
-	logger.Debug("Successful validation")
-
-	// TODO: This needs to be moved out of here
-	worktreeRoot := s.Base.Config.Worktrees.Dir
-	if err := s.Base.Workspace.MkdirAll(worktreeRoot, 0o755); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to create worktree root", nil), Render.Status(http.StatusInternalServerError))
+	if err := repo.CheckRepo(request.Path); err != nil {
+		logger.Info("Repo validation failed", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Path is not a git repo", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
 
+	backend, err := s.Base.BackendStore.Get(request.BackendID)
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Backend is not registered", nil), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	logger = logger.With(slog.Any("request", request))
+	logger.Debug("Successful validation")
+
 	// LOGIC
+	// NOTE: Parallel requests with the same ID are allowed by this behaviour. Can fix this later. Its safe because create session should fail at db level
 	repoName := filepath.Base(request.Path)
 	if request.SessionID == "" {
 		generatedID, err := sessionids.New(repoName, &sessionids.GeneratorConfig{
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
-				sid := schemas.NewSSessionID(id)
-				worktreePath := filepath.Join(worktreeRoot, sid.SessionWorktreeName(repoName)) // TODO: this conversion is done in multiple places. Brittle
-				_, err := s.Base.Workspace.Stat(worktreePath)
-				if err == nil {
-					return errors.New("Session folder already exists")
-				}
-
-				return nil
+				return backend.ValidateSessionID(request.Path, id)
 			},
 		})
 		if err != nil {
@@ -90,8 +86,16 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		request.SessionID = schemas.NewSSessionID(generatedID)
 	}
 
-	worktreeName := request.SessionID.SessionWorktreeName(repoName)
-	worktreePath := filepath.Join(worktreeRoot, worktreeName)
+	if err := backend.ValidateSessionID(request.Path, request.SessionID.String()); err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Session ID is not available", nil), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	worktreePath, err := backend.WorktreePath(request.Path, request.SessionID.String())
+	if err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve worktree path", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
 
 	sessionID, err := uuid.NewV7()
 	if err != nil {

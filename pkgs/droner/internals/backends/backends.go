@@ -1,6 +1,7 @@
 package backends
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
@@ -17,6 +18,28 @@ const (
 
 type Backend interface {
 	ID() BackendID
+	WorktreePath(repoPath string, sessionID string) (string, error)
+	ValidateSessionID(repoPath string, sessionID string) error
+	CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error
+	DeleteSession(ctx context.Context, worktreePath string, sessionID string) error
+}
+
+type SessionsConfig struct {
+	DefaultBackend BackendID      `json:"default_backend"`
+	Agent          AgentDefaults  `json:"agent"`
+	Backends       BackendsConfig `json:"backends"`
+}
+
+type BackendsConfig struct {
+	Local LocalBackendConfig `json:"local"`
+}
+
+type LocalBackendConfig struct {
+	WorktreeDir string `json:"worktree_dir"`
+}
+
+type AgentDefaults struct {
+	DefaultModel string `json:"default_model"`
 }
 
 var ErrUnknownBackend = errors.New("unknown backend")
@@ -26,9 +49,14 @@ type Store struct {
 	backends map[BackendID]Backend
 }
 
-func NewStore() *Store {
+type AgentConfig struct {
+	Model  string
+	Prompt string
+}
+
+func NewStore(config SessionsConfig) *Store {
 	store := &Store{backends: map[BackendID]Backend{}}
-	RegisterLocal(store)
+	RegisterLocal(store, config.Backends.Local.WorktreeDir)
 	return store
 }
 

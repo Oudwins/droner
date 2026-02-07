@@ -7,12 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
@@ -21,7 +21,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type fakeWorkspace struct {
+type fakeBackend struct {
+	worktreeRoot          string
 	createdWorktreeRepo   string
 	createdWorktreePath   string
 	createdWorktreeBranch string
@@ -31,78 +32,40 @@ type fakeWorkspace struct {
 	createdTmuxPrompt     string
 	removedWorktreePath   string
 	killedTmuxName        string
-	deletedBranchName     string
-	commonGitDirPath      string
 }
 
-func (f *fakeWorkspace) Stat(path string) (os.FileInfo, error) {
-	return os.Stat(path)
+func (f *fakeBackend) ID() backends.BackendID {
+	return backends.BackendLocal
 }
 
-func (f *fakeWorkspace) ReadDir(path string) ([]os.DirEntry, error) {
-	return os.ReadDir(path)
+func (f *fakeBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
+	repoName := filepath.Base(repoPath)
+	worktreeName := repoName + ".." + sessionID
+	return filepath.Join(f.worktreeRoot, worktreeName), nil
 }
 
-func (f *fakeWorkspace) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func (f *fakeWorkspace) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
-
-func (f *fakeWorkspace) GitIsInsideWorkTree(repoPath string) error {
+func (f *fakeBackend) ValidateSessionID(repoPath string, sessionID string) error {
 	return nil
 }
 
-func (f *fakeWorkspace) CreateGitWorktree(repoPath string, worktreePath string, branchName string) error {
+func (f *fakeBackend) CreateSession(_ context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
 	f.createdWorktreeRepo = repoPath
 	f.createdWorktreePath = worktreePath
-	f.createdWorktreeBranch = branchName
-	return nil
-}
-
-func (f *fakeWorkspace) RemoveGitWorktree(worktreePath string) error {
-	f.removedWorktreePath = worktreePath
-	return nil
-}
-
-func (f *fakeWorkspace) GitCommonDirFromWorktree(worktreePath string) (string, error) {
-	f.commonGitDirPath = filepath.Join(worktreePath, "common.git")
-	return f.commonGitDirPath, nil
-}
-
-func (f *fakeWorkspace) DeleteGitBranch(commonGitDir string, sessionID string) error {
-	f.deletedBranchName = sessionID
-	return nil
-}
-
-func (f *fakeWorkspace) GetRemoteURL(repoPath string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeWorkspace) GetRemoteURLFromWorktree(worktreePath string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeWorkspace) RunWorktreeSetup(repoPath string, worktreePath string) error {
-	return nil
-}
-
-func (f *fakeWorkspace) CreateTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
-	f.createdTmuxName = sessionName
+	f.createdWorktreeBranch = sessionID
+	f.createdTmuxName = sessionID
 	f.createdTmuxPath = worktreePath
-	f.createdTmuxModel = model
-	f.createdTmuxPrompt = prompt
+	f.createdTmuxModel = agentConfig.Model
+	f.createdTmuxPrompt = agentConfig.Prompt
 	return nil
 }
 
-func (f *fakeWorkspace) KillTmuxSession(sessionName string) error {
-	f.killedTmuxName = sessionName
+func (f *fakeBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
+	f.removedWorktreePath = worktreePath
+	f.killedTmuxName = sessionID
 	return nil
 }
 
-func setupTestBase(t *testing.T) (*BaseServer, *fakeWorkspace, string) {
+func setupTestBase(t *testing.T) (*BaseServer, *fakeBackend, string) {
 	t.Helper()
 
 	tempDir := t.TempDir()
@@ -138,16 +101,24 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeWorkspace, string) {
 	})
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	ws := &fakeWorkspace{}
 	config := &conf.Config{
-		Server:    conf.ServerConfig{DataDir: tempDir},
-		Worktrees: conf.WorktreesConfig{Dir: worktreesDir},
+		Server: conf.ServerConfig{DataDir: tempDir},
+		Sessions: backends.SessionsConfig{
+			DefaultBackend: backends.BackendLocal,
+			Agent:          backends.AgentDefaults{DefaultModel: "default-model"},
+			Backends: backends.BackendsConfig{
+				Local: backends.LocalBackendConfig{WorktreeDir: worktreesDir},
+			},
+		},
 	}
+	backend := &fakeBackend{worktreeRoot: worktreesDir}
+	backendStore := backends.NewStore(config.Sessions)
+	backendStore.Register(backend)
 	base := &BaseServer{
-		Config:    config,
-		Logger:    logger,
-		Workspace: ws,
-		DB:        db.New(conn),
+		Config:       config,
+		Logger:       logger,
+		BackendStore: backendStore,
+		DB:           db.New(conn),
 	}
 
 	queue, err := NewQueue(base)
@@ -157,7 +128,7 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeWorkspace, string) {
 	base.TaskQueue = queue
 	base.Subscriptions = newSubscriptionManager(base)
 
-	return base, ws, repoDir
+	return base, backend, repoDir
 }
 
 func runQueueUntil(t *testing.T, queue *tasky.Queue[Jobs], waitFn func() bool) {
@@ -222,11 +193,12 @@ func waitForSessionStatusByID(t *testing.T, queries *db.Queries, id string, stat
 }
 
 func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
-	base, ws, repoDir := setupTestBase(t)
+	base, backend, repoDir := setupTestBase(t)
 
 	payload := schemas.SessionCreateRequest{
 		Path:      repoDir,
 		SessionID: schemas.NewSSessionID("session-1"),
+		BackendID: backends.BackendLocal,
 		AgentConfig: &schemas.SessionAgentConfig{
 			Model:  "test-model",
 			Prompt: "test-prompt",
@@ -238,8 +210,10 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 		t.Fatalf("failed to create uuid: %v", err)
 	}
 
-	repoName := filepath.Base(payload.Path)
-	worktreePath := path.Join(base.Config.Worktrees.Dir, payload.SessionID.SessionWorktreeName(repoName))
+	worktreePath, err := backend.WorktreePath(payload.Path, payload.SessionID.String())
+	if err != nil {
+		t.Fatalf("failed to resolve worktree path: %v", err)
+	}
 
 	_, err = base.DB.CreateSession(context.Background(), db.CreateSessionParams{
 		ID:           newID.String(),
@@ -277,19 +251,19 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	if session.WorktreePath != worktreePath {
 		t.Fatalf("expected worktree path %s, got %s", worktreePath, session.WorktreePath)
 	}
-	if ws.createdWorktreeRepo != payload.Path {
-		t.Fatalf("expected git worktree repo %s, got %s", payload.Path, ws.createdWorktreeRepo)
+	if backend.createdWorktreeRepo != payload.Path {
+		t.Fatalf("expected git worktree repo %s, got %s", payload.Path, backend.createdWorktreeRepo)
 	}
-	if ws.createdWorktreePath != worktreePath {
-		t.Fatalf("expected git worktree path %s, got %s", worktreePath, ws.createdWorktreePath)
+	if backend.createdWorktreePath != worktreePath {
+		t.Fatalf("expected git worktree path %s, got %s", worktreePath, backend.createdWorktreePath)
 	}
-	if ws.createdTmuxName != payload.SessionID.String() {
-		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID.String(), ws.createdTmuxName)
+	if backend.createdTmuxName != payload.SessionID.String() {
+		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID.String(), backend.createdTmuxName)
 	}
 }
 
 func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
-	base, ws, repoDir := setupTestBase(t)
+	base, backend, repoDir := setupTestBase(t)
 
 	newID, err := uuid.NewV7()
 	if err != nil {
@@ -297,8 +271,10 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 	}
 
 	simpleID := "session-delete"
-	repoName := filepath.Base(repoDir)
-	worktreePath := path.Join(base.Config.Worktrees.Dir, schemas.NewSSessionID(simpleID).SessionWorktreeName(repoName))
+	worktreePath, err := backend.WorktreePath(repoDir, simpleID)
+	if err != nil {
+		t.Fatalf("failed to resolve worktree path: %v", err)
+	}
 
 	created, err := base.DB.CreateSession(context.Background(), db.CreateSessionParams{
 		ID:           newID.String(),
@@ -334,13 +310,10 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 	if session.Status != db.SessionStatusDeleted {
 		t.Fatalf("expected status deleted, got %s", session.Status)
 	}
-	if ws.killedTmuxName != simpleID {
-		t.Fatalf("expected tmux session kill %s, got %s", simpleID, ws.killedTmuxName)
+	if backend.killedTmuxName != simpleID {
+		t.Fatalf("expected tmux session kill %s, got %s", simpleID, backend.killedTmuxName)
 	}
-	if ws.removedWorktreePath != worktreePath {
-		t.Fatalf("expected worktree removal %s, got %s", worktreePath, ws.removedWorktreePath)
-	}
-	if ws.deletedBranchName != simpleID {
-		t.Fatalf("expected branch deletion %s, got %s", simpleID, ws.deletedBranchName)
+	if backend.removedWorktreePath != worktreePath {
+		t.Fatalf("expected worktree removal %s, got %s", worktreePath, backend.removedWorktreePath)
 	}
 }

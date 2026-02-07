@@ -7,7 +7,6 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/workspace"
 
 	z "github.com/Oudwins/zog"
 )
@@ -57,11 +56,11 @@ var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
 var multiupleSlashes = regexp.MustCompile(`//+`)
 
 var SessionCreateSchema = z.Struct(z.Shape{
-	"Path":      z.String().Required().Trim().Transform(cleanPathTransform).TestFunc(isGitRepoTest, z.Message("Path is not a git repo")),
+	"Path":      z.String().Required().Trim().Transform(cleanPathTransform),
 	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
 	"BackendID": z.StringLike[backends.BackendID]().Default(conf.GetConfig().Sessions.DefaultBackend).OneOf(backends.AllBackendIDs),
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
-		"Model":  z.String().Default(conf.GetConfig().Agent.DefaultModel).Trim(),
+		"Model":  z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
 		"Prompt": z.String().Optional().Trim(),
 	})),
 })
@@ -99,28 +98,4 @@ var SessionDeleteSchema = z.Struct(z.Shape{
 func cleanPathTransform(valPtr *string, c z.Ctx) error {
 	*valPtr = filepath.Clean(*valPtr)
 	return nil
-}
-
-func isGitRepoTest(valPtr *string, ctx z.Ctx) bool {
-	w, ok := ctx.Get("workspace").(workspace.Host)
-	if !ok {
-		ctx.AddIssue(ctx.Issue().SetMessage("Something wen't wrong trying to get workspace from context. Internal error"))
-		return true
-	}
-	file, err := w.Stat(*valPtr)
-	if err != nil {
-		ctx.AddIssue(ctx.Issue().SetMessage("Failed to stat path"))
-		return true
-	}
-
-	if !file.IsDir() {
-		ctx.AddIssue(ctx.Issue().SetMessage("Path is not a directory"))
-		return true
-	}
-	err = w.GitIsInsideWorkTree(*valPtr)
-	if err != nil {
-		ctx.AddIssue(ctx.Issue().SetMessage("Path is not to a git repo").SetError(err))
-	}
-	return true
-
 }

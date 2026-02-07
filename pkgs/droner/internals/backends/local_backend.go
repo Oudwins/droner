@@ -1,7 +1,7 @@
-package workspace
+package backends
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,47 +10,63 @@ import (
 	"strings"
 )
 
-type LocalHost struct{}
-
-func NewLocalHost() *LocalHost {
-	return &LocalHost{}
-}
-
-var _ Host = (*LocalHost)(nil)
-
 type commandFunc func(name string, args ...string) *exec.Cmd
 
 var execCommand commandFunc = exec.Command
 
-func (l *LocalHost) Stat(path string) (os.FileInfo, error) {
-	return os.Stat(path)
-}
-
-func (l *LocalHost) ReadDir(path string) ([]os.DirEntry, error) {
-	return os.ReadDir(path)
-}
-
-func (l *LocalHost) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func (l *LocalHost) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
-
-func (l *LocalHost) GitIsInsideWorkTree(repoPath string) error {
-	cmd := execCommand("git", "-C", repoPath, "rev-parse", "--is-inside-work-tree")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git check failed: %s", strings.TrimSpace(string(output)))
+func (l LocalBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return "", errors.New("session id is required")
 	}
-	if strings.TrimSpace(string(output)) != "true" {
-		return fmt.Errorf("not a git worktree")
+	repoName := filepath.Base(repoPath)
+	worktreeName := fmt.Sprintf("%s..%s", repoName, sessionID)
+	return filepath.Join(l.worktreeRoot, worktreeName), nil
+}
+
+func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error {
+	worktreePath, err := l.WorktreePath(repoPath, sessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(worktreePath); err == nil {
+		return errors.New("session folder already exists")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat worktree path: %w", err)
 	}
 	return nil
 }
 
-func (l *LocalHost) CreateGitWorktree(repoPath string, worktreePath string, branchName string) error {
+func (l LocalBackend) CreateSession(_ context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error {
+	if err := os.MkdirAll(l.worktreeRoot, 0o755); err != nil {
+		return fmt.Errorf("failed to create worktree root: %w", err)
+	}
+	if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
+		return err
+	}
+	if err := l.createTmuxSession(sessionID, worktreePath, agentConfig.Model, agentConfig.Prompt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
+	commonGitDir, err := l.gitCommonDirFromWorktree(worktreePath)
+	if err != nil {
+		return err
+	}
+	if err := l.killTmuxSession(sessionID); err != nil {
+		return err
+	}
+	if err := l.removeGitWorktree(worktreePath); err != nil {
+		return err
+	}
+	if err := l.deleteGitBranch(commonGitDir, sessionID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string) error {
 	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
@@ -58,7 +74,7 @@ func (l *LocalHost) CreateGitWorktree(repoPath string, worktreePath string, bran
 	return nil
 }
 
-func (l *LocalHost) RemoveGitWorktree(worktreePath string) error {
+func (l LocalBackend) removeGitWorktree(worktreePath string) error {
 	cmd := execCommand("git", "-C", worktreePath, "worktree", "remove", "--force", worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove worktree: %s", strings.TrimSpace(string(output)))
@@ -66,7 +82,7 @@ func (l *LocalHost) RemoveGitWorktree(worktreePath string) error {
 	return nil
 }
 
-func (l *LocalHost) GitCommonDirFromWorktree(worktreePath string) (string, error) {
+func (l LocalBackend) gitCommonDirFromWorktree(worktreePath string) (string, error) {
 	cmd := execCommand("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -82,7 +98,7 @@ func (l *LocalHost) GitCommonDirFromWorktree(worktreePath string) (string, error
 	return commonDir, nil
 }
 
-func (l *LocalHost) DeleteGitBranch(commonGitDir string, sessionID string) error {
+func (l LocalBackend) deleteGitBranch(commonGitDir string, sessionID string) error {
 	if sessionID == "" {
 		return nil
 	}
@@ -101,69 +117,7 @@ func (l *LocalHost) DeleteGitBranch(commonGitDir string, sessionID string) error
 	return nil
 }
 
-func (l *LocalHost) GetRemoteURL(repoPath string) (string, error) {
-	cmd := execCommand("git", "-C", repoPath, "remote", "get-url", "origin")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to get origin URL: %s", strings.TrimSpace(string(output)))
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-func (l *LocalHost) GetRemoteURLFromWorktree(worktreePath string) (string, error) {
-	commonDir, err := l.GitCommonDirFromWorktree(worktreePath)
-	if err != nil {
-		return "", err
-	}
-	repoPath := filepath.Dir(commonDir)
-	return l.GetRemoteURL(repoPath)
-}
-
-type worktreeConfig struct {
-	SetupWorktree []string `json:"setup-worktree"`
-}
-
-func (l *LocalHost) RunWorktreeSetup(repoPath string, worktreePath string) error {
-	configPath := filepath.Join(repoPath, ".cursor", "worktrees.json")
-	if _, err := l.Stat(configPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to read worktree config")
-	}
-
-	data, err := l.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read worktree config")
-	}
-
-	var config worktreeConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse worktree config")
-	}
-
-	for _, command := range config.SetupWorktree {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			continue
-		}
-		cmd := execCommand("sh", "-c", command)
-		cmd.Dir = worktreePath
-		cmd.Env = append(os.Environ(), fmt.Sprintf("ROOT_WORKTREE_PATH=%s", repoPath))
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			message := strings.TrimSpace(string(output))
-			if message != "" {
-				return fmt.Errorf("setup command failed: %s: %s", command, message)
-			}
-			return fmt.Errorf("setup command failed: %s", command)
-		}
-	}
-
-	return nil
-}
-
-func (l *LocalHost) CreateTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
+func (l LocalBackend) createTmuxSession(sessionName string, worktreePath string, model string, prompt string) error {
 	newSession := execCommand("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
 	if output, err := newSession.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux session: %s", strings.TrimSpace(string(output)))
@@ -190,7 +144,7 @@ func (l *LocalHost) CreateTmuxSession(sessionName string, worktreePath string, m
 	return nil
 }
 
-func (l *LocalHost) KillTmuxSession(sessionName string) error {
+func (l LocalBackend) killTmuxSession(sessionName string) error {
 	check := execCommand("tmux", "has-session", "-t", sessionName)
 	if err := check.Run(); err != nil {
 		return nil
