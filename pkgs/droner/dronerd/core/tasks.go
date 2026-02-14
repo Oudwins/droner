@@ -24,8 +24,8 @@ import (
 type Jobs string
 
 const (
-	JobCreateSession     Jobs = "session_delete_job"
-	JobDeleteSession     Jobs = "session_create_job"
+	JobCreateSession     Jobs = "session_create_job"
+	JobDeleteSession     Jobs = "session_delete_job"
 	JobDeleteAllSessions Jobs = "session_nuke_job"
 )
 
