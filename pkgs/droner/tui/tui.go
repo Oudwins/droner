@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -41,7 +42,11 @@ func Run(client *sdk.Client) error {
 		SessionID: schemas.NewSSessionID(strings.TrimSpace(id)),
 	}
 	if strings.TrimSpace(prompt) != "" {
-		request.AgentConfig = &schemas.SessionAgentConfig{Prompt: strings.TrimSpace(prompt)}
+		request.AgentConfig = &schemas.SessionAgentConfig{
+			Message: &messages.Message{
+				Role:  messages.MessageRoleUser,
+				Parts: []messages.MessagePart{messages.NewTextPart(prompt)}},
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
