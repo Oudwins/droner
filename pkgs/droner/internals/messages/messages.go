@@ -53,6 +53,6 @@ type Message struct {
 
 var MessageSchema = z.Struct(z.Shape{
 	"ID":    z.String(),
-	"Role":  z.StringLike[MessageRole]().OneOf([]MessageRole{MessageRoleUser, MessageRoleAgent}).Required(),
+	"Role":  z.StringLike[MessageRole]().OneOf([]MessageRole{MessageRoleUser, MessageRoleAgent}).Default(MessageRoleUser),
 	"Parts": z.Slice(MessagePartSchema).Min(1).Required(),
 })
