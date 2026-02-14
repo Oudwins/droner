@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -53,10 +54,9 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Path is not a git repo", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
-
 	backend, err := s.Base.BackendStore.Get(request.BackendID)
 	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Backend is not registered", nil), Render.Status(http.StatusBadRequest))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Backend '%s' is not registered", request.BackendID), nil), Render.Status(http.StatusBadRequest))
 		return
 	}
 
@@ -132,8 +132,8 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// Enqueue task
 	bytes, _ := json.Marshal(request)
-	logger.Debug("Enequeued", slog.Any("request", request))
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
+	logger.Debug("Enqued create job session", slog.Any("request", request), slog.Bool("success", err == nil))
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
 		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
