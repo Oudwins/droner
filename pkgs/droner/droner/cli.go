@@ -129,6 +129,7 @@ func newNewCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			includeAgentConfig := cmd.Flags().Changed("model") || cmd.Flags().Changed("prompt") || args.Model != "" || args.Prompt != ""
+
 			return runCreateSession(&args, includeAgentConfig)
 		},
 	}

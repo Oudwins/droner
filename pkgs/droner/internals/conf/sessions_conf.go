@@ -9,7 +9,9 @@ const (
 type BackendID string
 
 // TODO. Handle default value here
-var BackendIDSchema = z.StringLike[BackendID]().OneOf([]BackendID{BackendLocal})
+var BackendIDSchema = z.StringLike[BackendID]().OneOf([]BackendID{BackendLocal}).DefaultFunc(func() BackendID {
+	return BackendLocal
+})
 
 func (b BackendID) String() string {
 	return string(b)

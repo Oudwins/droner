@@ -53,3 +53,5 @@ require (
 	golang.org/x/oauth2 v0.25.0
 	modernc.org/sqlite v1.32.0
 )
+
+replace github.com/Oudwins/zog => /home/tmx/open_source/zog

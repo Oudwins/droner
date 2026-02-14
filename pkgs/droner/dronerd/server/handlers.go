@@ -44,10 +44,13 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	errs := schemas.SessionCreateSchema.Validate(&request)
 	if errs != nil {
-		logger.Info("Schema validation failed", "errors", errs)
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", z.Issues.Flatten(errs)), Render.Status(http.StatusBadRequest))
+		flattened := z.Issues.FlattenAndCollect(errs)
+		logger.Info("Schema validation failed", slog.Any("errors", flattened))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", flattened), Render.Status(http.StatusBadRequest))
 		return
 	}
+
+	logger = logger.With(slog.Any("validated_payload", request))
 
 	if err := repo.CheckRepo(request.Path); err != nil {
 		logger.Info("Repo validation failed", slog.String("error", err.Error()))
@@ -133,7 +136,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	// Enqueue task
 	bytes, _ := json.Marshal(request)
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
-	logger.Debug("Enqued create job session", slog.Any("request", request), slog.Bool("success", err == nil))
+	logger.Debug("Enqued create job session", slog.Bool("success", err == nil))
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
 		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
