@@ -14,6 +14,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/google/uuid"
@@ -29,13 +30,14 @@ type fakeBackend struct {
 	createdTmuxName       string
 	createdTmuxPath       string
 	createdTmuxModel      string
-	createdTmuxPrompt     string
+	createdMessageParts   []messages.MessagePart
+	createdOpencodeConfig conf.OpenCodeConfig
 	removedWorktreePath   string
 	killedTmuxName        string
 }
 
-func (f *fakeBackend) ID() backends.BackendID {
-	return backends.BackendLocal
+func (f *fakeBackend) ID() conf.BackendID {
+	return conf.BackendLocal
 }
 
 func (f *fakeBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
@@ -55,7 +57,10 @@ func (f *fakeBackend) CreateSession(_ context.Context, repoPath string, worktree
 	f.createdTmuxName = sessionID
 	f.createdTmuxPath = worktreePath
 	f.createdTmuxModel = agentConfig.Model
-	f.createdTmuxPrompt = agentConfig.Prompt
+	if agentConfig.Message != nil {
+		f.createdMessageParts = agentConfig.Message.Parts
+	}
+	f.createdOpencodeConfig = agentConfig.Opencode
 	return nil
 }
 
@@ -103,14 +108,20 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeBackend, string) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	config := &conf.Config{
 		Server: conf.ServerConfig{DataDir: tempDir},
-		Sessions: backends.SessionsConfig{
-			DefaultBackend: backends.BackendLocal,
-			Agent:          backends.AgentDefaults{DefaultModel: "default-model"},
-			Backends: backends.BackendsConfig{
-				Local: backends.LocalBackendConfig{WorktreeDir: worktreesDir},
+		Sessions: conf.SessionsConfig{
+			Agent: conf.AgentConfig{
+				DefaultModel:    "default-model",
+				DefaultProvider: conf.AgentProviderOpenCode,
+				Providers: conf.AgentProvidersConfig{
+					OpenCode: conf.OpenCodeConfig{Hostname: "127.0.0.1", Port: 4096},
+				},
+			},
+			Backends: conf.BackendsConfig{
+				Local: conf.LocalBackendConfig{WorktreeDir: worktreesDir},
 			},
 		},
 	}
+
 	backend := &fakeBackend{worktreeRoot: worktreesDir}
 	backendStore := backends.NewStore(config.Sessions)
 	backendStore.Register(backend)
@@ -198,10 +209,12 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	payload := schemas.SessionCreateRequest{
 		Path:      repoDir,
 		SessionID: schemas.NewSSessionID("session-1"),
-		BackendID: backends.BackendLocal,
+		BackendID: conf.BackendLocal,
 		AgentConfig: &schemas.SessionAgentConfig{
-			Model:  "test-model",
-			Prompt: "test-prompt",
+			Model: "test-model",
+			Message: &messages.Message{
+				Parts: []messages.MessagePart{{Type: "text", Text: "test-prompt"}},
+			},
 		},
 	}
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 	"github.com/Oudwins/droner/pkgs/droner/tui"
@@ -358,10 +359,12 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	defer cancel()
 	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 	if includeAgentConfig {
-		request.AgentConfig = &schemas.SessionAgentConfig{
-			Model:  args.Model,
-			Prompt: args.Prompt,
+		agentConfig := &schemas.SessionAgentConfig{Model: args.Model}
+		prompt := strings.TrimSpace(args.Prompt)
+		if prompt != "" {
+			agentConfig.Message = &messages.Message{Parts: []messages.MessagePart{{Type: messages.PartTypeText, Text: prompt}}}
 		}
+		request.AgentConfig = agentConfig
 	}
 	response, err := client.CreateSession(ctx, request)
 	if err != nil {

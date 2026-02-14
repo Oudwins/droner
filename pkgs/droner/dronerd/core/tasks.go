@@ -13,6 +13,8 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky/backends/tasky_sqlite3"
@@ -56,16 +58,21 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			}
 
 			model := base.Config.Sessions.Agent.DefaultModel
-			prompt := ""
+			var message *messages.Message
 			if payload.AgentConfig != nil {
 				if payload.AgentConfig.Model != "" {
 					model = payload.AgentConfig.Model
 				}
-				prompt = payload.AgentConfig.Prompt
+				message = payload.AgentConfig.Message
 			}
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
-			if err := backend.CreateSession(ctx, payload.Path, worktreePath, payload.SessionID.String(), backends.AgentConfig{Model: model, Prompt: prompt}); err != nil {
+			agentConfig := backends.AgentConfig{
+				Model:    model,
+				Message:  message,
+				Opencode: base.Config.Sessions.Agent.Providers.OpenCode,
+			}
+			if err := backend.CreateSession(ctx, payload.Path, worktreePath, payload.SessionID.String(), agentConfig); err != nil {
 				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
 				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID.String(),
@@ -131,7 +138,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf(" failed to load session: %w", err)
 			}
 
-			backend, err := base.BackendStore.Get(backends.BackendID(session.BackendID))
+			backend, err := base.BackendStore.Get(conf.BackendID(session.BackendID))
 			if err != nil {
 				logger.Error("Failed to resolve backend", slog.String("error", err.Error()))
 				return err

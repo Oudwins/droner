@@ -1,16 +1,18 @@
 package backends
 
+import "github.com/Oudwins/droner/pkgs/droner/internals/conf"
+
 type LocalBackend struct {
-	worktreeRoot string
+	config *conf.LocalBackendConfig
 }
 
-func (l LocalBackend) ID() BackendID {
-	return BackendLocal
+func (l LocalBackend) ID() conf.BackendID {
+	return conf.BackendLocal
 }
 
-func RegisterLocal(store *Store, worktreeRoot string) {
+func RegisterLocal(store *Store, config *conf.LocalBackendConfig) {
 	if store == nil {
 		return
 	}
-	store.Register(LocalBackend{worktreeRoot: worktreeRoot})
+	store.Register(LocalBackend{config: config})
 }

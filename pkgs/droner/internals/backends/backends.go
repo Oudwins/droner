@@ -4,59 +4,35 @@ import (
 	"context"
 	"errors"
 	"sync"
-)
 
-type BackendID string
-
-func (b BackendID) String() string {
-	return string(b)
-}
-
-const (
-	BackendLocal BackendID = "local"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
 type Backend interface {
-	ID() BackendID
+	ID() conf.BackendID
 	WorktreePath(repoPath string, sessionID string) (string, error)
 	ValidateSessionID(repoPath string, sessionID string) error
 	CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error
 	DeleteSession(ctx context.Context, worktreePath string, sessionID string) error
 }
 
-type SessionsConfig struct {
-	DefaultBackend BackendID      `json:"default_backend"`
-	Agent          AgentDefaults  `json:"agent"`
-	Backends       BackendsConfig `json:"backends"`
-}
-
-type BackendsConfig struct {
-	Local LocalBackendConfig `json:"local"`
-}
-
-type LocalBackendConfig struct {
-	WorktreeDir string `json:"worktree_dir"`
-}
-
-type AgentDefaults struct {
-	DefaultModel string `json:"default_model"`
-}
-
 var ErrUnknownBackend = errors.New("unknown backend")
 
 type Store struct {
 	mu       sync.RWMutex
-	backends map[BackendID]Backend
+	backends map[conf.BackendID]Backend
 }
 
 type AgentConfig struct {
-	Model  string
-	Prompt string
+	Model    string
+	Message  *messages.Message
+	Opencode conf.OpenCodeConfig
 }
 
-func NewStore(config SessionsConfig) *Store {
-	store := &Store{backends: map[BackendID]Backend{}}
-	RegisterLocal(store, config.Backends.Local.WorktreeDir)
+func NewStore(config conf.SessionsConfig) *Store {
+	store := &Store{backends: map[conf.BackendID]Backend{}}
+	RegisterLocal(store, &config.Backends.Local)
 	return store
 }
 
@@ -69,7 +45,7 @@ func (s *Store) Register(backend Backend) {
 	s.backends[backend.ID()] = backend
 }
 
-func (s *Store) Get(backendID BackendID) (Backend, error) {
+func (s *Store) Get(backendID conf.BackendID) (Backend, error) {
 	if s == nil {
 		return nil, ErrUnknownBackend
 	}
@@ -81,5 +57,3 @@ func (s *Store) Get(backendID BackendID) (Backend, error) {
 	}
 	return backend, nil
 }
-
-var AllBackendIDs = []BackendID{BackendLocal}

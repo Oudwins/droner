@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 
 	z "github.com/Oudwins/zog"
 )
@@ -41,14 +41,14 @@ func (i SSessionID) SessionWorktreeName(repoName string) string {
 }
 
 type SessionAgentConfig struct {
-	Model  string `json:"model" zog:"model"`
-	Prompt string `json:"prompt" zog:"prompt"`
+	Model   string            `json:"model" zog:"model"`
+	Message *messages.Message `json:"message,omitempty"`
 }
 
 type SessionCreateRequest struct {
 	Path        string              `json:"path"`
 	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
-	BackendID   backends.BackendID  `json:"backendId,omitempty" zog:"backendId"`
+	BackendID   conf.BackendID      `json:"backendId,omitempty" zog:"backendId"`
 	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
 }
 
@@ -58,19 +58,19 @@ var multiupleSlashes = regexp.MustCompile(`//+`)
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform),
 	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
-	"BackendID": z.StringLike[backends.BackendID]().Default(conf.GetConfig().Sessions.DefaultBackend).OneOf(backends.AllBackendIDs),
+	"BackendID": conf.BackendIDSchema,
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
-		"Model":  z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
-		"Prompt": z.String().Optional().Trim(),
+		"Model":   z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
+		"Message": z.Ptr(messages.MessageSchema),
 	})),
 })
 
 type SessionCreateResponse struct {
-	SessionID    SSessionID         `json:"sessionId"`
-	SimpleID     string             `json:"simpleId"`
-	BackendID    backends.BackendID `json:"backendId"`
-	WorktreePath string             `json:"worktreePath"`
-	TaskID       string             `json:"taskId"`
+	SessionID    SSessionID     `json:"sessionId"`
+	SimpleID     string         `json:"simpleId"`
+	BackendID    conf.BackendID `json:"backendId"`
+	WorktreePath string         `json:"worktreePath"`
+	TaskID       string         `json:"taskId"`
 }
 
 type SessionDeleteRequest struct {
