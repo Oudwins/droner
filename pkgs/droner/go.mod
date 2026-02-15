@@ -47,11 +47,9 @@ require (
 )
 
 require (
-	github.com/Oudwins/zog v0.22.0
+	github.com/Oudwins/zog v0.22.1-0.20260207152405-f27b872631d1
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8 // indirect
 	golang.org/x/oauth2 v0.25.0
 	modernc.org/sqlite v1.32.0
 )
-
-replace github.com/Oudwins/zog => /home/tmx/open_source/zog
