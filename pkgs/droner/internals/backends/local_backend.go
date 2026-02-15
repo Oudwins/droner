@@ -30,6 +30,20 @@ func (l LocalBackend) WorktreePath(repoPath string, sessionID string) (string, e
 	return filepath.Join(l.config.WorktreeDir, worktreeName), nil
 }
 
+func tmuxSessionName(repoPath string, sessionID string) string {
+	repoName := filepath.Base(repoPath)
+	return fmt.Sprintf("%s#%s", repoName, sessionID)
+}
+
+func tmuxSessionNameFromWorktreePath(worktreePath string) string {
+	worktreeName := filepath.Base(worktreePath)
+	parts := strings.Split(worktreeName, "..")
+	if len(parts) != 2 {
+		return worktreeName
+	}
+	return fmt.Sprintf("%s#%s", parts[0], parts[1])
+}
+
 func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error {
 	worktreePath, err := l.WorktreePath(repoPath, sessionID)
 	if err != nil {
@@ -44,17 +58,18 @@ func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error
 }
 
 func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error {
+	sessionName := tmuxSessionName(repoPath, sessionID)
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
 	if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
 		return err
 	}
-	if err := l.createTmuxBaseSession(sessionID, worktreePath); err != nil {
+	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
 		return err
 	}
 	opencodeConfig := agentConfig.Opencode
-	if err := l.ensureOpencodeServer(ctx, sessionID, worktreePath, opencodeConfig); err != nil {
+	if err := l.ensureOpencodeServer(ctx, sessionName, worktreePath, opencodeConfig); err != nil {
 		return err
 	}
 	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig)
@@ -67,21 +82,22 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		}
 	}
 	agentConfig.Opencode = opencodeConfig
-	if err := l.createTmuxOpencodeWindow(sessionID, worktreePath, agentConfig, opencodeSessionID); err != nil {
+	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
-	if err := l.createTmuxTerminalWindow(sessionID, worktreePath); err != nil {
+	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
+	sessionName := tmuxSessionNameFromWorktreePath(worktreePath)
 	commonGitDir, err := l.gitCommonDirFromWorktree(worktreePath)
 	if err != nil {
 		return err
 	}
-	if err := l.killTmuxSession(sessionID); err != nil {
+	if err := l.killTmuxSession(sessionName); err != nil {
 		return err
 	}
 	if err := l.removeGitWorktree(worktreePath); err != nil {
