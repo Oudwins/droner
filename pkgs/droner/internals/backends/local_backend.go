@@ -202,10 +202,12 @@ func (l LocalBackend) ensureOpencodeServer(ctx context.Context, sessionName stri
 	if l.opencodeHealthy(ctx, config) {
 		return nil
 	}
-	serveArgs := []string{"new-window", "-t", sessionName, "-n", "opencode-server", "-c", worktreePath, "opencode", "serve", "--hostname", config.Hostname, "--port", fmt.Sprintf("%d", config.Port)}
-	startServer := execCommand("tmux", serveArgs...)
-	if output, err := startServer.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to start opencode server: %s", strings.TrimSpace(string(output)))
+	cmd := exec.Command("opencode", "serve", "--hostname", config.Hostname, "--port", fmt.Sprintf("%d", config.Port))
+	cmd.Dir = worktreePath
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start opencode server: %w", err)
 	}
 	return l.waitForOpencode(ctx, config, 20*time.Second)
 }
