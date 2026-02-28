@@ -34,6 +34,7 @@ type fakeBackend struct {
 	createdOpencodeConfig conf.OpenCodeConfig
 	removedWorktreePath   string
 	killedTmuxName        string
+	completedTmuxName     string
 }
 
 func (f *fakeBackend) ID() conf.BackendID {
@@ -67,6 +68,11 @@ func (f *fakeBackend) CreateSession(_ context.Context, repoPath string, worktree
 func (f *fakeBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
 	f.removedWorktreePath = worktreePath
 	f.killedTmuxName = sessionID
+	return nil
+}
+
+func (f *fakeBackend) CompleteSession(_ context.Context, _ string, sessionID string) error {
+	f.completedTmuxName = sessionID
 	return nil
 }
 
@@ -328,5 +334,61 @@ func TestDeleteSessionTaskMarksDeleted(t *testing.T) {
 	}
 	if backend.removedWorktreePath != worktreePath {
 		t.Fatalf("expected worktree removal %s, got %s", worktreePath, backend.removedWorktreePath)
+	}
+}
+
+func TestCompleteSessionTaskMarksCompletedAndKeepsWorktree(t *testing.T) {
+	base, backend, repoDir := setupTestBase(t)
+
+	newID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("failed to create uuid: %v", err)
+	}
+
+	simpleID := "session-complete"
+	worktreePath, err := backend.WorktreePath(repoDir, simpleID)
+	if err != nil {
+		t.Fatalf("failed to resolve worktree path: %v", err)
+	}
+
+	created, err := base.DB.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:           newID.String(),
+		SimpleID:     simpleID,
+		Status:       db.SessionStatusRunning,
+		BackendID:    "local",
+		RepoPath:     repoDir,
+		WorktreePath: worktreePath,
+		AgentConfig:  sql.NullString{},
+		Error:        sql.NullString{},
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	completePayload := schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID(simpleID)}
+	bytes, err := json.Marshal(completePayload)
+	if err != nil {
+		t.Fatalf("failed to marshal payload: %v", err)
+	}
+
+	_, err = base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobCompleteSession, bytes))
+	if err != nil {
+		t.Fatalf("failed to enqueue complete task: %v", err)
+	}
+
+	runQueueUntil(t, base.TaskQueue, func() bool {
+		row, err := base.DB.GetSessionByID(context.Background(), created.ID)
+		return err == nil && row.Status == db.SessionStatusCompleted
+	})
+
+	session := waitForSessionStatusByID(t, base.DB, created.ID, db.SessionStatusCompleted)
+	if session.Status != db.SessionStatusCompleted {
+		t.Fatalf("expected status completed, got %s", session.Status)
+	}
+	if backend.completedTmuxName != simpleID {
+		t.Fatalf("expected tmux session complete %s, got %s", simpleID, backend.completedTmuxName)
+	}
+	if backend.removedWorktreePath != "" {
+		t.Fatalf("expected worktree to be kept, got removal %s", backend.removedWorktreePath)
 	}
 }

@@ -92,7 +92,15 @@ type SessionListResponse struct {
 }
 
 var SessionDeleteSchema = z.Struct(z.Shape{
-	"SessionID": sessionID().Optional().Trim(),
+	"SessionID": sessionID().Required().Trim(),
+})
+
+type SessionCompleteRequest struct {
+	SessionID SSessionID `json:"sessionId" zog:"sessionId"`
+}
+
+var SessionCompleteSchema = z.Struct(z.Shape{
+	"SessionID": sessionID().Required().Trim(),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {

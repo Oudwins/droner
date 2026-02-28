@@ -26,6 +26,7 @@ type Jobs string
 const (
 	JobCreateSession     Jobs = "session_create_job"
 	JobDeleteSession     Jobs = "session_delete_job"
+	JobCompleteSession   Jobs = "session_complete_job"
 	JobDeleteAllSessions Jobs = "session_nuke_job"
 )
 
@@ -170,6 +171,74 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 		},
 	})
 
+	completeSessionJob := tasky.NewJob(JobCompleteSession, tasky.JobConfig[Jobs]{
+		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
+			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
+			data := schemas.SessionCompleteRequest{}
+			err2 := json.Unmarshal(task.Payload, &data)
+			if err2 != nil {
+				logger.Error("Failed to unmarshal payload", slog.String("error", err2.Error()))
+				return err2
+			}
+			logger = logger.With(slog.Any("payload", data))
+			errs := schemas.SessionCompleteSchema.Validate(&data)
+			if errs != nil {
+				logger.Error("failed to validate payload", slog.Any("issues", errs))
+				return fmt.Errorf("failed to validate payload: %s", zog.Issues.FlattenAndCollect(errs))
+			}
+
+			session, err := base.DB.GetSessionBySimpleIDAnyStatus(ctx, data.SessionID.String())
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					logger.Error("No session by that ID found in database. No-op")
+					return nil
+				}
+				return fmt.Errorf("failed to load session: %w", err)
+			}
+
+			switch session.Status {
+			case db.SessionStatusCompleted, db.SessionStatusDeleted:
+				logger.Info("Session already completed or deleted. No-op", slog.String("status", string(session.Status)))
+				return nil
+			case db.SessionStatusRunning:
+				// ok
+			default:
+				logger.Error("Session not running. No-op", slog.String("status", string(session.Status)))
+				return nil
+			}
+
+			backend, err := base.BackendStore.Get(conf.BackendID(session.BackendID))
+			if err != nil {
+				logger.Error("Failed to resolve backend", slog.String("error", err.Error()))
+				return err
+			}
+			if err := backend.CompleteSession(ctx, session.WorktreePath, data.SessionID.String()); err != nil {
+				logger.Error("Failed to complete session", slog.String("error", err.Error()))
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+					SimpleID: data.SessionID.String(),
+					Status:   db.SessionStatusFailed,
+					Error:    sql.NullString{String: err.Error(), Valid: true},
+				})
+				if updateErr != nil {
+					logger.Error("[queue] Failed to update session status", slog.String("error", updateErr.Error()))
+				}
+				return err
+			}
+
+			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+				SimpleID: data.SessionID.String(),
+				Status:   db.SessionStatusCompleted,
+				Error:    sql.NullString{},
+			})
+			if err != nil {
+				logger.Error("Failed to update session status", slog.String("error", err.Error()))
+				return err
+			}
+			logger.Debug("Complete session success")
+			return nil
+		},
+	})
+
 	nukeSessionsJob := tasky.NewJob(JobDeleteAllSessions, tasky.JobConfig[Jobs]{
 		Run: func(ctx context.Context, task *tasky.Task[Jobs]) error {
 			logger := base.Logger.With(slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)))
@@ -217,7 +286,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	q, err := tasky.NewQueue(
 		tasky.QueueConfig[Jobs]{
-			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob, nukeSessionsJob},
+			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob, completeSessionJob, nukeSessionsJob},
 			Backend: sqliteBackend,
 			OnError: func(err error, task *tasky.Task[Jobs], payload []byte) error {
 				base.Logger.Error("[QUEUE] Task failed to complete", slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)), slog.String("error", err.Error()))

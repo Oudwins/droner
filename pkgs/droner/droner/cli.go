@@ -52,6 +52,12 @@ type DelArgs struct {
 	Timeout string `zog:"timeout"`
 }
 
+type CompleteArgs struct {
+	ID      string `zog:"id"`
+	Wait    bool   `zog:"wait"`
+	Timeout string `zog:"timeout"`
+}
+
 type NukeArgs struct {
 	Yes     bool
 	Wait    bool
@@ -90,12 +96,55 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		newNewCmd(),
 		newDelCmd(),
+		newCompleteCmd(),
 		newNukeCmd(),
 		newSessionsCmd(),
 		newTaskCmd(),
 		newAuthCmd(),
 	)
 
+	return cmd
+}
+
+func newCompleteCmd() *cobra.Command {
+	args := CompleteArgs{}
+	cmd := &cobra.Command{
+		Use:   "complete <id>",
+		Short: "Complete a running session (keeps worktree)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, inputs []string) error {
+			client := sdk.NewClient()
+			args.ID = inputs[0]
+			if err := validateDelArgs(&DelArgs{ID: args.ID}); err != nil {
+				return err
+			}
+			if err := cliutil.EnsureDaemonRunning(client); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			response, err := client.CompleteSession(ctx, schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
+			if err != nil {
+				return err
+			}
+			printTaskSummary(response)
+			if args.Wait {
+				timeout, err := parseWaitTimeout(args.Timeout)
+				if err != nil {
+					return err
+				}
+				final, err := waitForTask(client, response.TaskID, timeout)
+				if err != nil {
+					return err
+				}
+				printTaskSummary(final)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
+	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
 }
 

@@ -109,6 +109,10 @@ func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sess
 	return nil
 }
 
+func (l LocalBackend) CompleteSession(_ context.Context, _ string, sessionID string) error {
+	return l.killTmuxSession(sessionID)
+}
+
 func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string) error {
 	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
