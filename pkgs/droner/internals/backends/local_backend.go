@@ -3,6 +3,7 @@ package backends
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
@@ -62,8 +64,20 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
-	if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
-		return err
+	if l.db != nil {
+		reused, err := l.tryReuseCompletedWorktree(ctx, repoPath, worktreePath, sessionID)
+		if err != nil {
+			return err
+		}
+		if !reused {
+			if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
+			return err
+		}
 	}
 	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
 		return err
@@ -319,4 +333,120 @@ func parseOpencodeModel(raw string) *opencodeModel {
 		return nil
 	}
 	return &opencodeModel{ProviderID: parts[0], ModelID: parts[1]}
+}
+
+func (l LocalBackend) tryReuseCompletedWorktree(ctx context.Context, repoPath string, worktreePath string, sessionID string) (bool, error) {
+	completed, err := l.db.ListSessionsByStatus(ctx, db.SessionStatusCompleted)
+	if err != nil {
+		return false, fmt.Errorf("failed to list completed sessions: %w", err)
+	}
+	if len(completed) == 0 {
+		return false, nil
+	}
+
+	cleanRepoPath := filepath.Clean(repoPath)
+	cleanTarget := filepath.Clean(worktreePath)
+	cleanRoot := filepath.Clean(l.config.WorktreeDir)
+
+	for _, session := range completed {
+		if session.BackendID != conf.BackendLocal.String() {
+			continue
+		}
+		if filepath.Clean(session.RepoPath) != cleanRepoPath {
+			continue
+		}
+		oldWorktreePath := filepath.Clean(session.WorktreePath)
+		if oldWorktreePath == "" || oldWorktreePath == cleanTarget {
+			continue
+		}
+		rel, relErr := filepath.Rel(cleanRoot, oldWorktreePath)
+		if relErr != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		info, statErr := os.Stat(oldWorktreePath)
+		if statErr != nil || !info.IsDir() {
+			continue
+		}
+
+		_ = l.killTmuxSession(session.SimpleID)
+		if err := l.resetAndCleanWorktree(oldWorktreePath); err != nil {
+			continue
+		}
+		if err := l.moveGitWorktree(cleanRepoPath, oldWorktreePath, cleanTarget); err != nil {
+			continue
+		}
+		baseRef, err := l.resolveBaseRef(cleanRepoPath)
+		if err != nil {
+			return false, err
+		}
+		if err := l.checkoutNewBranch(cleanTarget, sessionID, baseRef); err != nil {
+			return false, err
+		}
+
+		commonGitDir, err := l.gitCommonDirFromWorktree(cleanTarget)
+		if err != nil {
+			return false, err
+		}
+		if err := l.deleteGitBranch(commonGitDir, session.SimpleID); err != nil {
+			return false, err
+		}
+		_, _ = l.db.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+			SimpleID: session.SimpleID,
+			Status:   db.SessionStatusDeleted,
+			Error:    sql.NullString{},
+		})
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (l LocalBackend) moveGitWorktree(repoPath string, fromPath string, toPath string) error {
+	cmd := execCommand("git", "-C", repoPath, "worktree", "move", fromPath, toPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to move worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (l LocalBackend) resetAndCleanWorktree(worktreePath string) error {
+	reset := execCommand("git", "-C", worktreePath, "reset", "--hard")
+	if output, err := reset.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to reset worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+	}
+	clean := execCommand("git", "-C", worktreePath, "clean", "-ffd")
+	if output, err := clean.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to clean worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (l LocalBackend) checkoutNewBranch(worktreePath string, branchName string, baseRef string) error {
+	cmd := execCommand("git", "-C", worktreePath, "checkout", "-B", branchName, baseRef)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to checkout branch: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (l LocalBackend) resolveBaseRef(repoPath string) (string, error) {
+	symbolic := execCommand("git", "-C", repoPath, "symbolic-ref", "refs/remotes/origin/HEAD")
+	if output, err := symbolic.CombinedOutput(); err == nil {
+		ref := strings.TrimSpace(string(output))
+		if ref != "" {
+			return ref, nil
+		}
+	}
+	for _, ref := range []string{
+		"refs/remotes/origin/main",
+		"refs/remotes/origin/master",
+		"refs/heads/main",
+		"refs/heads/master",
+	} {
+		check := execCommand("git", "-C", repoPath, "show-ref", "--verify", "--quiet", ref)
+		if err := check.Run(); err == nil {
+			return ref, nil
+		}
+	}
+	return "HEAD", nil
 }

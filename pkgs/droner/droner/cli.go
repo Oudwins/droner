@@ -287,9 +287,10 @@ func newNukeCmd() *cobra.Command {
 }
 
 func newSessionsCmd() *cobra.Command {
+	var all bool
 	cmd := &cobra.Command{
 		Use:   "sessions",
-		Short: "List queued and running sessions",
+		Short: "List sessions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := sdk.NewClient()
@@ -298,7 +299,13 @@ func newSessionsCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			response, err := client.ListSessions(ctx)
+			var response *schemas.SessionListResponse
+			var err error
+			if all {
+				response, err = client.ListSessionsAll(ctx)
+			} else {
+				response, err = client.ListSessions(ctx)
+			}
 			if err != nil {
 				if errors.Is(err, sdk.ErrAuthRequired) {
 					if err := cliutil.RunGitHubAuthFlow(client); err != nil {
@@ -306,7 +313,11 @@ func newSessionsCmd() *cobra.Command {
 					}
 					ctx, retryCancel := context.WithTimeout(context.Background(), 3*time.Second)
 					defer retryCancel()
-					response, err = client.ListSessions(ctx)
+					if all {
+						response, err = client.ListSessionsAll(ctx)
+					} else {
+						response, err = client.ListSessions(ctx)
+					}
 					if err != nil {
 						return err
 					}
@@ -315,7 +326,11 @@ func newSessionsCmd() *cobra.Command {
 				}
 			}
 			if len(response.Sessions) == 0 {
-				fmt.Println("No queued or running sessions.")
+				if all {
+					fmt.Println("No sessions.")
+				} else {
+					fmt.Println("No queued or running sessions.")
+				}
 				return nil
 			}
 			writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -327,7 +342,7 @@ func newSessionsCmd() *cobra.Command {
 			return nil
 		},
 	}
-
+	cmd.Flags().BoolVar(&all, "all", false, "list last 100 sessions of any status")
 	return cmd
 }
 

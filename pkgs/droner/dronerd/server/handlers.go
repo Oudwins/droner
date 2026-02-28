@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
@@ -378,24 +379,44 @@ func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter,
 }
 
 func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	queued, err := s.Base.DB.ListSessionsByStatus(context.Background(), db.SessionStatusQueued)
-	if err != nil {
-		logger.Error("Failed to list queued sessions", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list queued sessions", nil), Render.Status(http.StatusInternalServerError))
-		return
+	all := false
+	rawAll := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("all")))
+	if rawAll == "1" || rawAll == "true" || rawAll == "yes" {
+		all = true
 	}
 
-	running, err := s.Base.DB.ListSessionsByStatus(context.Background(), db.SessionStatusRunning)
-	if err != nil {
-		logger.Error("Failed to list running sessions", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list running sessions", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
+	var sessions []db.Session
+	if all {
+		rows, err := s.Base.DB.ListSessions(r.Context())
+		if err != nil {
+			logger.Error("Failed to list sessions", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		if len(rows) > 100 {
+			rows = rows[:100]
+		}
+		sessions = rows
+	} else {
+		queued, err := s.Base.DB.ListSessionsByStatus(r.Context(), db.SessionStatusQueued)
+		if err != nil {
+			logger.Error("Failed to list queued sessions", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list queued sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
 
-	sessions := append(queued, running...)
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
-	})
+		running, err := s.Base.DB.ListSessionsByStatus(r.Context(), db.SessionStatusRunning)
+		if err != nil {
+			logger.Error("Failed to list running sessions", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list running sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		sessions = append(queued, running...)
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		})
+	}
 
 	items := make([]schemas.SessionListItem, 0, len(sessions))
 	for _, session := range sessions {
