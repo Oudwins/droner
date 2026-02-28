@@ -8,9 +8,12 @@ const (
 
 type BackendID string
 
-// TODO. Handle default value here
+var configBackendIDSchema = z.StringLike[BackendID]().OneOf([]BackendID{BackendLocal}).Default(BackendLocal)
+
+// Copy of above but that uses the config to set default
 var BackendIDSchema = z.StringLike[BackendID]().OneOf([]BackendID{BackendLocal}).DefaultFunc(func() BackendID {
-	return BackendLocal
+	return GetConfig().Sessions.Backends.Default
+	// return BackendLocal
 })
 
 func (b BackendID) String() string {
@@ -61,7 +64,7 @@ type SessionsConfig struct {
 var SessionsConfigSchema = z.Struct(z.Shape{
 	"Backends": z.Struct(
 		z.Shape{
-			"Default": BackendIDSchema,
+			"Default": configBackendIDSchema,
 			"Local": z.Struct(z.Shape{
 				"WorktreeDir": z.String().Default("~/.droner/worktrees").Transform(expandPathTransform),
 			}),
