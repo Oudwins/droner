@@ -34,19 +34,17 @@ func New() *BaseServer {
 	}
 
 	logger, logFile := InitLogger(config)
-	backendStore := backends.NewStore(config.Sessions)
-
 	base := &BaseServer{
-		Config:       config,
-		Env:          env,
-		Logger:       logger,
-		LogFile:      logFile,
-		BackendStore: backendStore,
+		Config:  config,
+		Env:     env,
+		Logger:  logger,
+		LogFile: logFile,
 	}
 
 	queries, err := InitDB(config)
 	assert.AssertNil(err, "[CORE] Failed to initialize DB")
 	base.DB = queries
+	base.BackendStore = backends.NewStore(config.Sessions, queries)
 
 	queue, err := NewQueue(base)
 	assert.AssertNil(err, "[CORE] Failed to initialize queue")

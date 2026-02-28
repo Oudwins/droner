@@ -222,6 +222,25 @@ func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse
 	return &payload, nil
 }
 
+func (c *Client) ListSessionsAll(ctx context.Context) (*schemas.SessionListResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions?all=1", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, responseError(resp)
+	}
+
+	var payload schemas.SessionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return &payload, nil
+}
+
 func (c *Client) TaskStatus(ctx context.Context, taskID string) (*schemas.TaskResponse, error) {
 	path := "/tasks/" + url.PathEscape(taskID)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)

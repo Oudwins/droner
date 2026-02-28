@@ -129,7 +129,7 @@ func setupTestBase(t *testing.T) (*BaseServer, *fakeBackend, string) {
 	}
 
 	backend := &fakeBackend{worktreeRoot: worktreesDir}
-	backendStore := backends.NewStore(config.Sessions)
+	backendStore := backends.NewStore(config.Sessions, nil)
 	backendStore.Register(backend)
 	base := &BaseServer{
 		Config:       config,

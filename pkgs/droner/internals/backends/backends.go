@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
@@ -32,9 +33,9 @@ type AgentConfig struct {
 	Opencode conf.OpenCodeConfig
 }
 
-func NewStore(config conf.SessionsConfig) *Store {
+func NewStore(config conf.SessionsConfig, queries *db.Queries) *Store {
 	store := &Store{backends: map[conf.BackendID]Backend{}}
-	RegisterLocal(store, &config.Backends.Local)
+	RegisterLocal(store, &config.Backends.Local, queries)
 	return store
 }
 
