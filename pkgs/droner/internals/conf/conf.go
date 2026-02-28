@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/version"
+
 	z "github.com/Oudwins/zog"
 )
 
@@ -56,7 +58,7 @@ func GetConfig() *Config {
 		if err := ConfigSchema.Parse(map[string]any{}, defaults); err != nil {
 			log.Fatal("[Droner] Failed to parse config", err)
 		}
-		defaults.Version = "0.0.1"
+		defaults.Version = version.Identity()
 
 		dataDir, err := expandPath(defaults.Server.DataDir)
 		if err != nil {
