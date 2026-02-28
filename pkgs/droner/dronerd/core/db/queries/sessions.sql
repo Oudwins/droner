@@ -31,6 +31,11 @@ FROM sessions
 WHERE simple_id = ?
   AND status IN ('queued', 'running', 'completed');
 
+-- name: GetSessionBySimpleIDAnyStatus :one
+SELECT *
+FROM sessions
+WHERE simple_id = ?;
+
 -- name: ListSessions :many
 SELECT *
 FROM sessions

@@ -106,10 +106,18 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusPending})
 				return
 			}
+		case "/sessions/complete":
+			if r.Method == http.MethodPost {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusPending})
+				return
+			}
 		case "/tasks/task-new":
 			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-new", Status: schemas.TaskStatusSucceeded})
 		case "/tasks/task-del":
 			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusSucceeded})
+		case "/tasks/task-complete":
+			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusSucceeded})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -136,6 +144,16 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	}
 	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
 		t.Fatalf("unexpected del output: %s", output)
+	}
+
+	output, err = captureOutput(t, func() error {
+		return executeCLI([]string{"complete", "abc", "--wait"})
+	})
+	if err != nil {
+		t.Fatalf("run complete: %v", err)
+	}
+	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
+		t.Fatalf("unexpected complete output: %s", output)
 	}
 }
 

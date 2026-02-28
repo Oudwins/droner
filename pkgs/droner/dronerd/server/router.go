@@ -21,7 +21,12 @@ func (s *Server) Router() http.Handler {
 		r.Get("/sessions", HandlerWithLogger(s.HandlerListSessions))
 		r.Post("/sessions", HandlerWithLogger(s.HandlerCreateSession))
 		r.Delete("/sessions", HandlerWithLogger(s.HandlerDeleteSession))
+		r.Post("/sessions/complete", HandlerWithLogger(s.HandlerCompleteSession))
 		r.Post("/sessions/nuke", HandlerWithLogger(s.HandlerNukeSessions))
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Get("/tasks/{id}", HandlerWithLogger(s.HandlerTaskStatus))
 	})
 	return r
 }

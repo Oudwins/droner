@@ -179,6 +179,30 @@ func (c *Client) NukeSessions(ctx context.Context) (*schemas.TaskResponse, error
 	return &payload, nil
 }
 
+func (c *Client) CompleteSession(ctx context.Context, request schemas.SessionCompleteRequest) (*schemas.TaskResponse, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/sessions/complete", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, responseError(resp)
+	}
+
+	var payload schemas.TaskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return &payload, nil
+}
+
 func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {
