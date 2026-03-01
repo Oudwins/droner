@@ -16,6 +16,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/version"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 	"github.com/Oudwins/droner/pkgs/droner/tui"
 	"github.com/mattn/go-isatty"
@@ -77,10 +78,15 @@ func main() {
 }
 
 func newRootCmd() *cobra.Command {
+	showVersion := false
 	cmd := &cobra.Command{
 		Use:   "droner",
 		Short: "Droner CLI",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				printVersionInfo(cmd)
+				return nil
+			}
 			if len(args) > 0 {
 				return cmd.Usage()
 			}
@@ -91,6 +97,8 @@ func newRootCmd() *cobra.Command {
 			return tui.Run(client)
 		},
 	}
+
+	cmd.Flags().BoolVar(&showVersion, "version", false, "print CLI/server versions and exit")
 
 	cmd.AddCommand(
 		newServeCmd(),
@@ -104,6 +112,21 @@ func newRootCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+func printVersionInfo(cmd *cobra.Command) {
+	out := cmd.OutOrStdout()
+	_, _ = fmt.Fprintf(out, "cli: %s\n", strings.TrimSpace(version.Version()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	serverVersion, err := sdk.NewClient().Version(ctx)
+	if err != nil || strings.TrimSpace(serverVersion) == "" {
+		_, _ = fmt.Fprintln(out, "server: (not running)")
+		return
+	}
+	_, _ = fmt.Fprintf(out, "server: %s\n", strings.TrimSpace(serverVersion))
 }
 
 func newCompleteCmd() *cobra.Command {

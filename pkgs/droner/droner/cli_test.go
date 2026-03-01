@@ -237,3 +237,47 @@ func TestCLIAuthFlow(t *testing.T) {
 		t.Fatalf("timeout test took too long")
 	}
 }
+
+func TestCLIVersionFlag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte("server-version"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCLIEnv(t, server.URL)
+
+	output, err := captureOutput(t, func() error {
+		return executeCLI([]string{"--version"})
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(output, "cli:") {
+		t.Fatalf("expected cli version, got %q", output)
+	}
+	if !strings.Contains(output, "server: server-version") {
+		t.Fatalf("expected server version, got %q", output)
+	}
+}
+
+func TestCLIVersionFlagServerNotRunning(t *testing.T) {
+	setupCLIEnv(t, "http://127.0.0.1:1")
+
+	output, err := captureOutput(t, func() error {
+		return executeCLI([]string{"--version"})
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(output, "cli:") {
+		t.Fatalf("expected cli version, got %q", output)
+	}
+	if !strings.Contains(output, "server: (not running)") {
+		t.Fatalf("expected not running, got %q", output)
+	}
+}
