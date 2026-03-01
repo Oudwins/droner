@@ -444,7 +444,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 	if includeAgentConfig {

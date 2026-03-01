@@ -29,8 +29,9 @@ build-all: build
 test *args:
     cd ./pkgs/droner && go test ./... {{args}}
 
+[positional-arguments]
 cli *args: build
-    {{droner_bin}} {{args}}
+    {{droner_bin}} "$@"
 
 gen-sqlc:
     cd ./pkgs/droner && sqlc generate
