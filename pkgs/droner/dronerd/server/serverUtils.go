@@ -34,6 +34,7 @@ func JsonResponseError(code JsonResponseErrorCode, message string, errors map[st
 		Status:  JsonResponseStatusFailed,
 		Code:    code,
 		Message: message,
+		Errors:  errors,
 	}
 }
 
@@ -55,6 +56,5 @@ func RenderJSON(w http.ResponseWriter, r *http.Request, payload any, opts ...Ren
 	for _, opt := range opts {
 		opt(w, r)
 	}
-	w.WriteHeader(http.StatusOK) // is ignored if already called
-	json.NewEncoder(w).Encode(payload)
+	_ = json.NewEncoder(w).Encode(payload)
 }

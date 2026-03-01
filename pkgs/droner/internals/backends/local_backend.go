@@ -59,8 +59,31 @@ func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error
 	return nil
 }
 
-func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error {
+func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) (retErr error) {
 	sessionName := tmuxSessionName(repoPath, sessionID)
+
+	defer func() {
+		if retErr == nil {
+			return
+		}
+
+		// Best-effort cleanup. We prefer to leave no partial state behind.
+		_ = l.killTmuxSession(sessionName)
+
+		cleanRoot := filepath.Clean(l.config.WorktreeDir)
+		cleanWorktree := filepath.Clean(worktreePath)
+		if cleanRoot != "" && cleanWorktree != "" {
+			if rel, err := filepath.Rel(cleanRoot, cleanWorktree); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				_ = l.removeGitWorktreeFromRepo(repoPath, cleanWorktree)
+				_ = os.RemoveAll(cleanWorktree)
+			}
+		}
+
+		if commonGitDir, err := l.gitCommonDirFromRepo(repoPath); err == nil {
+			_ = l.deleteGitBranch(commonGitDir, sessionID)
+		}
+	}()
+
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
@@ -101,6 +124,30 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	}
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (l LocalBackend) gitCommonDirFromRepo(repoPath string) (string, error) {
+	cmd := execCommand("git", "-C", repoPath, "rev-parse", "--git-common-dir")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine git common dir: %s", strings.TrimSpace(string(output)))
+	}
+	commonDir := strings.TrimSpace(string(output))
+	if commonDir == "" {
+		return "", errors.New("failed to determine git common dir")
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(repoPath, commonDir)
+	}
+	return commonDir, nil
+}
+
+func (l LocalBackend) removeGitWorktreeFromRepo(repoPath string, worktreePath string) error {
+	cmd := execCommand("git", "-C", repoPath, "worktree", "remove", "--force", worktreePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove worktree: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -227,7 +274,7 @@ func (l LocalBackend) ensureOpencodeServer(ctx context.Context, sessionName stri
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start opencode server: %w", err)
 	}
-	return l.waitForOpencode(ctx, config, 20*time.Second)
+	return l.waitForOpencode(ctx, config, 30*time.Second)
 }
 
 func (l LocalBackend) opencodeHealthy(ctx context.Context, config conf.OpenCodeConfig) bool {
@@ -248,6 +295,9 @@ func (l LocalBackend) opencodeHealthy(ctx context.Context, config conf.OpenCodeC
 func (l LocalBackend) waitForOpencode(ctx context.Context, config conf.OpenCodeConfig, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if l.opencodeHealthy(ctx, config) {
 			return nil
 		}
@@ -273,7 +323,7 @@ type opencodeMessageRequest struct {
 
 func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig) (string, error) {
 	url := fmt.Sprintf("http://%s:%d/session", config.Hostname, config.Port)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", err
@@ -310,7 +360,7 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

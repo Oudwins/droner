@@ -45,6 +45,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	if err != nil {
 		logger.Info("Json decoding failed", slog.String("err", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid json", nil), Render.Status(http.StatusBadRequest))
+		return
 	}
 
 	errs := schemas.SessionCreateSchema.Validate(&request)
