@@ -12,6 +12,11 @@ GOPROXY=direct go install github.com/Oudwins/droner/pkgs/droner/dronerd@latest
 
 ## Useful commands
 
+
+```bash
+just cli *args
+```
+
 ```bash
 # is server running
 curl -X GET http://localhost:57876/version
@@ -26,7 +31,7 @@ curl -sS -X POST http://localhost:57876/sessions \
 # Create session with agent prompt/model:
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
-  -d '{"path":"/home/tmx/projects/droner/","agent":{"model":"openai/gpt-5.2-codex","prompt":"review the repo"}}'
+  -d '{"path":"/home/tmx/projects/droner/","agentConfig":{"model":"openai/gpt-5.2-codex","prompt":"review the repo"}}'
 # Delete session by path:
 curl -sS -X DELETE http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
