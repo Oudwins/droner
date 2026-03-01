@@ -106,6 +106,9 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil
 	}
+	if resp.StatusCode == http.StatusAccepted {
+		return nil
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrShutdownUnsupported
 	}
