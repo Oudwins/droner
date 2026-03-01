@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
@@ -89,18 +90,27 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return err
 			}
 
-			// if remoteURL, err := ws.GetRemoteURL(payload.Path); err != nil {
-			// 	err := base.Subscriptions.subscribe(context.Background(), remoteURL, payload.SessionID, func(sessionId string) {
-			// 		data, _ := json.Marshal(schemas.SessionDeleteRequest{SessionID: sessionId})
-			// 		taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobDeleteSession, data))
-			// 		if err != nil {
-			// 			base.Logger.Error("[create session] Failed to enque task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
-			// 		}
-			// 	})
-			// 	if err != nil {
-			// 		base.Logger.Error("[create session] Failed to subscribe to remote events", slog.String("taskId", task.TaskID), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID))
-			// 	}
-			// }
+			session, err := base.DB.GetSessionBySimpleID(ctx, payload.SessionID.String())
+			if err != nil {
+				logger.Error("Failed to load session from DB", slog.String("error", err.Error()))
+			} else {
+				remoteURL := ""
+				if session.RemoteUrl.Valid {
+					remoteURL = strings.TrimSpace(session.RemoteUrl.String)
+				}
+				if remoteURL != "" {
+					subErr := base.Subscriptions.subscribe(context.Background(), remoteURL, payload.SessionID.String(), func(sessionID string) {
+						data, _ := json.Marshal(schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID(sessionID)})
+						taskId, err := base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(JobCompleteSession, data))
+						if err != nil {
+							base.Logger.Error("[create session] Failed to enqueue task", slog.String("taskId", taskId), slog.String("error", err.Error()), slog.String("sessionId", payload.SessionID.String()))
+						}
+					})
+					if subErr != nil {
+						base.Logger.Error("[create session] Failed to subscribe to remote events", slog.String("error", subErr.Error()), slog.String("sessionId", payload.SessionID.String()))
+					}
+				}
+			}
 
 			updateCtx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
@@ -142,6 +152,14 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 					return nil // no op
 				}
 				return fmt.Errorf(" failed to load session: %w", err)
+			}
+			if session.RemoteUrl.Valid {
+				remoteURL := strings.TrimSpace(session.RemoteUrl.String)
+				if remoteURL != "" {
+					if err := base.Subscriptions.unsubscribe(context.Background(), remoteURL, data.SessionID.String()); err != nil {
+						logger.Error("Failed to unsubscribe from remote events", slog.String("error", err.Error()))
+					}
+				}
 			}
 
 			backend, err := base.BackendStore.Get(conf.BackendID(session.BackendID))
@@ -201,14 +219,29 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				return fmt.Errorf("failed to load session: %w", err)
 			}
 
+			unsubscribe := func() {
+				if !session.RemoteUrl.Valid {
+					return
+				}
+				remoteURL := strings.TrimSpace(session.RemoteUrl.String)
+				if remoteURL == "" {
+					return
+				}
+				if err := base.Subscriptions.unsubscribe(context.Background(), remoteURL, data.SessionID.String()); err != nil {
+					logger.Error("Failed to unsubscribe from remote events", slog.String("error", err.Error()))
+				}
+			}
+
 			switch session.Status {
 			case db.SessionStatusCompleted, db.SessionStatusDeleted:
 				logger.Info("Session already completed or deleted. No-op", slog.String("status", string(session.Status)))
+				unsubscribe()
 				return nil
 			case db.SessionStatusRunning:
 				// ok
 			default:
 				logger.Error("Session not running. No-op", slog.String("status", string(session.Status)))
+				unsubscribe()
 				return nil
 			}
 
@@ -239,6 +272,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				logger.Error("Failed to update session status", slog.String("error", err.Error()))
 				return err
 			}
+			unsubscribe()
 			logger.Debug("Complete session success")
 			return nil
 		},

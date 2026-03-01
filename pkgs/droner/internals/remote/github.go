@@ -2,14 +2,19 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -17,10 +22,30 @@ import (
 type githubProvider struct {
 	token         string
 	pollIntervalD time.Duration
+	apiBaseURL    string
+	httpClient    *http.Client
+
+	mu    sync.Mutex
+	state map[string]githubBranchState
+}
+
+type githubBranchState struct {
+	initialized  bool
+	branchExists bool
+	hasPR        bool
+	prNumber     int
+	prState      string
+	merged       bool
+}
+
+type githubPull struct {
+	Number   int        `json:"number"`
+	State    string     `json:"state"`
+	MergedAt *time.Time `json:"merged_at"`
 }
 
 func newGitHubProvider() *githubProvider {
-	interval := 1 * time.Hour // default
+	interval := timeouts.PollInterval
 	if configured := strings.TrimSpace(conf.GetConfig().Providers.Github.PollInterval); configured != "" {
 		if d, err := time.ParseDuration(configured); err == nil {
 			interval = d
@@ -35,6 +60,9 @@ func newGitHubProvider() *githubProvider {
 	return &githubProvider{
 		token:         os.Getenv("GITHUB_TOKEN"),
 		pollIntervalD: interval,
+		apiBaseURL:    "https://api.github.com",
+		httpClient:    &http.Client{Timeout: timeouts.SecondDefault},
+		state:         make(map[string]githubBranchState),
 	}
 }
 
@@ -59,18 +87,127 @@ func (p *githubProvider) pollInterval() time.Duration {
 }
 
 func (p *githubProvider) pollEvents(ctx context.Context, remoteURL string, branchName string) ([]BranchEvent, error) {
+	if !isGitHubURL(remoteURL) {
+		return []BranchEvent{}, nil
+	}
+
 	owner, repo, err := p.parseGitHubURL(remoteURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: Implement actual GitHub API calls
-	// For now, return empty slice - will implement actual polling in next step
-	// This is just to make the interface compile
-	_ = owner
-	_ = repo
-	_ = branchName
-	return []BranchEvent{}, nil
+	branchExists, err := p.fetchBranchExists(ctx, owner, repo, branchName)
+	if err != nil {
+		return nil, err
+	}
+
+	pull, hasPR, err := p.fetchPullForBranch(ctx, owner, repo, branchName)
+	if err != nil {
+		return nil, err
+	}
+
+	key := remoteURL + "\n" + branchName
+	current := githubBranchState{initialized: true, branchExists: branchExists}
+	if hasPR {
+		current.hasPR = true
+		current.prNumber = pull.Number
+		current.prState = pull.State
+		current.merged = pull.MergedAt != nil
+	}
+
+	p.mu.Lock()
+	prev := p.state[key]
+	p.state[key] = current
+	p.mu.Unlock()
+
+	if !prev.initialized {
+		return []BranchEvent{}, nil
+	}
+
+	events := make([]BranchEvent, 0, 2)
+	now := time.Now()
+	if prev.branchExists && !current.branchExists {
+		events = append(events, BranchEvent{Type: BranchDeleted, RemoteURL: remoteURL, Branch: branchName, Timestamp: now})
+	}
+	if prev.hasPR && current.hasPR {
+		if prev.prState == "open" && current.prState == "closed" {
+			prState := current.prState
+			n := current.prNumber
+			events = append(events, BranchEvent{Type: PRClosed, RemoteURL: remoteURL, Branch: branchName, PRNumber: &n, PRState: &prState, Timestamp: now})
+		}
+		if !prev.merged && current.merged {
+			prState := current.prState
+			n := current.prNumber
+			events = append(events, BranchEvent{Type: PRMerged, RemoteURL: remoteURL, Branch: branchName, PRNumber: &n, PRState: &prState, Timestamp: now})
+		}
+	}
+
+	return events, nil
+}
+
+func (p *githubProvider) fetchBranchExists(ctx context.Context, owner string, repo string, branchName string) (bool, error) {
+	ref := "heads/" + branchName
+	escapedRef := url.PathEscape(ref)
+	u := fmt.Sprintf("%s/repos/%s/%s/git/ref/%s", p.apiBaseURL, owner, repo, escapedRef)
+	status, _, err := p.doGET(ctx, u)
+	if err != nil {
+		return false, err
+	}
+	switch status {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("unexpected github status checking branch ref: %d", status)
+	}
+}
+
+func (p *githubProvider) fetchPullForBranch(ctx context.Context, owner string, repo string, branchName string) (githubPull, bool, error) {
+	q := url.Values{}
+	q.Set("head", owner+":"+branchName)
+	q.Set("state", "all")
+	q.Set("per_page", "1")
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls?%s", p.apiBaseURL, owner, repo, q.Encode())
+	status, body, err := p.doGET(ctx, u)
+	if err != nil {
+		return githubPull{}, false, err
+	}
+	if status != http.StatusOK {
+		return githubPull{}, false, fmt.Errorf("unexpected github status listing pulls: %d", status)
+	}
+	var pulls []githubPull
+	if err := json.Unmarshal(body, &pulls); err != nil {
+		return githubPull{}, false, fmt.Errorf("failed to parse github pulls response: %w", err)
+	}
+	if len(pulls) == 0 {
+		return githubPull{}, false, nil
+	}
+	return pulls[0], true, nil
+}
+
+func (p *githubProvider) doGET(ctx context.Context, requestURL string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "droner")
+	if strings.TrimSpace(p.token) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(p.token))
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, body, nil
 }
 
 func (p *githubProvider) parseGitHubURL(remoteURL string) (string, string, error) {

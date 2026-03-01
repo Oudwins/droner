@@ -94,7 +94,7 @@ func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName s
 	r.subscriptions[key] = sub
 
 	// Start polling in background
-	go r.pollLoop(subCtx, remoteURL, branchName, handler)
+	go r.pollLoop(subCtx, key)
 
 	return nil
 }
@@ -113,7 +113,7 @@ func (r *registry) unsubscribe(ctx context.Context, remoteURL string, branchName
 	return nil
 }
 
-func (r *registry) pollLoop(ctx context.Context, remoteURL string, branchName string, handler BranchEventHandler) {
+func (r *registry) pollLoop(ctx context.Context, key subscriptionKey) {
 	ticker := time.NewTicker(r.provider.pollInterval())
 	defer ticker.Stop()
 
@@ -122,13 +122,21 @@ func (r *registry) pollLoop(ctx context.Context, remoteURL string, branchName st
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			events, err := r.provider.pollEvents(ctx, remoteURL, branchName)
+			events, err := r.provider.pollEvents(ctx, key.remoteURL, key.branch)
 			if err != nil {
 				// Log error but continue polling
 				continue
 			}
 			for _, event := range events {
-				handler(event)
+				r.mu.RLock()
+				sub := r.subscriptions[key]
+				if sub == nil {
+					r.mu.RUnlock()
+					return
+				}
+				h := sub.handler
+				r.mu.RUnlock()
+				h(event)
 			}
 		}
 	}

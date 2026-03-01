@@ -17,6 +17,7 @@ INSERT INTO sessions (
   status,
   backend_id,
   repo_path,
+  remote_url,
   worktree_path,
   agent_config,
   error
@@ -28,9 +29,10 @@ INSERT INTO sessions (
   ?,
   ?,
   ?,
+  ?,
   ?
 )
-RETURNING id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+RETURNING id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 `
 
 type CreateSessionParams struct {
@@ -39,6 +41,7 @@ type CreateSessionParams struct {
 	Status       SessionStatus
 	BackendID    string
 	RepoPath     string
+	RemoteUrl    sql.NullString
 	WorktreePath string
 	AgentConfig  sql.NullString
 	Error        sql.NullString
@@ -51,6 +54,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.Status,
 		arg.BackendID,
 		arg.RepoPath,
+		arg.RemoteUrl,
 		arg.WorktreePath,
 		arg.AgentConfig,
 		arg.Error,
@@ -62,6 +66,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,
@@ -82,7 +87,7 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id string) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+SELECT id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
 WHERE id = ?
 `
@@ -96,6 +101,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,
@@ -106,7 +112,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 }
 
 const getSessionBySimpleID = `-- name: GetSessionBySimpleID :one
-SELECT id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+SELECT id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
 WHERE simple_id = ?
   AND status IN ('queued', 'running', 'completed')
@@ -121,6 +127,7 @@ func (q *Queries) GetSessionBySimpleID(ctx context.Context, simpleID string) (Se
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,
@@ -131,7 +138,7 @@ func (q *Queries) GetSessionBySimpleID(ctx context.Context, simpleID string) (Se
 }
 
 const getSessionBySimpleIDAnyStatus = `-- name: GetSessionBySimpleIDAnyStatus :one
-SELECT id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+SELECT id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
 WHERE simple_id = ?
 `
@@ -145,6 +152,7 @@ func (q *Queries) GetSessionBySimpleIDAnyStatus(ctx context.Context, simpleID st
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,
@@ -185,7 +193,7 @@ func (q *Queries) ListRunningSessionIDs(ctx context.Context) ([]string, error) {
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+SELECT id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
 ORDER BY updated_at DESC
 `
@@ -205,6 +213,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.Status,
 			&i.BackendID,
 			&i.RepoPath,
+			&i.RemoteUrl,
 			&i.WorktreePath,
 			&i.AgentConfig,
 			&i.Error,
@@ -225,7 +234,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 }
 
 const listSessionsByStatus = `-- name: ListSessionsByStatus :many
-SELECT id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+SELECT id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 FROM sessions
 WHERE status = ?
 ORDER BY updated_at DESC
@@ -246,6 +255,7 @@ func (q *Queries) ListSessionsByStatus(ctx context.Context, status SessionStatus
 			&i.Status,
 			&i.BackendID,
 			&i.RepoPath,
+			&i.RemoteUrl,
 			&i.WorktreePath,
 			&i.AgentConfig,
 			&i.Error,
@@ -271,7 +281,7 @@ SET status = ?,
     error = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
-RETURNING id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+RETURNING id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 `
 
 type UpdateSessionStatusByIDParams struct {
@@ -289,6 +299,7 @@ func (q *Queries) UpdateSessionStatusByID(ctx context.Context, arg UpdateSession
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,
@@ -305,7 +316,7 @@ SET status = ?,
     updated_at = CURRENT_TIMESTAMP
 WHERE simple_id = ?
   AND status IN ('queued', 'running', 'completed')
-RETURNING id, simple_id, status, backend_id, repo_path, worktree_path, agent_config, error, created_at, updated_at
+RETURNING id, simple_id, status, backend_id, repo_path, remote_url, worktree_path, agent_config, error, created_at, updated_at
 `
 
 type UpdateSessionStatusBySimpleIDParams struct {
@@ -323,6 +334,7 @@ func (q *Queries) UpdateSessionStatusBySimpleID(ctx context.Context, arg UpdateS
 		&i.Status,
 		&i.BackendID,
 		&i.RepoPath,
+		&i.RemoteUrl,
 		&i.WorktreePath,
 		&i.AgentConfig,
 		&i.Error,

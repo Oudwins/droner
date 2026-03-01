@@ -5,10 +5,12 @@ INSERT INTO sessions (
   status,
   backend_id,
   repo_path,
+  remote_url,
   worktree_path,
   agent_config,
   error
 ) VALUES (
+  ?,
   ?,
   ?,
   ?,
