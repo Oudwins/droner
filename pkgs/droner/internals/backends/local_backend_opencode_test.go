@@ -14,6 +14,32 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
+func writePromptOK(w http.ResponseWriter, sessionID string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"info": map[string]any{
+			"id":         "m1",
+			"cost":       0,
+			"mode":       "default",
+			"modelID":    "gpt-5-mini",
+			"parentID":   "",
+			"path":       map[string]any{"cwd": "", "root": ""},
+			"providerID": "openai",
+			"role":       "assistant",
+			"sessionID":  sessionID,
+			"system":     []any{},
+			"time":       map[string]any{"created": 0, "completed": 0},
+			"tokens": map[string]any{
+				"cache":     map[string]any{"read": 0, "write": 0},
+				"input":     0,
+				"output":    0,
+				"reasoning": 0,
+			},
+		},
+		"parts": []any{},
+	})
+}
+
 func opencodeConfigFromServer(t *testing.T, srv *httptest.Server) conf.OpenCodeConfig {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
@@ -57,14 +83,14 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 		if model["modelID"] != "gpt-5-mini" {
 			t.Fatalf("modelID = %v, want gpt-5-mini", model["modelID"])
 		}
-		w.WriteHeader(http.StatusOK)
+		writePromptOK(w, "abc")
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	backend := LocalBackend{}
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}}
-	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "openai/gpt-5-mini", msg); err != nil {
+	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", msg); err != nil {
 		t.Fatalf("sendOpencodeMessage: %v", err)
 	}
 }
@@ -82,14 +108,14 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 		if body["noReply"] != true {
 			t.Fatalf("noReply = %v, want true", body["noReply"])
 		}
-		w.WriteHeader(http.StatusOK)
+		writePromptOK(w, "abc")
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	backend := LocalBackend{}
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("seed")}}
-	if err := backend.seedOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "openai/gpt-5-mini", msg); err != nil {
+	if err := backend.seedOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", msg); err != nil {
 		t.Fatalf("seedOpencodeMessage: %v", err)
 	}
 }

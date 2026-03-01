@@ -1,10 +1,8 @@
 package backends
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +18,8 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
+	opencode "github.com/sst/opencode-sdk-go"
+	"github.com/sst/opencode-sdk-go/option"
 )
 
 type commandFunc func(name string, args ...string) *exec.Cmd
@@ -114,7 +114,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
 		return err
 	}
-	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig)
+	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
 	if err != nil {
 		return err
 	}
@@ -125,12 +125,13 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if agentConfig.Message != nil && len(agentConfig.Message.Parts) > 0 {
 		cfg := opencodeConfig
 		session := opencodeSessionID
+		dir := worktreePath
 		model := agentConfig.Model
 		message := agentConfig.Message
 		go func() {
 			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
 			defer cancel()
-			if err := l.sendOpencodeMessage(promptCtx, cfg, session, model, message); err != nil {
+			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, message); err != nil {
 				slog.Warn(
 					"failed to autorun opencode prompt",
 					slog.String("sessionID", sessionID),
@@ -263,7 +264,7 @@ func (l LocalBackend) createTmuxBaseSession(sessionName string, worktreePath str
 
 func (l LocalBackend) createTmuxOpencodeWindow(sessionName string, worktreePath string, agentConfig AgentConfig, opencodeSessionID string) error {
 	opencodeURL := fmt.Sprintf("http://%s:%d", agentConfig.Opencode.Hostname, agentConfig.Opencode.Port)
-	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL, "--session", opencodeSessionID}
+	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL, "--session", opencodeSessionID, "--dir", worktreePath}
 	newOpencode := execCommand("tmux", opencodeArgs...)
 	if output, err := newOpencode.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
@@ -357,131 +358,122 @@ func (l LocalBackend) waitForOpencode(ctx context.Context, config conf.OpenCodeC
 	return fmt.Errorf("timed out waiting for opencode server at %s:%d", config.Hostname, config.Port)
 }
 
-type opencodeSessionResponse struct {
-	ID string `json:"id"`
+func newOpencodeClient(config conf.OpenCodeConfig) *opencode.Client {
+	baseURL := fmt.Sprintf("http://%s:%d", config.Hostname, config.Port)
+	return opencode.NewClient(option.WithBaseURL(baseURL))
 }
 
-type opencodeModel struct {
-	ProviderID string `json:"providerID"`
-	ModelID    string `json:"modelID"`
+func opencodePartsFromMessage(message *messages.Message) []opencode.SessionPromptParamsPartUnion {
+	if message == nil || len(message.Parts) == 0 {
+		return nil
+	}
+	parts := make([]opencode.SessionPromptParamsPartUnion, 0, len(message.Parts))
+	for _, p := range message.Parts {
+		if p.Type != messages.PartTypeText {
+			continue
+		}
+		if strings.TrimSpace(p.Text) == "" {
+			continue
+		}
+		parts = append(parts, opencode.TextPartInputParam{
+			Type: opencode.F(opencode.TextPartInputTypeText),
+			Text: opencode.F(p.Text),
+		})
+	}
+	return parts
 }
 
-type opencodeMessageRequest struct {
-	NoReply bool                   `json:"noReply,omitempty"`
-	Parts   []messages.MessagePart `json:"parts"`
-	Model   *opencodeModel         `json:"model,omitempty"`
-}
-
-func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig) (string, error) {
-	url := fmt.Sprintf("http://%s:%d/session", config.Hostname, config.Port)
-	client := &http.Client{Timeout: timeouts.SecondLong}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader([]byte("{}")))
+func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig, worktreePath string) (string, error) {
+	client := newOpencodeClient(config)
+	params := opencode.SessionNewParams{}
+	if strings.TrimSpace(worktreePath) != "" {
+		params.Directory = opencode.F(worktreePath)
+	}
+	session, err := client.Session.New(ctx, params, option.WithRequestTimeout(timeouts.SecondLong))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("unexpected opencode session status: %s", resp.Status)
-	}
-	var payload opencodeSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(payload.ID) == "" {
+	if session == nil || strings.TrimSpace(session.ID) == "" {
 		return "", errors.New("opencode session id missing from response")
 	}
-	return payload.ID, nil
+	return session.ID, nil
 }
 
-func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, model string, message *messages.Message) error {
+func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, message *messages.Message) error {
 	if message == nil || len(message.Parts) == 0 {
 		return nil
 	}
-	url := fmt.Sprintf("http://%s:%d/session/%s/message", config.Hostname, config.Port, sessionID)
-	request := opencodeMessageRequest{NoReply: true, Parts: message.Parts}
-	if parsed := parseOpencodeModel(model); parsed != nil {
-		request.Model = parsed
+	client := newOpencodeClient(config)
+
+	parts := opencodePartsFromMessage(message)
+	if len(parts) == 0 {
+		return nil
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return err
+
+	params := opencode.SessionPromptParams{
+		Parts:   opencode.F(parts),
+		NoReply: opencode.F(true),
 	}
-	client := &http.Client{Timeout: timeouts.SecondLong}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
+	if strings.TrimSpace(directory) != "" {
+		params.Directory = opencode.F(directory)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	if providerID, modelID, ok := parseOpencodeModel(model); ok {
+		params.Model = opencode.F(opencode.SessionPromptParamsModel{
+			ProviderID: opencode.F(providerID),
+			ModelID:    opencode.F(modelID),
+		})
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if body := readHTTPResponseBody(resp.Body); body != "" {
-			return fmt.Errorf("unexpected opencode message status: %s: %s", resp.Status, body)
+
+	if strings.TrimSpace(sessionID) == "" {
+		id, err := l.createOpencodeSession(ctx, config, "")
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("unexpected opencode message status: %s", resp.Status)
+		sessionID = id
 	}
-	return nil
+	_, err := client.Session.Prompt(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
+	return err
 }
 
-func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, model string, message *messages.Message) error {
+func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, message *messages.Message) error {
 	if message == nil || len(message.Parts) == 0 {
 		return nil
 	}
-	url := fmt.Sprintf("http://%s:%d/session/%s/message", config.Hostname, config.Port, sessionID)
-	request := opencodeMessageRequest{Parts: message.Parts}
-	if parsed := parseOpencodeModel(model); parsed != nil {
-		request.Model = parsed
+	client := newOpencodeClient(config)
+
+	parts := opencodePartsFromMessage(message)
+	if len(parts) == 0 {
+		return nil
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return err
+
+	params := opencode.SessionPromptParams{Parts: opencode.F(parts)}
+	if strings.TrimSpace(directory) != "" {
+		params.Directory = opencode.F(directory)
 	}
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
+	if providerID, modelID, ok := parseOpencodeModel(model); ok {
+		params.Model = opencode.F(opencode.SessionPromptParamsModel{
+			ProviderID: opencode.F(providerID),
+			ModelID:    opencode.F(modelID),
+		})
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if body := readHTTPResponseBody(resp.Body); body != "" {
-			return fmt.Errorf("unexpected opencode message status: %s: %s", resp.Status, body)
+
+	if strings.TrimSpace(sessionID) == "" {
+		id, err := l.createOpencodeSession(ctx, config, "")
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("unexpected opencode message status: %s", resp.Status)
+		sessionID = id
 	}
-	return nil
+	_, err := client.Session.Prompt(ctx, sessionID, params)
+	return err
 }
 
-func readHTTPResponseBody(r io.Reader) string {
-	if r == nil {
-		return ""
-	}
-	const maxBytes = 8 * 1024
-	b, err := io.ReadAll(io.LimitReader(r, maxBytes))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-func parseOpencodeModel(raw string) *opencodeModel {
+func parseOpencodeModel(raw string) (providerID string, modelID string, ok bool) {
 	parts := strings.SplitN(strings.TrimSpace(raw), "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return nil
+		return "", "", false
 	}
-	return &opencodeModel{ProviderID: parts[0], ModelID: parts[1]}
+	return parts[0], parts[1], true
 }
 
 func (l LocalBackend) tryReuseCompletedWorktree(ctx context.Context, repoPath string, worktreePath string, sessionID string) (bool, error) {
