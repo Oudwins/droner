@@ -68,7 +68,7 @@ func NewClient(opts ...Option) *Client {
 	client := &Client{
 		baseURL: strings.TrimRight(envs.BASE_URL, "/"),
 		httpClient: &http.Client{
-			Timeout: timeouts.SecondDefault,
+			Timeout: timeouts.SecondLong,
 		},
 	}
 	for _, opt := range opts {
