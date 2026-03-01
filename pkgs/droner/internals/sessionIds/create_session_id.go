@@ -51,7 +51,7 @@ func NewForCreateSession(ctx context.Context, opts CreateSessionIDOptions) (stri
 }
 
 const openCodeSessionNamePromptPrefix = "" +
-	"Generate a short git branch name for this coding session.\n" +
+	"Generate a short (1-3 words) git branch name for this coding session.\n" +
 	"\n" +
 	"Return ONLY the name, with no additional text.\n" +
 	"Rules:\n" +
