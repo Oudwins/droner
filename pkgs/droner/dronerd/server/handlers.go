@@ -16,6 +16,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/repo"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
@@ -85,12 +86,22 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// LOGIC
 	// NOTE: Parallel requests with the same ID are allowed by this behaviour. Can fix this later. Its safe because create session should fail at db level
-	repoName := filepath.Base(request.Path)
 	if request.SessionID == "" {
-		generatedID, err := sessionids.New(repoName, &sessionids.GeneratorConfig{
+		var msg *messages.Message
+		if request.AgentConfig != nil {
+			msg = request.AgentConfig.Message
+		}
+
+		generatedID, err := sessionids.NewForCreateSession(r.Context(), sessionids.CreateSessionIDOptions{
+			RepoPath:    request.Path,
+			Naming:      s.Base.Config.Sessions.Naming,
+			Message:     msg,
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
 				return backend.ValidateSessionID(request.Path, id)
+			},
+			OnNamingError: func(err error) {
+				logger.Info("OpenCode naming failed; falling back to random", slog.String("error", err.Error()))
 			},
 		})
 		if err != nil {

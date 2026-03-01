@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"strings"
+
 	z "github.com/Oudwins/zog"
 )
 
@@ -49,6 +51,25 @@ type Message struct {
 	Role  MessageRole
 	Parts []MessagePart `json:"parts"`
 	Meta  MessageMeta   // TODO: Actually store some info in here
+}
+
+// ToRawText concatenates all text parts and ignores non-text parts.
+// Text parts are joined with newlines.
+func ToRawText(m *Message) string {
+	if m == nil || len(m.Parts) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, p := range m.Parts {
+		if p.Type != PartTypeText {
+			continue
+		}
+		if strings.TrimSpace(p.Text) == "" {
+			continue
+		}
+		parts = append(parts, p.Text)
+	}
+	return strings.Join(parts, "\n")
 }
 
 var MessageSchema = z.Struct(z.Shape{

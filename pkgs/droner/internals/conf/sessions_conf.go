@@ -37,6 +37,18 @@ type OpenCodeConfig struct {
 	Port     int
 }
 
+type SessionNamingStrategy string
+
+const (
+	SessionNamingStrategyRandom         SessionNamingStrategy = "random"
+	SessionNamingStrategyOpenCodePrompt SessionNamingStrategy = "opencode_prompt"
+)
+
+type SessionNamingConfig struct {
+	Strategy SessionNamingStrategy
+	Model    string
+}
+
 type LocalBackendConfig struct {
 	WorktreeDir string
 }
@@ -59,6 +71,7 @@ type BackendsConfig struct {
 type SessionsConfig struct {
 	Backends BackendsConfig
 	Agent    AgentConfig
+	Naming   SessionNamingConfig
 }
 
 var SessionsConfigSchema = z.Struct(z.Shape{
@@ -79,5 +92,9 @@ var SessionsConfigSchema = z.Struct(z.Shape{
 				"Port":     z.Int().Default(4096),
 			}),
 		}),
+	}),
+	"Naming": z.Struct(z.Shape{
+		"Strategy": z.StringLike[SessionNamingStrategy]().OneOf([]SessionNamingStrategy{SessionNamingStrategyRandom, SessionNamingStrategyOpenCodePrompt}).Default(SessionNamingStrategyOpenCodePrompt),
+		"Model":    z.String().Default("openai/gpt-5-mini").Trim(),
 	}),
 })

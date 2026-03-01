@@ -12,6 +12,11 @@ type GeneratorConfig struct {
 }
 
 func New(baseName string, conf *GeneratorConfig) (string, error) {
+	_ = baseName
+	return NewWithPrefix("", conf)
+}
+
+func NewWithPrefix(prefix string, conf *GeneratorConfig) (string, error) {
 	random := rand.New(rand.NewSource(time.Now().UnixNano()))
 	letters := []rune("abcdefghijklmnopqrstuvwxyz")
 	var err error
@@ -20,7 +25,11 @@ func New(baseName string, conf *GeneratorConfig) (string, error) {
 		for i := range chars {
 			chars[i] = letters[random.Intn(len(letters))]
 		}
-		candidate := fmt.Sprintf("%s-%02d", string(chars), random.Intn(100))
+		suffix := fmt.Sprintf("%s-%02d", string(chars), random.Intn(100))
+		candidate := suffix
+		if prefix != "" {
+			candidate = prefix + "-" + suffix
+		}
 
 		err = conf.IsValid(candidate)
 
