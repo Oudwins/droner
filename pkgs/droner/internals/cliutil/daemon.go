@@ -65,7 +65,7 @@ func waitForDaemon(client *sdk.Client) error {
 }
 
 func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 
 	if err := client.Shutdown(ctx); err != nil {
@@ -87,17 +87,18 @@ func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string
 }
 
 func waitForDaemonStop(client *sdk.Client) error {
-	for i := 0; i < 8; i++ {
+	deadline := time.Now().Add(timeouts.SecondLong)
+	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeouts.Probe)
 		_, err := client.Version(ctx)
 		cancel()
 		if err != nil {
 			return nil
 		}
-		time.Sleep(time.Duration(i+1) * 150 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 
-	return errors.New("failed to stop dronerd")
+	return errors.New("failed to stop dronerd within timeout")
 }
 
 func findServeBinary() (string, error) {

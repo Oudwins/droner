@@ -35,8 +35,18 @@ func (s *Server) HandlerVersion(_ *slog.Logger, w http.ResponseWriter, r *http.R
 
 func (s *Server) HandlerShutdown(_ *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	s.Shutdown()
-	_, _ = w.Write([]byte("Shutdown"))
+	// Trigger shutdown asynchronously; calling http.Server.Shutdown from within
+	// a handler can deadlock until the shutdown context times out.
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte("Shutting down"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go func() {
+		// Give the response a moment to flush before tearing down the server.
+		time.Sleep(100 * time.Millisecond)
+		s.Shutdown()
+	}()
 }
 
 func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
