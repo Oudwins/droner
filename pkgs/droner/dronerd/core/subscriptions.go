@@ -29,7 +29,7 @@ func newSubscriptionManager(base *BaseServer) *subscriptionManager {
 }
 
 // subscribe starts a remote subscription if not already active
-func (sm *subscriptionManager) subscribe(ctx context.Context, remoteURL string, branch string, onDelete func(sessionID string)) error {
+func (sm *subscriptionManager) subscribe(ctx context.Context, remoteURL string, branch string, onComplete func(sessionID string)) error {
 	key := remoteURL + ":" + branch
 
 	sm.mu.Lock()
@@ -53,16 +53,16 @@ func (sm *subscriptionManager) subscribe(ctx context.Context, remoteURL string, 
 			"pr_number", event.PRNumber,
 		)
 
-		// Trigger deletion for these event types
+		// Trigger completion for these event types
 		switch event.Type {
 		case remote.PRClosed, remote.PRMerged, remote.BranchDeleted:
-			sm.logger.Info("Triggering session cleanup due to remote event",
+			sm.logger.Info("Triggering session completion due to remote event",
 				"event_type", event.Type,
 				"branch", event.Branch,
 				"pr_number", event.PRNumber,
 			)
 			// Extract session ID from branch name (branch name == session ID)
-			onDelete(event.Branch)
+			onComplete(event.Branch)
 		default:
 			sm.logger.Debug("Ignoring non-triggering event",
 				"event_type", event.Type,

@@ -75,6 +75,11 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Path is not a git repo", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
+	remoteURL, err := repo.GetRemoteURL(request.Path)
+	if err != nil {
+		logger.Warn("Failed to resolve repo remote URL; continuing without subscriptions", slog.String("error", err.Error()))
+		remoteURL = ""
+	}
 	backend, err := s.Base.BackendStore.Get(request.BackendID)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Backend '%s' is not registered", request.BackendID), nil), Render.Status(http.StatusBadRequest))
@@ -144,12 +149,17 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		}
 		agentConfigValue = sql.NullString{String: string(agentConfigBytes), Valid: true}
 	}
+	remoteURLValue := sql.NullString{}
+	if remoteURL != "" {
+		remoteURLValue = sql.NullString{String: remoteURL, Valid: true}
+	}
 	sessionData := db.CreateSessionParams{
 		ID:           sessionID.String(),
 		SimpleID:     request.SessionID.String(),
 		Status:       db.SessionStatusQueued,
 		BackendID:    request.BackendID.String(),
 		RepoPath:     request.Path,
+		RemoteUrl:    remoteURLValue,
 		WorktreePath: worktreePath,
 		AgentConfig:  agentConfigValue,
 		Error:        sql.NullString{},

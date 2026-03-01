@@ -15,6 +15,7 @@ type Session struct {
 	Status       SessionStatus
 	BackendID    string
 	RepoPath     string
+	RemoteUrl    sql.NullString
 	WorktreePath string
 	AgentConfig  sql.NullString
 	Error        sql.NullString
