@@ -115,14 +115,14 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err != nil {
 		return err
 	}
-	if agentConfig.Message != nil && len(agentConfig.Message.Parts) > 0 {
-		if err := l.seedOpencodeMessage(ctx, opencodeConfig, opencodeSessionID, agentConfig.Model, agentConfig.Message); err != nil {
-			return err
-		}
-	}
 	agentConfig.Opencode = opencodeConfig
 	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
+	}
+	if agentConfig.Message != nil && len(agentConfig.Message.Parts) > 0 {
+		if err := l.sendOpencodeMessage(ctx, opencodeConfig, opencodeSessionID, agentConfig.Model, agentConfig.Message); err != nil {
+			return err
+		}
 	}
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
 		return err
@@ -351,7 +351,7 @@ type opencodeModel struct {
 }
 
 type opencodeMessageRequest struct {
-	NoReply bool                   `json:"noReply"`
+	NoReply bool                   `json:"noReply,omitempty"`
 	Parts   []messages.MessagePart `json:"parts"`
 	Model   *opencodeModel         `json:"model,omitempty"`
 }
@@ -407,9 +407,57 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if body := readHTTPResponseBody(resp.Body); body != "" {
+			return fmt.Errorf("unexpected opencode message status: %s: %s", resp.Status, body)
+		}
 		return fmt.Errorf("unexpected opencode message status: %s", resp.Status)
 	}
 	return nil
+}
+
+func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, model string, message *messages.Message) error {
+	if message == nil || len(message.Parts) == 0 {
+		return nil
+	}
+	url := fmt.Sprintf("http://%s:%d/session/%s/message", config.Hostname, config.Port, sessionID)
+	request := opencodeMessageRequest{Parts: message.Parts}
+	if parsed := parseOpencodeModel(model); parsed != nil {
+		request.Model = parsed
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: timeouts.SecondLong}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		if body := readHTTPResponseBody(resp.Body); body != "" {
+			return fmt.Errorf("unexpected opencode message status: %s: %s", resp.Status, body)
+		}
+		return fmt.Errorf("unexpected opencode message status: %s", resp.Status)
+	}
+	return nil
+}
+
+func readHTTPResponseBody(r io.Reader) string {
+	if r == nil {
+		return ""
+	}
+	const maxBytes = 8 * 1024
+	b, err := io.ReadAll(io.LimitReader(r, maxBytes))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func parseOpencodeModel(raw string) *opencodeModel {
