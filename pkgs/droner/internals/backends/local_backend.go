@@ -172,8 +172,18 @@ func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sess
 	return nil
 }
 
-func (l LocalBackend) CompleteSession(_ context.Context, _ string, sessionID string) error {
-	return l.killTmuxSession(sessionID)
+func (l LocalBackend) CompleteSession(_ context.Context, worktreePath string, sessionID string) error {
+	sessionName := ""
+	if strings.TrimSpace(worktreePath) != "" {
+		sessionName = tmuxSessionNameFromWorktreePath(worktreePath)
+	}
+	if strings.TrimSpace(sessionName) == "" {
+		sessionName = strings.TrimSpace(sessionID)
+	}
+	if sessionName == "" {
+		return nil
+	}
+	return l.killTmuxSession(sessionName)
 }
 
 func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string) error {
