@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -107,7 +108,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		return err
 	}
 	opencodeConfig := agentConfig.Opencode
-	if err := l.ensureOpencodeServer(ctx, sessionName, worktreePath, opencodeConfig); err != nil {
+	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
 		return err
 	}
 	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig)
@@ -264,17 +265,40 @@ func (l LocalBackend) killTmuxSession(sessionName string) error {
 	return nil
 }
 
-func (l LocalBackend) ensureOpencodeServer(ctx context.Context, sessionName string, worktreePath string, config conf.OpenCodeConfig) error {
+func (l LocalBackend) ensureOpencodeServer(ctx context.Context, worktreePath string, config conf.OpenCodeConfig) error {
 	if l.opencodeHealthy(ctx, config) {
 		return nil
 	}
-	cmd := exec.Command("opencode", "serve", "--hostname", config.Hostname, "--port", fmt.Sprintf("%d", config.Port))
-	cmd.Dir = worktreePath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	cmd := execCommand(
+		"opencode",
+		"serve",
+		"--hostname",
+		config.Hostname,
+		"--port",
+		fmt.Sprintf("%d", config.Port),
+	)
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		cmd.Dir = home
+	} else {
+		cmd.Dir = worktreePath
+	}
+
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.Env = os.Environ()
+
+	// Detach from any controlling terminal/session (e.g. tmux) so the server
+	// keeps running even if the tmux session is killed.
+	detachCmd(cmd)
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start opencode server: %w", err)
 	}
+	_ = cmd.Process.Release()
+
 	return l.waitForOpencode(ctx, config, timeouts.SecondLong)
 }
 
