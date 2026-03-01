@@ -58,7 +58,7 @@ func GetConfig() *Config {
 		if err := ConfigSchema.Parse(map[string]any{}, defaults); err != nil {
 			log.Fatal("[Droner] Failed to parse config", err)
 		}
-		defaults.Version = version.Identity()
+		defaults.Version = version.Version()
 
 		dataDir, err := expandPath(defaults.Server.DataDir)
 		if err != nil {

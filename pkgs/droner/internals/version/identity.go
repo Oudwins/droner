@@ -14,6 +14,7 @@ import (
 var (
 	identityOnce sync.Once
 	identityVal  string
+	metadataVal  string
 )
 
 // Identity returns a best-effort build identity string that changes on rebuilds.
@@ -25,31 +26,45 @@ var (
 //   - unknown
 func Identity() string {
 	identityOnce.Do(func() {
-		identityVal = computeIdentity()
+		identityVal, metadataVal = computeIdentityAndMetadata()
 	})
 	return identityVal
 }
 
-func computeIdentity() string {
+// IdentityMetadata returns an identity string suitable for SemVer build metadata
+// (no '+' characters). It is best-effort and may be empty.
+//
+// Format:
+//   - <rev12><.dirty?>.<exeHash12>
+//   - <exeHash12>
+//   - <rev12><.dirty?>
+func IdentityMetadata() string {
+	identityOnce.Do(func() {
+		identityVal, metadataVal = computeIdentityAndMetadata()
+	})
+	return metadataVal
+}
+
+func computeIdentityAndMetadata() (identity string, metadata string) {
 	rev, dirty := vcsInfo()
 	hash := executableHash()
 
-	if hash != "" && rev != "" {
+	if rev != "" && hash != "" {
 		if dirty {
-			return rev + "-dirty+" + hash
+			return rev + "-dirty+" + hash, rev + ".dirty." + hash
 		}
-		return rev + "+" + hash
+		return rev + "+" + hash, rev + "." + hash
 	}
 	if hash != "" {
-		return hash
+		return hash, hash
 	}
 	if rev != "" {
 		if dirty {
-			return rev + "-dirty"
+			return rev + "-dirty", rev + ".dirty"
 		}
-		return rev
+		return rev, rev
 	}
-	return "unknown"
+	return "unknown", ""
 }
 
 func vcsInfo() (rev12 string, dirty bool) {
