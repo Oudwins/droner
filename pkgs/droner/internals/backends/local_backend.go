@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,6 +25,8 @@ import (
 type commandFunc func(name string, args ...string) *exec.Cmd
 
 var execCommand commandFunc = exec.Command
+
+var opencodeAutorunTimeout = timeouts.DefaultMinutes
 
 func (l LocalBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
 	if strings.TrimSpace(sessionID) == "" {
@@ -120,9 +123,22 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		return err
 	}
 	if agentConfig.Message != nil && len(agentConfig.Message.Parts) > 0 {
-		if err := l.sendOpencodeMessage(ctx, opencodeConfig, opencodeSessionID, agentConfig.Model, agentConfig.Message); err != nil {
-			return err
-		}
+		cfg := opencodeConfig
+		session := opencodeSessionID
+		model := agentConfig.Model
+		message := agentConfig.Message
+		go func() {
+			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
+			defer cancel()
+			if err := l.sendOpencodeMessage(promptCtx, cfg, session, model, message); err != nil {
+				slog.Warn(
+					"failed to autorun opencode prompt",
+					slog.String("sessionID", sessionID),
+					slog.String("opencodeSessionID", session),
+					slog.String("error", err.Error()),
+				)
+			}
+		}()
 	}
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
 		return err
@@ -428,7 +444,7 @@ func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenC
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: timeouts.SecondLong}
+	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
