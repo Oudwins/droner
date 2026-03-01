@@ -21,8 +21,10 @@ serve:
 
 build:
     mkdir -p {{bin_dir}}
-    cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd
     cd ./pkgs/droner && go build -o ../../{{droner_bin}} ./droner
+
+build-all: build
+    cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd
 
 test *args:
     cd ./pkgs/droner && go test ./... {{args}}
