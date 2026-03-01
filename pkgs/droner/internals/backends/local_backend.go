@@ -17,6 +17,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 
 type commandFunc func(name string, args ...string) *exec.Cmd
@@ -274,11 +275,11 @@ func (l LocalBackend) ensureOpencodeServer(ctx context.Context, sessionName stri
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start opencode server: %w", err)
 	}
-	return l.waitForOpencode(ctx, config, 30*time.Second)
+	return l.waitForOpencode(ctx, config, timeouts.SecondLong)
 }
 
 func (l LocalBackend) opencodeHealthy(ctx context.Context, config conf.OpenCodeConfig) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: timeouts.SecondShort}
 	url := fmt.Sprintf("http://%s:%d/global/health", config.Hostname, config.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -323,7 +324,7 @@ type opencodeMessageRequest struct {
 
 func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig) (string, error) {
 	url := fmt.Sprintf("http://%s:%d/session", config.Hostname, config.Port)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeouts.SecondLong}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", err
@@ -360,7 +361,7 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeouts.SecondLong}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

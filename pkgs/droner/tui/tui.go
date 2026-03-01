@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,7 +48,7 @@ func Run(client *sdk.Client) error {
 				Parts: []messages.MessagePart{messages.NewTextPart(prompt)}},
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
 	if err != nil {
@@ -56,7 +56,7 @@ func Run(client *sdk.Client) error {
 			if err := cliutil.RunGitHubAuthFlow(client); err != nil {
 				return err
 			}
-			ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.SecondDefault)
 			defer retryCancel()
 			response, err = client.CreateSession(ctx, request)
 			if err != nil {

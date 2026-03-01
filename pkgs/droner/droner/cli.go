@@ -16,6 +16,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/internals/version"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 	"github.com/Oudwins/droner/pkgs/droner/tui"
@@ -118,7 +119,7 @@ func printVersionInfo(cmd *cobra.Command) {
 	out := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(out, "cli: %s\n", strings.TrimSpace(version.Version()))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.Probe)
 	defer cancel()
 
 	serverVersion, err := sdk.NewClient().Version(ctx)
@@ -144,7 +145,7 @@ func newCompleteCmd() *cobra.Command {
 			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
 			response, err := client.CompleteSession(ctx, schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
 			if err != nil {
@@ -230,7 +231,7 @@ func newDelCmd() *cobra.Command {
 			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
 			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
 			if err != nil {
@@ -281,7 +282,7 @@ func newNukeCmd() *cobra.Command {
 					return nil
 				}
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
 			response, err := client.NukeSessions(ctx)
 			if err != nil {
@@ -320,7 +321,7 @@ func newSessionsCmd() *cobra.Command {
 			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
 			var response *schemas.SessionListResponse
 			var err error
@@ -334,7 +335,7 @@ func newSessionsCmd() *cobra.Command {
 					if err := cliutil.RunGitHubAuthFlow(client); err != nil {
 						return err
 					}
-					ctx, retryCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
 					defer retryCancel()
 					if all {
 						response, err = client.ListSessionsAll(ctx)
@@ -379,7 +380,7 @@ func newTaskCmd() *cobra.Command {
 			if err := cliutil.EnsureDaemonRunning(client); err != nil {
 				return err
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
 			defer cancel()
 			response, err := client.TaskStatus(ctx, inputs[0])
 			if err != nil {
@@ -443,7 +444,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 	defer cancel()
 	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 	if includeAgentConfig {
@@ -460,7 +461,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 			if err := cliutil.RunGitHubAuthFlow(client); err != nil {
 				return err
 			}
-			ctx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.SecondDefault)
 			defer retryCancel()
 			response, err = client.CreateSession(ctx, request)
 			if err != nil {
@@ -494,7 +495,7 @@ func isInteractiveTerminal() bool {
 
 func parseWaitTimeout(raw string) (time.Duration, error) {
 	if strings.TrimSpace(raw) == "" {
-		return 45 * time.Minute, nil
+		return timeouts.DefaultMinutes, nil
 	}
 	value, err := time.ParseDuration(raw)
 	if err != nil {
@@ -517,7 +518,7 @@ func confirmAction(prompt string) (bool, error) {
 func waitForTask(client *sdk.Client, taskID string, timeout time.Duration) (*schemas.TaskResponse, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
 		response, err := client.TaskStatus(ctx, taskID)
 		cancel()
 		if err != nil {

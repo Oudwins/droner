@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 
 type Client struct {
@@ -68,7 +68,7 @@ func NewClient(opts ...Option) *Client {
 	client := &Client{
 		baseURL: strings.TrimRight(envs.BASE_URL, "/"),
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: timeouts.SecondDefault,
 		},
 	}
 	for _, opt := range opts {

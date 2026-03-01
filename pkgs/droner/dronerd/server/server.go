@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -95,7 +95,7 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown() {
 	s.canceler()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 	defer cancel()
 	if s.consumer != nil {
 		if err := s.consumer.Shutdown(ctx); err != nil {
