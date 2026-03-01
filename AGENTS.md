@@ -29,12 +29,12 @@
 - Run CLI (builds first): `just cli <args>`.
 
 ## Tests
-- Run all tests: `go test ./pkgs/droner/...`.
-- Run a single package: `go test ./pkgs/droner/internals/server`.
+- Run all tests: `cd pkgs/droner && go test ./...`.
+- Run a single package: `cd pkgs/droner && go test ./internals/server`.
 - Run a single test by name:
-  `go test ./pkgs/droner/... -run ^TestName$ -count=1`.
+  `cd pkgs/droner && go test ./... -run ^TestName$ -count=1`.
 - Run a single subtest:
-  `go test ./pkgs/droner/... -run ^TestName$/^SubtestName$ -count=1`.
+  `cd pkgs/droner && go test ./... -run ^TestName$/^SubtestName$ -count=1`.
 - Use `-count=1` when you need to bypass cached results.
 
 ## Lint and formatting
@@ -124,5 +124,4 @@
 - `just dev` starts the server and frees port 57876.
 - `go test ./pkgs/droner/...` should pass before PRs.
 - `gofmt -w` should produce no diffs on committed Go files.
-
 
