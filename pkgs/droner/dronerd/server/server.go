@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
@@ -17,11 +18,12 @@ import (
 )
 
 type Server struct {
-	Base       *core.BaseServer
-	oauth      *oauthStateStore
-	httpServer *http.Server
-	canceler   context.CancelFunc
-	consumer   *tasky.Consumer[core.Jobs]
+	Base         *core.BaseServer
+	oauth        *oauthStateStore
+	httpServer   *http.Server
+	canceler     context.CancelFunc
+	consumer     *tasky.Consumer[core.Jobs]
+	shutdownOnce sync.Once
 }
 
 func New() *Server {
@@ -94,25 +96,26 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown() {
-	s.canceler()
-	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
-	defer cancel()
-	if s.consumer != nil {
-		if err := s.consumer.Shutdown(ctx); err != nil {
-			s.Base.Logger.Error("[shutdown] Consumer shutdown failed", "error", err)
-		}
-	}
-
-	if s.httpServer != nil {
-		if err := s.httpServer.Shutdown(ctx); err != nil {
-			if !errors.Is(err, http.ErrServerClosed) {
-				s.Base.Logger.Error("[shutdown] server shutdown failed", "error", err)
+	s.shutdownOnce.Do(func() {
+		s.canceler()
+		ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
+		defer cancel()
+		if s.consumer != nil {
+			if err := s.consumer.Shutdown(ctx); err != nil {
+				s.Base.Logger.Error("[shutdown] Consumer shutdown failed", "error", err)
 			}
 		}
-	}
 
-	if s.Base != nil {
-		s.Base.Close()
-	}
+		if s.httpServer != nil {
+			if err := s.httpServer.Shutdown(ctx); err != nil {
+				if !errors.Is(err, http.ErrServerClosed) {
+					s.Base.Logger.Error("[shutdown] server shutdown failed", "error", err)
+				}
+			}
+		}
 
+		if s.Base != nil {
+			s.Base.Close()
+		}
+	})
 }
