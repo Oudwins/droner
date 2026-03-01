@@ -30,6 +30,11 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 	messageStarted := make(chan struct{})
 	releaseMessage := make(chan struct{})
 	messageDone := make(chan struct{})
+	handlerErr := make(chan string, 1)
+
+	tmp := t.TempDir()
+	repoPath := filepath.Join(tmp, "repo")
+	worktreePath := filepath.Join(tmp, "worktree")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/global/health", func(w http.ResponseWriter, r *http.Request) {
@@ -40,11 +45,11 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
 		}
+		if dir := r.URL.Query().Get("directory"); dir != worktreePath {
+			t.Fatalf("directory = %q, want %q", dir, worktreePath)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"abc"}`))
-	})
-	mux.HandleFunc("/session/abc/prompt", func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("unexpected call to /session/abc/prompt")
 	})
 	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -68,11 +73,25 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 			t.Fatalf("parts missing or empty")
 		}
 		gotMessage = true
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"info":{"role":"assistant"},"parts":[`))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 		select {
 		case <-releaseMessage:
-			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"type":"text","text":"ok"}]}`))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 			close(messageDone)
 		case <-r.Context().Done():
+			select {
+			case handlerErr <- "client canceled request before response completed":
+			default:
+			}
 			close(messageDone)
 		}
 	})
@@ -83,10 +102,6 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 		srv.Close()
 	})
 	opencodeCfg := opencodeConfigFromServer(t, srv)
-
-	tmp := t.TempDir()
-	repoPath := filepath.Join(tmp, "repo")
-	worktreePath := filepath.Join(tmp, "worktree")
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
 	agentCfg := AgentConfig{
@@ -117,6 +132,11 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 	if !gotMessage {
 		t.Fatalf("expected a POST to /session/abc/message")
 	}
+	select {
+	case err := <-handlerErr:
+		t.Fatalf("message handler error: %s", err)
+	default:
+	}
 }
 
 func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T) {
@@ -128,12 +148,19 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 
 	messageStarted := make(chan struct{})
 
+	tmp := t.TempDir()
+	repoPath := filepath.Join(tmp, "repo")
+	worktreePath := filepath.Join(tmp, "worktree")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/global/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		if dir := r.URL.Query().Get("directory"); dir != worktreePath {
+			t.Fatalf("directory = %q, want %q", dir, worktreePath)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"abc"}`))
 	})
@@ -149,10 +176,6 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	opencodeCfg := opencodeConfigFromServer(t, srv)
-
-	tmp := t.TempDir()
-	repoPath := filepath.Join(tmp, "repo")
-	worktreePath := filepath.Join(tmp, "worktree")
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
 	agentCfg := AgentConfig{
