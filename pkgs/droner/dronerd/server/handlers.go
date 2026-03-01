@@ -20,6 +20,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/zog/zhttp"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -278,7 +279,7 @@ func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), timeouts.SecondShort)
 	defer cancel()
 
 	var jobID string

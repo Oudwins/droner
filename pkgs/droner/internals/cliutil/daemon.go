@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 func EnsureDaemonRunning(client *sdk.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.Probe)
 	defer cancel()
 
 	if version, err := client.Version(ctx); err == nil {
@@ -47,7 +48,7 @@ func StartDaemon() error {
 func waitForDaemon(client *sdk.Client) error {
 	var lastErr error
 	for i := 0; i < 8; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), timeouts.Probe)
 		_, err := client.Version(ctx)
 		cancel()
 		if err == nil {
@@ -64,7 +65,7 @@ func waitForDaemon(client *sdk.Client) error {
 }
 
 func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 	defer cancel()
 
 	if err := client.Shutdown(ctx); err != nil {
@@ -87,7 +88,7 @@ func replaceDaemon(client *sdk.Client, remoteVersion string, localVersion string
 
 func waitForDaemonStop(client *sdk.Client) error {
 	for i := 0; i < 8; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), timeouts.Probe)
 		_, err := client.Version(ctx)
 		cancel()
 		if err != nil {

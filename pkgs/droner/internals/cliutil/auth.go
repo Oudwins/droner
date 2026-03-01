@@ -8,11 +8,12 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/desktop"
 	"github.com/Oudwins/droner/pkgs/droner/internals/term"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 func RunGitHubAuthFlow(client *sdk.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondDefault)
 	defer cancel()
 
 	start, err := client.StartGitHubOAuth(ctx)
@@ -35,22 +36,22 @@ func RunGitHubAuthFlow(client *sdk.Client) error {
 		fmt.Printf("User code: %s\n", start.UserCode)
 	}
 
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(timeouts.DefaultMinutes)
 	if start.ExpiresIn > 0 {
 		expiry := time.Now().Add(time.Duration(start.ExpiresIn) * time.Second)
 		if expiry.Before(deadline) {
 			deadline = expiry
 		}
 	}
-	pollInterval := 2 * time.Second
+	pollInterval := timeouts.PollInterval
 	if start.Interval > 0 {
 		pollInterval = time.Duration(start.Interval) * time.Second
-		if pollInterval < 2*time.Second {
-			pollInterval = 2 * time.Second
+		if pollInterval < timeouts.PollInterval {
+			pollInterval = timeouts.PollInterval
 		}
 	}
 	for time.Now().Before(deadline) {
-		pollCtx, pollCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		pollCtx, pollCancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
 		status, err := client.GitHubOAuthStatus(pollCtx, start.State)
 		pollCancel()
 		if err != nil {

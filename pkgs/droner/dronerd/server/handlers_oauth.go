@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
 )
@@ -26,7 +27,7 @@ const (
 
 var now = time.Now
 
-var oauthHTTPClient = &http.Client{Timeout: 10 * time.Second}
+var oauthHTTPClient = &http.Client{Timeout: timeouts.SecondDefault}
 
 type oauthStateStatus string
 

@@ -5,10 +5,12 @@ import (
 	"math"
 	"net/http"
 	"time"
+
+	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 
 const (
-	DefaultPingTimeout = 200 * time.Millisecond
+	DefaultPingTimeout = timeouts.Probe
 	startInitialDelay  = 2 * time.Second
 	startAttempts      = 6
 )
