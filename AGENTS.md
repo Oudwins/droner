@@ -3,6 +3,8 @@
 ## CRITICAL INSTRUCTIONS
 1. After you think you have completed a task always aim to verify your work by running the tests, build, etc before handing control back to the user.
 2. This file is for you. Please update it if you figure out something important about the codebase or find that some information is out of date. We should try to keep it small with only the most important details 
+3. This is a green field project with no users. We do not need to consider backwards compatibility. Lets aim to make the code as clean as possible without worrying about breaking existing users since no one is using it yet.
+4. We will not support windows. Only macos and linux
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
