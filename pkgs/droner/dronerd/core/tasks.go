@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
@@ -74,8 +75,10 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 				Opencode: base.Config.Sessions.Agent.Providers.OpenCode,
 			}
 			if err := backend.CreateSession(ctx, payload.Path, worktreePath, payload.SessionID.String(), agentConfig); err != nil {
-				logger.Error("Failed to create worktree", slog.String("error", err.Error()))
-				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+				logger.Error("Failed to create session", slog.String("error", err.Error()))
+				updateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_, updateErr := base.DB.UpdateSessionStatusBySimpleID(updateCtx, db.UpdateSessionStatusBySimpleIDParams{
 					SimpleID: payload.SessionID.String(),
 					Status:   db.SessionStatusFailed,
 					Error:    sql.NullString{String: err.Error(), Valid: true},
@@ -99,7 +102,9 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			// 	}
 			// }
 
-			_, err = base.DB.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
+			updateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, err = base.DB.UpdateSessionStatusBySimpleID(updateCtx, db.UpdateSessionStatusBySimpleIDParams{
 				SimpleID: payload.SessionID.String(),
 				Status:   db.SessionStatusRunning,
 				Error:    sql.NullString{},
