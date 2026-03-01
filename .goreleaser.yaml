@@ -1,0 +1,61 @@
+version: 2
+
+project_name: droner
+
+gomod: pkgs/droner/go.mod
+
+before:
+  hooks:
+    - go -C pkgs/droner test ./...
+
+builds:
+  - id: droner
+    main: ./pkgs/droner/droner
+    binary: droner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Oudwins/droner/pkgs/droner/internals/version.SemVer={{.Version}}
+      - -X github.com/Oudwins/droner/pkgs/droner/internals/version.BuiltAt={{.Date}}
+
+  - id: dronerd
+    main: ./pkgs/droner/dronerd
+    binary: dronerd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Oudwins/droner/pkgs/droner/internals/version.SemVer={{.Version}}
+      - -X github.com/Oudwins/droner/pkgs/droner/internals/version.BuiltAt={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ .Tag }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
