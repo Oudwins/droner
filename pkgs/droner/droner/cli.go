@@ -91,11 +91,7 @@ func newRootCmd() *cobra.Command {
 			if len(args) > 0 {
 				return cmd.Usage()
 			}
-			if !isInteractiveTerminal() {
-				return cmd.Usage()
-			}
-			client := sdk.NewClient()
-			return tui.Run(client)
+			return runTUICmd(cmd, nil)
 		},
 	}
 
@@ -103,6 +99,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newServeCmd(),
+		newTUICmd(),
 		newNewCmd(),
 		newDelCmd(),
 		newCompleteCmd(),
@@ -113,6 +110,23 @@ func newRootCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+func newTUICmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tui",
+		Short: "Open the Droner TUI",
+		Args:  cobra.NoArgs,
+		RunE:  runTUICmd,
+	}
+}
+
+func runTUICmd(cmd *cobra.Command, _ []string) error {
+	if !isInteractiveTerminal() {
+		return cmd.Usage()
+	}
+	client := sdk.NewClient()
+	return tui.Run(client)
 }
 
 func printVersionInfo(cmd *cobra.Command) {
