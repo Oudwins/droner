@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -442,24 +444,98 @@ func newOpencodeClient(config conf.OpenCodeConfig) *opencode.Client {
 	return opencode.NewClient(option.WithBaseURL(baseURL))
 }
 
-func opencodePartsFromMessage(message *messages.Message) []opencode.SessionPromptParamsPartUnion {
+func opencodePartsFromMessage(message *messages.Message, worktreePath string) ([]opencode.SessionPromptParamsPartUnion, error) {
 	if message == nil || len(message.Parts) == 0 {
-		return nil
+		return nil, nil
 	}
 	parts := make([]opencode.SessionPromptParamsPartUnion, 0, len(message.Parts))
 	for _, p := range message.Parts {
-		if p.Type != messages.PartTypeText {
-			continue
+		switch p.Type {
+		case messages.PartTypeText:
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			parts = append(parts, opencode.TextPartInputParam{
+				Type: opencode.F(opencode.TextPartInputTypeText),
+				Text: opencode.F(p.Text),
+			})
+		case messages.PartTypeFile:
+			filePart, err := opencodeFilePartFromMessagePart(p, worktreePath)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, filePart)
 		}
-		if strings.TrimSpace(p.Text) == "" {
-			continue
-		}
-		parts = append(parts, opencode.TextPartInputParam{
-			Type: opencode.F(opencode.TextPartInputTypeText),
-			Text: opencode.F(p.Text),
-		})
 	}
-	return parts
+	return parts, nil
+}
+
+func opencodeFilePartFromMessagePart(part messages.MessagePart, worktreePath string) (opencode.FilePartInputParam, error) {
+	if part.File == nil || part.File.Source == nil {
+		return opencode.FilePartInputParam{}, errors.New("file message part is missing file source")
+	}
+	if strings.TrimSpace(worktreePath) == "" {
+		return opencode.FilePartInputParam{}, errors.New("worktree path is required for file message parts")
+	}
+	relativePath := part.File.Source.Path
+	absolutePath := filepath.Join(worktreePath, relativePath)
+	info, err := os.Stat(absolutePath)
+	if err != nil {
+		return opencode.FilePartInputParam{}, fmt.Errorf("resolve file part %q: %w", relativePath, err)
+	}
+	if info.IsDir() {
+		return opencode.FilePartInputParam{}, fmt.Errorf("resolve file part %q: path is a directory", relativePath)
+	}
+	fileURL, err := localFileURL(absolutePath)
+	if err != nil {
+		return opencode.FilePartInputParam{}, fmt.Errorf("resolve file part %q url: %w", relativePath, err)
+	}
+	filename := strings.TrimSpace(part.File.Filename)
+	if filename == "" {
+		filename = filepath.Base(relativePath)
+	}
+	mimeType := strings.TrimSpace(part.File.Mime)
+	if mimeType == "" {
+		mimeType = mimeTypeForPath(relativePath)
+	}
+	source := opencode.FilePartSourceUnionParam(opencode.FileSourceParam{
+		Type: opencode.F(opencode.FileSourceTypeFile),
+		Path: opencode.F(relativePath),
+		Text: opencode.F(opencode.FilePartSourceTextParam{}),
+	})
+	if part.File.Source != nil && part.File.Source.Text != nil {
+		source = opencode.FileSourceParam{
+			Type: opencode.F(opencode.FileSourceTypeFile),
+			Path: opencode.F(relativePath),
+			Text: opencode.F(opencode.FilePartSourceTextParam{
+				Start: opencode.F(part.File.Source.Text.Start),
+				End:   opencode.F(part.File.Source.Text.End),
+				Value: opencode.F(part.File.Source.Text.Value),
+			}),
+		}
+	}
+	return opencode.FilePartInputParam{
+		Type:     opencode.F(opencode.FilePartInputTypeFile),
+		URL:      opencode.F(fileURL),
+		Mime:     opencode.F(mimeType),
+		Filename: opencode.F(filename),
+		Source:   opencode.F(source),
+	}, nil
+}
+
+func mimeTypeForPath(path string) string {
+	if detected := mime.TypeByExtension(filepath.Ext(path)); detected != "" {
+		return detected
+	}
+	return "text/plain"
+}
+
+func localFileURL(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String(), nil
 }
 
 func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig, worktreePath string) (string, error) {
@@ -484,7 +560,10 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	}
 	client := newOpencodeClient(config)
 
-	parts := opencodePartsFromMessage(message)
+	parts, err := opencodePartsFromMessage(message, directory)
+	if err != nil {
+		return err
+	}
 	if len(parts) == 0 {
 		return nil
 	}
@@ -513,7 +592,7 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 		}
 		sessionID = id
 	}
-	_, err := client.Session.Prompt(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
+	_, err = client.Session.Prompt(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
 	return err
 }
 
@@ -523,7 +602,10 @@ func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenC
 	}
 	client := newOpencodeClient(config)
 
-	parts := opencodePartsFromMessage(message)
+	parts, err := opencodePartsFromMessage(message, directory)
+	if err != nil {
+		return err
+	}
 	if len(parts) == 0 {
 		return nil
 	}
@@ -549,7 +631,7 @@ func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenC
 		}
 		sessionID = id
 	}
-	_, err := client.Session.Prompt(ctx, sessionID, params)
+	_, err = client.Session.Prompt(ctx, sessionID, params)
 	return err
 }
 
