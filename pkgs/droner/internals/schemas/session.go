@@ -1,6 +1,7 @@
 package schemas
 
 import (
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -51,6 +52,36 @@ type SessionCreateRequest struct {
 	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
 	BackendID   conf.BackendID      `json:"backendId,omitempty" zog:"backendId"`
 	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
+}
+
+func (r SessionCreateRequest) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		slog.String("path", r.Path),
+		slog.String("sessionId", r.SessionID.String()),
+		slog.String("backendId", string(r.BackendID)),
+	}
+
+	if r.AgentConfig != nil {
+		attrs = append(attrs, slog.Any("agentConfig", r.AgentConfig))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
+func (c SessionAgentConfig) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		slog.String("model", c.Model),
+	}
+
+	if c.AgentName != "" {
+		attrs = append(attrs, slog.String("agentName", c.AgentName))
+	}
+
+	if c.Message != nil {
+		attrs = append(attrs, slog.Any("message", c.Message))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
