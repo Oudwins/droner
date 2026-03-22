@@ -83,6 +83,9 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 		if model["modelID"] != "gpt-5-mini" {
 			t.Fatalf("modelID = %v, want gpt-5-mini", model["modelID"])
 		}
+		if body["agent"] != "plan" {
+			t.Fatalf("agent = %v, want plan", body["agent"])
+		}
 		writePromptOK(w, "abc")
 	})
 	srv := httptest.NewServer(mux)
@@ -90,7 +93,7 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 
 	backend := LocalBackend{}
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}}
-	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", msg); err != nil {
+	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", "plan", msg); err != nil {
 		t.Fatalf("sendOpencodeMessage: %v", err)
 	}
 }
@@ -108,6 +111,9 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 		if body["noReply"] != true {
 			t.Fatalf("noReply = %v, want true", body["noReply"])
 		}
+		if body["agent"] != "build" {
+			t.Fatalf("agent = %v, want build", body["agent"])
+		}
 		writePromptOK(w, "abc")
 	})
 	srv := httptest.NewServer(mux)
@@ -115,7 +121,7 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 
 	backend := LocalBackend{}
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("seed")}}
-	if err := backend.seedOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", msg); err != nil {
+	if err := backend.seedOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", "build", msg); err != nil {
 		t.Fatalf("seedOpencodeMessage: %v", err)
 	}
 }

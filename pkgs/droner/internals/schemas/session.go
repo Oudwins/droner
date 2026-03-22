@@ -41,8 +41,9 @@ func (i SSessionID) SessionWorktreeName(repoName string) string {
 }
 
 type SessionAgentConfig struct {
-	Model   string            `json:"model" zog:"model"`
-	Message *messages.Message `json:"message,omitempty"`
+	Model     string            `json:"model" zog:"model"`
+	AgentName string            `json:"agentName,omitempty" zog:"agentName"`
+	Message   *messages.Message `json:"message,omitempty"`
 }
 
 type SessionCreateRequest struct {
@@ -60,8 +61,9 @@ var SessionCreateSchema = z.Struct(z.Shape{
 	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
 	"BackendID": conf.BackendIDSchema,
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
-		"Model":   z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
-		"Message": z.Ptr(messages.MessageSchema),
+		"Model":     z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
+		"AgentName": z.String().Optional().Trim(),
+		"Message":   z.Ptr(messages.MessageSchema),
 	})),
 })
 

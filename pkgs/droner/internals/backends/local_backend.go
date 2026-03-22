@@ -127,11 +127,12 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		session := opencodeSessionID
 		dir := worktreePath
 		model := agentConfig.Model
+		agentName := agentConfig.AgentName
 		message := agentConfig.Message
 		go func() {
 			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
 			defer cancel()
-			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, message); err != nil {
+			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, agentName, message); err != nil {
 				slog.Warn(
 					"failed to autorun opencode prompt",
 					slog.String("sessionID", sessionID),
@@ -399,7 +400,7 @@ func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.Ope
 	return session.ID, nil
 }
 
-func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, message *messages.Message) error {
+func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message) error {
 	if message == nil || len(message.Parts) == 0 {
 		return nil
 	}
@@ -416,6 +417,9 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	}
 	if strings.TrimSpace(directory) != "" {
 		params.Directory = opencode.F(directory)
+	}
+	if strings.TrimSpace(agentName) != "" {
+		params.Agent = opencode.F(strings.TrimSpace(agentName))
 	}
 	if providerID, modelID, ok := parseOpencodeModel(model); ok {
 		params.Model = opencode.F(opencode.SessionPromptParamsModel{
@@ -435,7 +439,7 @@ func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenC
 	return err
 }
 
-func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, message *messages.Message) error {
+func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message) error {
 	if message == nil || len(message.Parts) == 0 {
 		return nil
 	}
@@ -449,6 +453,9 @@ func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenC
 	params := opencode.SessionPromptParams{Parts: opencode.F(parts)}
 	if strings.TrimSpace(directory) != "" {
 		params.Directory = opencode.F(directory)
+	}
+	if strings.TrimSpace(agentName) != "" {
+		params.Agent = opencode.F(strings.TrimSpace(agentName))
 	}
 	if providerID, modelID, ok := parseOpencodeModel(model); ok {
 		params.Model = opencode.F(opencode.SessionPromptParamsModel{

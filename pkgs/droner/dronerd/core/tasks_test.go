@@ -30,6 +30,7 @@ type fakeBackend struct {
 	createdTmuxName       string
 	createdTmuxPath       string
 	createdTmuxModel      string
+	createdAgentName      string
 	createdMessageParts   []messages.MessagePart
 	createdOpencodeConfig conf.OpenCodeConfig
 	removedWorktreePath   string
@@ -58,6 +59,7 @@ func (f *fakeBackend) CreateSession(_ context.Context, repoPath string, worktree
 	f.createdTmuxName = sessionID
 	f.createdTmuxPath = worktreePath
 	f.createdTmuxModel = agentConfig.Model
+	f.createdAgentName = agentConfig.AgentName
 	if agentConfig.Message != nil {
 		f.createdMessageParts = agentConfig.Message.Parts
 	}
@@ -217,7 +219,8 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 		SessionID: schemas.NewSSessionID("session-1"),
 		BackendID: conf.BackendLocal,
 		AgentConfig: &schemas.SessionAgentConfig{
-			Model: "test-model",
+			Model:     "test-model",
+			AgentName: "plan",
 			Message: &messages.Message{
 				Parts: []messages.MessagePart{{Type: "text", Text: "test-prompt"}},
 			},
@@ -278,6 +281,9 @@ func TestCreateSessionTaskCreatesRecordAndMarksRunning(t *testing.T) {
 	}
 	if backend.createdTmuxName != payload.SessionID.String() {
 		t.Fatalf("expected tmux session name %s, got %s", payload.SessionID.String(), backend.createdTmuxName)
+	}
+	if backend.createdAgentName != "plan" {
+		t.Fatalf("expected agent name %q, got %q", "plan", backend.createdAgentName)
 	}
 }
 

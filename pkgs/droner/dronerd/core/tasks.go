@@ -61,19 +61,20 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			}
 
 			model := base.Config.Sessions.Agent.DefaultModel
+			agentName := ""
 			var message *messages.Message
 			if payload.AgentConfig != nil {
-				if payload.AgentConfig.Model != "" {
-					model = payload.AgentConfig.Model
-				}
+				model = payload.AgentConfig.Model
+				agentName = payload.AgentConfig.AgentName
 				message = payload.AgentConfig.Message
 			}
 
 			// TODO: this needs to be idempotent. Otherwise if we fail in step beyond this one this task will fail forever
 			agentConfig := backends.AgentConfig{
-				Model:    model,
-				Message:  message,
-				Opencode: base.Config.Sessions.Agent.Providers.OpenCode,
+				Model:     model,
+				AgentName: agentName,
+				Message:   message,
+				Opencode:  base.Config.Sessions.Agent.Providers.OpenCode,
 			}
 			if err := backend.CreateSession(ctx, payload.Path, worktreePath, payload.SessionID.String(), agentConfig); err != nil {
 				logger.Error("Failed to create session", slog.String("error", err.Error()))
