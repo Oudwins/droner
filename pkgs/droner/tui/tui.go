@@ -77,7 +77,7 @@ func Run(client *sdk.Client) error {
 		return err
 	}
 	request := buildSessionCreateRequest(path, prompt)
-	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
 	if err != nil {
