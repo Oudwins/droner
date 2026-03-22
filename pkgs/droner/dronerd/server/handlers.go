@@ -164,7 +164,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		AgentConfig:  agentConfigValue,
 		Error:        sql.NullString{},
 	}
-	_, err = s.Base.DB.CreateSession(context.Background(), sessionData)
+	_, err = s.Base.DB.CreateSession(r.Context(), sessionData)
 	if err != nil {
 		logger.Error("Failed to create session record", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
@@ -173,7 +173,9 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// Enqueue task
 	bytes, _ := json.Marshal(request)
-	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCreateSession, bytes))
+	enqueueCtx, enqueueCancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
+	defer enqueueCancel()
+	taskId, err := s.Base.TaskQueue.Enqueue(enqueueCtx, tasky.NewTask(core.JobCreateSession, bytes))
 	logger.Debug("Enqued create job session", slog.Bool("success", err == nil))
 	if err != nil {
 		logger.Error("Failed to enque task", slog.String("error", err.Error()))
