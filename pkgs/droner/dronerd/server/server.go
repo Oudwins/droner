@@ -77,6 +77,11 @@ func (s *Server) Start() error {
 	consumer := tasky.NewConsumer(s.Base.TaskQueue, tasky.ConsumerOptions{Workers: 1})
 	s.consumer = consumer
 	consumer.Start(ctx)
+	if err := s.hydrateRunningSessions(ctx); err != nil {
+		_ = listener.Close()
+		s.Shutdown()
+		return err
+	}
 
 	errCh := make(chan error, 2)
 	go func() {

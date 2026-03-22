@@ -28,6 +28,20 @@ func newSubscriptionManager(base *BaseServer) *subscriptionManager {
 	}
 }
 
+func (b *BaseServer) SubscribeSessionRemote(ctx context.Context, remoteURL string, branch string, onComplete func(sessionID string)) error {
+	if b == nil || b.Subscriptions == nil {
+		return nil
+	}
+	return b.Subscriptions.subscribe(ctx, remoteURL, branch, onComplete)
+}
+
+func (b *BaseServer) UnsubscribeSessionRemote(ctx context.Context, remoteURL string, branch string) error {
+	if b == nil || b.Subscriptions == nil {
+		return nil
+	}
+	return b.Subscriptions.unsubscribe(ctx, remoteURL, branch)
+}
+
 // subscribe starts a remote subscription if not already active
 func (sm *subscriptionManager) subscribe(ctx context.Context, remoteURL string, branch string, onComplete func(sessionID string)) error {
 	key := remoteURL + ":" + branch
