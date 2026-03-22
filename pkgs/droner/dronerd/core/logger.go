@@ -1,7 +1,8 @@
 package core
 
 import (
-	"io"
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,62 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
+type fanoutHandler struct {
+	handlers []slog.Handler
+}
+
+func newFanoutHandler(handlers ...slog.Handler) slog.Handler {
+	cloned := make([]slog.Handler, 0, len(handlers))
+	for _, handler := range handlers {
+		if handler != nil {
+			cloned = append(cloned, handler)
+		}
+	}
+
+	return &fanoutHandler{handlers: cloned}
+}
+
+func (h *fanoutHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, handler := range h.handlers {
+		if handler.Enabled(ctx, level) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (h *fanoutHandler) Handle(ctx context.Context, record slog.Record) error {
+	var err error
+	for _, handler := range h.handlers {
+		if !handler.Enabled(ctx, record.Level) {
+			continue
+		}
+
+		err = errors.Join(err, handler.Handle(ctx, record.Clone()))
+	}
+
+	return err
+}
+
+func (h *fanoutHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	handlers := make([]slog.Handler, 0, len(h.handlers))
+	for _, handler := range h.handlers {
+		handlers = append(handlers, handler.WithAttrs(attrs))
+	}
+
+	return &fanoutHandler{handlers: handlers}
+}
+
+func (h *fanoutHandler) WithGroup(name string) slog.Handler {
+	handlers := make([]slog.Handler, 0, len(h.handlers))
+	for _, handler := range h.handlers {
+		handlers = append(handlers, handler.WithGroup(name))
+	}
+
+	return &fanoutHandler{handlers: handlers}
+}
+
 func InitLogger(config *conf.Config) (*slog.Logger, *os.File) {
 	logPath := filepath.Join(config.Server.DataDir, "log.txt")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
@@ -19,12 +76,15 @@ func InitLogger(config *conf.Config) (*slog.Logger, *os.File) {
 	}
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	assert.AssertNil(err, "[CORE] Failed to open log file")
-	logWriter := io.MultiWriter(os.Stdout, logFile)
-	handler := tint.NewHandler(logWriter, &tint.Options{
+	stdoutHandler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:     slog.LevelDebug,
 		AddSource: true,
 	})
-	logger := slog.New(handler)
+	fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+	})
+	logger := slog.New(newFanoutHandler(stdoutHandler, fileHandler))
 
 	slog.SetDefault(logger)
 	return logger, logFile
