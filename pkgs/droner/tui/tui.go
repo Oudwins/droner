@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -53,6 +52,7 @@ var (
 
 type sessionComposerModel struct {
 	input             textarea.Model
+	prompt            composerPrompt
 	width             int
 	height            int
 	ready             bool
@@ -99,39 +99,36 @@ func Run(client *sdk.Client) error {
 	return nil
 }
 
-func runSessionComposer() (string, bool, error) {
+func runSessionComposer() (*messages.Message, bool, error) {
 	model := newSessionComposerModel()
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := program.Run()
 	if err != nil {
-		return "", false, err
+		return nil, false, err
 	}
 	finalModel, ok := result.(sessionComposerModel)
 	if !ok {
-		return "", false, nil
+		return nil, false, nil
 	}
 	return extractComposerResult(finalModel)
 }
 
-func buildSessionCreateRequest(path string, prompt string) schemas.SessionCreateRequest {
+func buildSessionCreateRequest(path string, prompt *messages.Message) schemas.SessionCreateRequest {
 	request := schemas.SessionCreateRequest{Path: path}
-	if strings.TrimSpace(prompt) == "" {
+	if !messageHasContent(prompt) {
 		return request
 	}
 	request.AgentConfig = &schemas.SessionAgentConfig{
-		Message: &messages.Message{
-			Role:  messages.MessageRoleUser,
-			Parts: []messages.MessagePart{messages.NewTextPart(prompt)},
-		},
+		Message: cloneMessage(prompt),
 	}
 	return request
 }
 
-func extractComposerResult(model sessionComposerModel) (string, bool, error) {
+func extractComposerResult(model sessionComposerModel) (*messages.Message, bool, error) {
 	if model.cancelled || !model.submitted {
-		return "", false, nil
+		return nil, false, nil
 	}
-	return model.input.Value(), true, nil
+	return model.prompt.Message(), true, nil
 }
 
 func newSessionComposerModel() sessionComposerModel {
@@ -159,9 +156,11 @@ func newSessionComposerModel() sessionComposerModel {
 
 	model := sessionComposerModel{
 		input:  input,
+		prompt: newComposerPrompt(),
 		width:  defaultPanelWidth,
 		height: composerTextareaRows + 8,
 	}
+	model.syncPromptFromInput()
 	model.syncLayout(defaultPanelWidth, model.height)
 	return model
 }
@@ -177,12 +176,13 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncLayout(msg.Width, msg.Height)
 		return m, nil
 	case tea.KeyMsg:
+		m.syncPromptFromInput()
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.cancelled = true
 			return m, tea.Quit
 		case "enter":
-			if strings.TrimSpace(m.input.Value()) == "" {
+			if m.prompt.IsEmpty() {
 				m.validationMessage = validationEmptyPrompt
 				return m, nil
 			}
@@ -190,6 +190,7 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "alt+enter", "ctrl+j":
 			m.input.InsertString("\n")
+			m.syncPromptFromInput()
 			m.validationMessage = ""
 			return m, nil
 		}
@@ -197,7 +198,8 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	if strings.TrimSpace(m.input.Value()) != "" {
+	m.syncPromptFromInput()
+	if !m.prompt.IsEmpty() {
 		m.validationMessage = ""
 	}
 	return m, cmd
@@ -255,6 +257,10 @@ func (m *sessionComposerModel) syncLayout(width int, height int) {
 	if !m.input.Focused() {
 		m.input.Focus()
 	}
+}
+
+func (m *sessionComposerModel) syncPromptFromInput() {
+	m.prompt.SetPlainText(m.input.Value())
 }
 
 func composerPanelWidth(totalWidth int) int {

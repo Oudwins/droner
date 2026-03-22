@@ -8,7 +8,12 @@ import (
 )
 
 func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
-	prompt := "first line\n\nsecond line\n"
+	prompt := &messages.Message{
+		Role: messages.MessageRoleUser,
+		Parts: []messages.MessagePart{
+			messages.NewTextPart("first line\n\nsecond line\n"),
+		},
+	}
 	request := buildSessionCreateRequest("/tmp/repo", prompt)
 
 	if request.Path != "/tmp/repo" {
@@ -27,13 +32,16 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("expected one message part, got %d", len(parts))
 	}
-	if parts[0].Text != prompt {
-		t.Fatalf("expected prompt %q, got %q", prompt, parts[0].Text)
+	if parts[0].Text != "first line\n\nsecond line\n" {
+		t.Fatalf("expected prompt %q, got %q", "first line\n\nsecond line\n", parts[0].Text)
 	}
 }
 
 func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
-	request := buildSessionCreateRequest("/tmp/repo", "  \n\t  ")
+	request := buildSessionCreateRequest("/tmp/repo", &messages.Message{
+		Role:  messages.MessageRoleUser,
+		Parts: []messages.MessagePart{messages.NewTextPart("  \n\t  ")},
+	})
 
 	if request.AgentConfig != nil {
 		t.Fatal("expected agent config to be omitted for empty prompt")
@@ -43,7 +51,7 @@ func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
 	}
 }
 
-func TestSessionComposerEnterSubmitsRawValue(t *testing.T) {
+func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	model := newSessionComposerModel()
 	model.input.SetValue("first line\nsecond line\n")
 
@@ -63,8 +71,17 @@ func TestSessionComposerEnterSubmitsRawValue(t *testing.T) {
 	if !submitted {
 		t.Fatal("expected extracted result to be submitted")
 	}
-	if prompt != "first line\nsecond line\n" {
-		t.Fatalf("expected raw prompt to be preserved, got %q", prompt)
+	if prompt == nil {
+		t.Fatal("expected structured prompt message")
+	}
+	if prompt.Role != messages.MessageRoleUser {
+		t.Fatalf("expected user role, got %q", prompt.Role)
+	}
+	if len(prompt.Parts) != 1 {
+		t.Fatalf("expected one prompt part, got %d", len(prompt.Parts))
+	}
+	if prompt.Parts[0] != messages.NewTextPart("first line\nsecond line\n") {
+		t.Fatalf("expected raw prompt to be preserved, got %#v", prompt.Parts[0])
 	}
 }
 
@@ -132,5 +149,33 @@ func TestSessionComposerRejectsWhitespaceSubmit(t *testing.T) {
 	}
 	if finalModel.validationMessage == "" {
 		t.Fatal("expected validation message for empty submit")
+	}
+}
+
+func TestComposerPromptSetPlainTextPreservesExactValue(t *testing.T) {
+	prompt := newComposerPrompt()
+	prompt.SetPlainText("  alpha\n")
+
+	if prompt.PlainText() != "  alpha\n" {
+		t.Fatalf("PlainText() = %q, want %q", prompt.PlainText(), "  alpha\n")
+	}
+	if prompt.IsEmpty() {
+		t.Fatal("expected non-empty prompt")
+	}
+	message := prompt.Message()
+	if message == nil || len(message.Parts) != 1 {
+		t.Fatalf("expected one message part, got %#v", message)
+	}
+	if message.Parts[0] != messages.NewTextPart("  alpha\n") {
+		t.Fatalf("message part = %#v, want %#v", message.Parts[0], messages.NewTextPart("  alpha\n"))
+	}
+}
+
+func TestComposerPromptWhitespaceOnlyIsEmpty(t *testing.T) {
+	prompt := newComposerPrompt()
+	prompt.SetPlainText(" \n\t ")
+
+	if !prompt.IsEmpty() {
+		t.Fatal("expected whitespace-only prompt to be empty")
 	}
 }
