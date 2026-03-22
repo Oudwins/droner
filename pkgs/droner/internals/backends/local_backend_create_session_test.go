@@ -68,6 +68,9 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 		if v, ok := body["noReply"]; ok && v != false {
 			t.Fatalf("noReply = %v, want omitted or false", v)
 		}
+		if body["agent"] != "plan" {
+			t.Fatalf("agent = %v, want plan", body["agent"])
+		}
 		parts, ok := body["parts"].([]any)
 		if !ok || len(parts) == 0 {
 			t.Fatalf("parts missing or empty")
@@ -105,8 +108,9 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
 	agentCfg := AgentConfig{
-		Model:   "openai/gpt-5-mini",
-		Message: &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
+		Model:     "openai/gpt-5-mini",
+		AgentName: "plan",
+		Message:   &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
 		Opencode: conf.OpenCodeConfig{
 			Hostname: opencodeCfg.Hostname,
 			Port:     opencodeCfg.Port,
@@ -179,8 +183,9 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
 	agentCfg := AgentConfig{
-		Model:   "openai/gpt-5-mini",
-		Message: &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
+		Model:     "openai/gpt-5-mini",
+		AgentName: "plan",
+		Message:   &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
 		Opencode: conf.OpenCodeConfig{
 			Hostname: opencodeCfg.Hostname,
 			Port:     opencodeCfg.Port,

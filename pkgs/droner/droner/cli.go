@@ -27,21 +27,23 @@ import (
 )
 
 type NewArgs struct {
-	Path    string `zog:"path"`
-	ID      string `zog:"id"`
-	Model   string `zog:"model"`
-	Prompt  string `zog:"prompt"`
-	Wait    bool   `zog:"wait"`
-	Timeout string `zog:"timeout"`
+	Path      string `zog:"path"`
+	ID        string `zog:"id"`
+	Model     string `zog:"model"`
+	AgentName string `zog:"agent"`
+	Prompt    string `zog:"prompt"`
+	Wait      bool   `zog:"wait"`
+	Timeout   string `zog:"timeout"`
 }
 
 var newArgsSchema = z.Struct(z.Shape{
-	"Path":    z.String().Optional().Trim(),
-	"ID":      z.String().Optional().Trim(),
-	"Model":   z.String().Optional().Trim(),
-	"Prompt":  z.String().Optional().Trim(),
-	"Wait":    z.Bool().Optional(),
-	"Timeout": z.String().Optional().Trim(),
+	"Path":      z.String().Optional().Trim(),
+	"ID":        z.String().Optional().Trim(),
+	"Model":     z.String().Optional().Trim(),
+	"AgentName": z.String().Optional().Trim(),
+	"Prompt":    z.String().Optional().Trim(),
+	"Wait":      z.Bool().Optional(),
+	"Timeout":   z.String().Optional().Trim(),
 })
 
 type ServeArgs struct {
@@ -215,7 +217,8 @@ func newNewCmd() *cobra.Command {
 		Short: "Create a new session",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			includeAgentConfig := cmd.Flags().Changed("model") || cmd.Flags().Changed("prompt") || args.Model != "" || args.Prompt != ""
+
+			includeAgentConfig := cmd.Flags().Changed("model") || cmd.Flags().Changed("agent") || cmd.Flags().Changed("prompt") || args.Model != "" || args.AgentName != "" || args.Prompt != ""
 
 			return runCreateSession(&args, includeAgentConfig)
 		},
@@ -224,6 +227,7 @@ func newNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&args.Path, "path", "", "path to the repository")
 	cmd.Flags().StringVar(&args.ID, "id", "", "session ID")
 	cmd.Flags().StringVar(&args.Model, "model", "", "agent model")
+	cmd.Flags().StringVar(&args.AgentName, "agent", "", "opencode agent")
 	cmd.Flags().StringVar(&args.Prompt, "prompt", "", "agent prompt")
 	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
 	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
@@ -462,7 +466,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	defer cancel()
 	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
 	if includeAgentConfig {
-		agentConfig := &schemas.SessionAgentConfig{Model: args.Model}
+		agentConfig := &schemas.SessionAgentConfig{Model: args.Model, AgentName: strings.TrimSpace(args.AgentName)}
 		prompt := strings.TrimSpace(args.Prompt)
 		if prompt != "" {
 			agentConfig.Message = &messages.Message{Parts: []messages.MessagePart{{Type: messages.PartTypeText, Text: prompt}}}

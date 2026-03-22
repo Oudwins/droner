@@ -91,12 +91,16 @@ func TestCLITaskFlow(t *testing.T) {
 }
 
 func TestCLINewAndDeleteWait(t *testing.T) {
+	var createRequest schemas.SessionCreateRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/version":
 			_, _ = w.Write([]byte("test-version"))
 		case "/sessions":
 			if r.Method == http.MethodPost {
+				if err := json.NewDecoder(r.Body).Decode(&createRequest); err != nil {
+					t.Fatalf("decode create request: %v", err)
+				}
 				w.WriteHeader(http.StatusAccepted)
 				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{SessionID: schemas.NewSSessionID("simple-new"), SimpleID: "simple-new", TaskID: "task-new"})
 				return
@@ -127,13 +131,22 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	setupCLIEnv(t, server.URL)
 
 	output, err := captureOutput(t, func() error {
-		return executeCLI([]string{"new", "--path", "/repo", "--wait"})
+		return executeCLI([]string{"new", "--path", "/repo", "--agent", "plan", "--prompt", "hello", "--wait"})
 	})
 	if err != nil {
 		t.Fatalf("run new: %v", err)
 	}
 	if !strings.Contains(output, "session: simple-new") || !strings.Contains(output, "status: succeeded") {
 		t.Fatalf("unexpected new output: %s", output)
+	}
+	if createRequest.AgentConfig == nil {
+		t.Fatalf("expected agentConfig in create request")
+	}
+	if createRequest.AgentConfig.AgentName != "plan" {
+		t.Fatalf("agentName = %q, want %q", createRequest.AgentConfig.AgentName, "plan")
+	}
+	if createRequest.AgentConfig.Message == nil || len(createRequest.AgentConfig.Message.Parts) != 1 || createRequest.AgentConfig.Message.Parts[0].Text != "hello" {
+		t.Fatalf("unexpected prompt payload: %#v", createRequest.AgentConfig.Message)
 	}
 
 	output, err = captureOutput(t, func() error {

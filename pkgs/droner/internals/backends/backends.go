@@ -28,9 +28,10 @@ type Store struct {
 }
 
 type AgentConfig struct {
-	Model    string
-	Message  *messages.Message
-	Opencode conf.OpenCodeConfig
+	Model     string
+	AgentName string
+	Message   *messages.Message
+	Opencode  conf.OpenCodeConfig
 }
 
 func NewStore(config conf.SessionsConfig, queries *db.Queries) *Store {
