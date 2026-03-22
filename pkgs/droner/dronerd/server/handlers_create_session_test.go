@@ -20,6 +20,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 )
@@ -240,6 +241,57 @@ func TestHandlerCreateSessionUsesBoundedBackgroundContextForEnqueue(t *testing.T
 	}
 	if session.Status != db.SessionStatusQueued {
 		t.Fatalf("status = %s, want %s", session.Status, db.SessionStatusQueued)
+	}
+}
+
+func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
+	server, queries, _, repoDir := newCreateSessionTestServer(t)
+
+	payload, err := json.Marshal(schemas.SessionCreateRequest{
+		Path:      repoDir,
+		SessionID: schemas.NewSSessionID("file-prompt-session"),
+		BackendID: conf.BackendLocal,
+		AgentConfig: &schemas.SessionAgentConfig{
+			Message: &messages.Message{
+				Role: messages.MessageRoleUser,
+				Parts: []messages.MessagePart{
+					messages.NewTextPart("inspect "),
+					messages.NewFilePart("pkgs/droner/tui/tui.go"),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.HandlerCreateSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	session, err := queries.GetSessionBySimpleIDAnyStatus(context.Background(), "file-prompt-session")
+	if err != nil {
+		t.Fatalf("GetSessionBySimpleIDAnyStatus: %v", err)
+	}
+	if !session.AgentConfig.Valid {
+		t.Fatal("expected agent config to be stored")
+	}
+	var stored schemas.SessionAgentConfig
+	if err := json.Unmarshal([]byte(session.AgentConfig.String), &stored); err != nil {
+		t.Fatalf("json.Unmarshal stored agent config: %v", err)
+	}
+	if stored.Message == nil || len(stored.Message.Parts) != 2 {
+		t.Fatalf("stored message parts = %#v", stored.Message)
+	}
+	if stored.Message.Parts[1].Type != messages.PartTypeFile || stored.Message.Parts[1].File == nil || stored.Message.Parts[1].File.Source == nil || stored.Message.Parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
+		t.Fatalf("stored file part = %#v", stored.Message.Parts[1])
+	}
+	if stored.Message.Parts[1].File.URL != nil {
+		t.Fatalf("expected stored file url to be nil, got %#v", stored.Message.Parts[1].File.URL)
 	}
 }
 

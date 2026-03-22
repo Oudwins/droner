@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -58,6 +60,16 @@ func opencodeConfigFromServer(t *testing.T, srv *httptest.Server) conf.OpenCodeC
 }
 
 func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
+	worktreeDir := t.TempDir()
+	filePath := filepath.Join(worktreeDir, "pkgs", "droner", "tui", "tui.go")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filePath, []byte("package tui\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	expectedMime := messages.NewFilePart("pkgs/droner/tui/tui.go").File.Mime
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -72,6 +84,47 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 		}
 		if _, ok := body["parts"]; !ok {
 			t.Fatalf("missing parts")
+		}
+		parts, ok := body["parts"].([]any)
+		if !ok || len(parts) != 2 {
+			t.Fatalf("parts = %#v, want two parts", body["parts"])
+		}
+		filePart, ok := parts[1].(map[string]any)
+		if !ok {
+			t.Fatalf("file part = %#v, want object", parts[1])
+		}
+		if filePart["type"] != "file" {
+			t.Fatalf("file part type = %v, want file", filePart["type"])
+		}
+		if filePart["filename"] != "tui.go" {
+			t.Fatalf("filename = %v, want tui.go", filePart["filename"])
+		}
+		if filePart["mime"] != expectedMime {
+			t.Fatalf("mime = %v, want %v", filePart["mime"], expectedMime)
+		}
+		parsedURL, err := url.Parse(filePart["url"].(string))
+		if err != nil {
+			t.Fatalf("parse file url: %v", err)
+		}
+		if parsedURL.Scheme != "file" {
+			t.Fatalf("file url scheme = %q, want file", parsedURL.Scheme)
+		}
+		if parsedURL.Path != filePath {
+			t.Fatalf("file url path = %q, want %q", parsedURL.Path, filePath)
+		}
+		source, ok := filePart["source"].(map[string]any)
+		if !ok {
+			t.Fatalf("source = %#v, want object", filePart["source"])
+		}
+		if source["type"] != "file" || source["path"] != "pkgs/droner/tui/tui.go" {
+			t.Fatalf("source = %#v", source)
+		}
+		text, ok := source["text"].(map[string]any)
+		if !ok {
+			t.Fatalf("source.text = %#v, want object", source["text"])
+		}
+		if text["start"] != float64(0) || text["end"] != float64(0) || text["value"] != "" {
+			t.Fatalf("source.text = %#v", text)
 		}
 		model, ok := body["model"].(map[string]any)
 		if !ok {
@@ -92,8 +145,9 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	backend := LocalBackend{}
-	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}}
-	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", "plan", msg); err != nil {
+	filePart := messages.NewFilePart("pkgs/droner/tui/tui.go")
+	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello"), filePart}}
+	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", worktreeDir, "openai/gpt-5-mini", "plan", msg); err != nil {
 		t.Fatalf("sendOpencodeMessage: %v", err)
 	}
 }
@@ -123,5 +177,26 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("seed")}}
 	if err := backend.seedOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", "build", msg); err != nil {
 		t.Fatalf("seedOpencodeMessage: %v", err)
+	}
+}
+
+func TestOpencodePartsFromMessageRejectsMissingFile(t *testing.T) {
+	t.Parallel()
+
+	_, err := opencodePartsFromMessage(&messages.Message{Parts: []messages.MessagePart{messages.NewFilePart("missing.txt")}}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected missing file error")
+	}
+}
+
+func TestNewFilePartStartsWithNilURL(t *testing.T) {
+	t.Parallel()
+
+	part := messages.NewFilePart("pkgs/droner/tui/tui.go")
+	if part.File == nil {
+		t.Fatal("expected nested file payload")
+	}
+	if part.File.URL != nil {
+		t.Fatalf("expected nil url, got %#v", part.File.URL)
 	}
 }

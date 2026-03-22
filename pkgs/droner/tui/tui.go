@@ -51,27 +51,37 @@ var (
 )
 
 type sessionComposerModel struct {
-	input             textarea.Model
-	prompt            composerPrompt
-	width             int
-	height            int
-	ready             bool
-	submitted         bool
-	cancelled         bool
-	validationMessage string
+	input               textarea.Model
+	prompt              composerPrompt
+	repoRoot            string
+	fileCandidates      []string
+	autocompleteActive  bool
+	autocompleteQuery   fileAutocompleteQuery
+	autocompleteResults []string
+	autocompleteIndex   int
+	width               int
+	height              int
+	ready               bool
+	submitted           bool
+	cancelled           bool
+	validationMessage   string
 }
 
 func Run(client *sdk.Client) error {
-	prompt, submitted, err := runSessionComposer()
+	path, err := cliutil.RepoRootFromCwd()
+	if err != nil {
+		return err
+	}
+	fileCandidates, err := loadRepoFileCandidates(path)
+	if err != nil {
+		return err
+	}
+	prompt, submitted, err := runSessionComposer(path, fileCandidates)
 	if err != nil {
 		return err
 	}
 	if !submitted {
 		return nil
-	}
-	path, err := cliutil.RepoRootFromCwd()
-	if err != nil {
-		return err
 	}
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
@@ -99,8 +109,8 @@ func Run(client *sdk.Client) error {
 	return nil
 }
 
-func runSessionComposer() (*messages.Message, bool, error) {
-	model := newSessionComposerModel()
+func runSessionComposer(repoRoot string, fileCandidates []string) (*messages.Message, bool, error) {
+	model := newSessionComposerModel(repoRoot, fileCandidates)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := program.Run()
 	if err != nil {
@@ -119,7 +129,7 @@ func buildSessionCreateRequest(path string, prompt *messages.Message) schemas.Se
 		return request
 	}
 	request.AgentConfig = &schemas.SessionAgentConfig{
-		Message: cloneMessage(prompt),
+		Message: messages.CloneMessage(prompt),
 	}
 	return request
 }
@@ -131,7 +141,7 @@ func extractComposerResult(model sessionComposerModel) (*messages.Message, bool,
 	return model.prompt.Message(), true, nil
 }
 
-func newSessionComposerModel() sessionComposerModel {
+func newSessionComposerModel(repoRoot string, fileCandidates []string) sessionComposerModel {
 	focusedStyle, blurredStyle := textarea.DefaultStyles()
 	focusedStyle.Base = lipgloss.NewStyle().Background(textareaBackgroundColor).Foreground(textColor)
 	focusedStyle.Text = lipgloss.NewStyle().Foreground(textColor)
@@ -155,12 +165,15 @@ func newSessionComposerModel() sessionComposerModel {
 	input.Focus()
 
 	model := sessionComposerModel{
-		input:  input,
-		prompt: newComposerPrompt(),
-		width:  defaultPanelWidth,
-		height: composerTextareaRows + 8,
+		input:          input,
+		prompt:         newComposerPrompt(),
+		repoRoot:       repoRoot,
+		fileCandidates: append([]string(nil), fileCandidates...),
+		width:          defaultPanelWidth,
+		height:         composerTextareaRows + 8,
 	}
 	model.syncPromptFromInput()
+	model.refreshAutocomplete()
 	model.syncLayout(defaultPanelWidth, model.height)
 	return model
 }
@@ -177,6 +190,25 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		m.syncPromptFromInput()
+		if m.autocompleteActive {
+			switch msg.String() {
+			case "esc":
+				m.clearAutocomplete()
+				return m, nil
+			case "up", "ctrl+p":
+				m.moveAutocomplete(-1)
+				return m, nil
+			case "down", "ctrl+n":
+				m.moveAutocomplete(1)
+				return m, nil
+			case "tab", "enter":
+				if m.applyAutocompleteSelection() {
+					return m, nil
+				}
+				m.clearAutocomplete()
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.cancelled = true
@@ -199,6 +231,7 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.syncPromptFromInput()
+	m.refreshAutocomplete()
 	if !m.prompt.IsEmpty() {
 		m.validationMessage = ""
 	}
@@ -222,9 +255,12 @@ func (m sessionComposerModel) View() string {
 		subtitleStyle.Width(panelInnerWidth).Render("Describe what you want to do"),
 	)
 
-	helpBlock := helpStyle.Width(panelInnerWidth).Render("Enter submit   Alt+Enter newline   Esc cancel")
+	helpBlock := helpStyle.Width(panelInnerWidth).Render("@ file ref   Enter submit   Alt+Enter newline   Esc cancel")
 
 	sections := []string{titleBlock, m.input.View(), helpBlock}
+	if autocompleteView := m.autocompleteView(panelInnerWidth); autocompleteView != "" {
+		sections = append(sections, autocompleteView)
+	}
 	if m.validationMessage != "" {
 		sections = append(sections, validationStyle.Width(panelInnerWidth).Render(m.validationMessage))
 	}
@@ -260,7 +296,83 @@ func (m *sessionComposerModel) syncLayout(width int, height int) {
 }
 
 func (m *sessionComposerModel) syncPromptFromInput() {
-	m.prompt.SetPlainText(m.input.Value())
+	m.prompt.SyncText(m.input.Value())
+}
+
+func (m *sessionComposerModel) refreshAutocomplete() {
+	query, ok := detectFileAutocompleteQuery(m.input.Value(), textareaCursorIndex(m.input))
+	if !ok {
+		m.clearAutocomplete()
+		return
+	}
+	results := rankFileSearchResults(m.fileCandidates, query.Text, maxAutocompleteResults)
+	if !m.autocompleteActive || m.autocompleteQuery.Start != query.Start || m.autocompleteQuery.End != query.End || m.autocompleteQuery.Text != query.Text {
+		m.autocompleteIndex = 0
+	}
+	m.autocompleteActive = true
+	m.autocompleteQuery = query
+	m.autocompleteResults = results
+	if len(results) == 0 {
+		m.autocompleteIndex = 0
+		return
+	}
+	if m.autocompleteIndex >= len(results) {
+		m.autocompleteIndex = len(results) - 1
+	}
+}
+
+func (m *sessionComposerModel) clearAutocomplete() {
+	m.autocompleteActive = false
+	m.autocompleteQuery = fileAutocompleteQuery{}
+	m.autocompleteResults = nil
+	m.autocompleteIndex = 0
+}
+
+func (m *sessionComposerModel) moveAutocomplete(delta int) {
+	if len(m.autocompleteResults) == 0 {
+		return
+	}
+	m.autocompleteIndex = (m.autocompleteIndex + delta + len(m.autocompleteResults)) % len(m.autocompleteResults)
+}
+
+func (m *sessionComposerModel) applyAutocompleteSelection() bool {
+	if !m.autocompleteActive || len(m.autocompleteResults) == 0 {
+		return false
+	}
+	selected := m.autocompleteResults[m.autocompleteIndex]
+	replacement := fileRefToken(selected)
+	for i := 0; i < m.autocompleteQuery.End-m.autocompleteQuery.Start; i++ {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		_ = cmd
+	}
+	m.input.InsertString(replacement)
+	m.syncPromptFromInput()
+	m.prompt.AddFileRef(m.autocompleteQuery.Start, m.autocompleteQuery.Start+len([]rune(replacement)), selected)
+	m.validationMessage = ""
+	m.clearAutocomplete()
+	return true
+}
+
+func (m sessionComposerModel) autocompleteView(width int) string {
+	if !m.autocompleteActive {
+		return ""
+	}
+	if len(m.autocompleteResults) == 0 {
+		return helpStyle.Width(width).Render("No matching files")
+	}
+	lines := make([]string, 0, len(m.autocompleteResults)+1)
+	lines = append(lines, helpStyle.Width(width).Render("Files"))
+	for i, result := range m.autocompleteResults {
+		prefix := "  "
+		style := helpStyle
+		if i == m.autocompleteIndex {
+			prefix = "- "
+			style = titleStyle.Foreground(accentColor)
+		}
+		lines = append(lines, style.Width(width).Render(prefix+result))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func composerPanelWidth(totalWidth int) int {

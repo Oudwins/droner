@@ -37,6 +37,31 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSessionCreateRequestPreservesFileParts(t *testing.T) {
+	prompt := &messages.Message{
+		Role: messages.MessageRoleUser,
+		Parts: []messages.MessagePart{
+			messages.NewTextPart("inspect "),
+			messages.NewFilePart("pkgs/droner/tui/tui.go"),
+		},
+	}
+	request := buildSessionCreateRequest("/tmp/repo", prompt)
+
+	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
+		t.Fatal("expected agent message to be included")
+	}
+	parts := request.AgentConfig.Message.Parts
+	if len(parts) != 2 {
+		t.Fatalf("expected two parts, got %d", len(parts))
+	}
+	if parts[1].Type != messages.PartTypeFile || parts[1].File == nil || parts[1].File.Source == nil || parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
+		t.Fatalf("unexpected file part: %#v", parts[1])
+	}
+	if parts[1].File.URL != nil {
+		t.Fatalf("expected file url to be nil in TUI payload, got %#v", parts[1].File.URL)
+	}
+}
+
 func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
 	request := buildSessionCreateRequest("/tmp/repo", &messages.Message{
 		Role:  messages.MessageRoleUser,
@@ -52,7 +77,7 @@ func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
 }
 
 func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
-	model := newSessionComposerModel()
+	model := newSessionComposerModel("", nil)
 	model.input.SetValue("first line\nsecond line\n")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -86,7 +111,7 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 }
 
 func TestSessionComposerAltEnterInsertsNewline(t *testing.T) {
-	model := newSessionComposerModel()
+	model := newSessionComposerModel("", nil)
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
@@ -101,7 +126,7 @@ func TestSessionComposerAltEnterInsertsNewline(t *testing.T) {
 }
 
 func TestSessionComposerCtrlJFallbackInsertsNewline(t *testing.T) {
-	model := newSessionComposerModel()
+	model := newSessionComposerModel("", nil)
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
@@ -116,7 +141,7 @@ func TestSessionComposerCtrlJFallbackInsertsNewline(t *testing.T) {
 }
 
 func TestSessionComposerEscCancels(t *testing.T) {
-	model := newSessionComposerModel()
+	model := newSessionComposerModel("", nil)
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -138,7 +163,7 @@ func TestSessionComposerEscCancels(t *testing.T) {
 }
 
 func TestSessionComposerRejectsWhitespaceSubmit(t *testing.T) {
-	model := newSessionComposerModel()
+	model := newSessionComposerModel("", nil)
 	model.input.SetValue("  \n\t")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -177,5 +202,64 @@ func TestComposerPromptWhitespaceOnlyIsEmpty(t *testing.T) {
 
 	if !prompt.IsEmpty() {
 		t.Fatal("expected whitespace-only prompt to be empty")
+	}
+}
+
+func TestComposerPromptTracksFileReferences(t *testing.T) {
+	prompt := newComposerPrompt()
+	prompt.SetPlainText("inspect @pkgs/droner/tui/tui.go now")
+	prompt.AddFileRef(8, 31, "pkgs/droner/tui/tui.go")
+
+	message := prompt.Message()
+	if len(message.Parts) != 3 {
+		t.Fatalf("expected three parts, got %#v", message.Parts)
+	}
+	if message.Parts[1].Type != messages.PartTypeFile {
+		t.Fatalf("expected file part, got %#v", message.Parts[1])
+	}
+	if message.Parts[1].File == nil || message.Parts[1].File.Source == nil || message.Parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
+		t.Fatalf("file source = %#v, want pkgs/droner/tui/tui.go", message.Parts[1].File)
+	}
+	if message.Parts[1].File.URL != nil {
+		t.Fatalf("expected nil file url, got %#v", message.Parts[1].File.URL)
+	}
+}
+
+func TestComposerPromptEditingInsideFileReferenceDropsStructuredSpan(t *testing.T) {
+	prompt := newComposerPrompt()
+	prompt.SetPlainText("inspect @pkgs/droner/tui/tui.go now")
+	prompt.AddFileRef(8, 31, "pkgs/droner/tui/tui.go")
+	prompt.SyncText("inspect @pkgs/droner/tui/tuix.go now")
+
+	message := prompt.Message()
+	if len(message.Parts) != 1 {
+		t.Fatalf("expected one plain-text part after edit, got %#v", message.Parts)
+	}
+	if message.Parts[0].Type != messages.PartTypeText {
+		t.Fatalf("expected text part, got %#v", message.Parts[0])
+	}
+}
+
+func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
+	model := newSessionComposerModel("/tmp/repo", []string{"pkgs/droner/tui/tui.go", "README.md"})
+	model.input.SetValue("inspect @pkgs/dr")
+	model.syncPromptFromInput()
+	model.refreshAutocomplete()
+
+	if !model.autocompleteActive {
+		t.Fatal("expected autocomplete to be active")
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	finalModel := updated.(sessionComposerModel)
+
+	if got := finalModel.input.Value(); got != "inspect @pkgs/droner/tui/tui.go" {
+		t.Fatalf("input value = %q", got)
+	}
+	message := finalModel.prompt.Message()
+	if len(message.Parts) != 2 {
+		t.Fatalf("expected text and file parts, got %#v", message.Parts)
+	}
+	if message.Parts[1].Type != messages.PartTypeFile {
+		t.Fatalf("expected file part, got %#v", message.Parts[1])
 	}
 }
