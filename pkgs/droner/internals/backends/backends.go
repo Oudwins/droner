@@ -15,6 +15,7 @@ type Backend interface {
 	WorktreePath(repoPath string, sessionID string) (string, error)
 	ValidateSessionID(repoPath string, sessionID string) error
 	CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) error
+	HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error)
 	// CompleteSession stops the active session runtime (e.g. tmux/opencode) but keeps the worktree/branch for reuse.
 	CompleteSession(ctx context.Context, worktreePath string, sessionID string) error
 	DeleteSession(ctx context.Context, worktreePath string, sessionID string) error
@@ -32,6 +33,11 @@ type AgentConfig struct {
 	AgentName string
 	Message   *messages.Message
 	Opencode  conf.OpenCodeConfig
+}
+
+type HydrationResult struct {
+	Status db.SessionStatus
+	Error  string
 }
 
 func NewStore(config conf.SessionsConfig, queries *db.Queries) *Store {

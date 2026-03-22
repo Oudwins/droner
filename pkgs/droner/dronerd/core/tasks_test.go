@@ -36,6 +36,8 @@ type fakeBackend struct {
 	removedWorktreePath   string
 	killedTmuxName        string
 	completedTmuxName     string
+	hydrateResult         backends.HydrationResult
+	hydrateErr            error
 }
 
 func (f *fakeBackend) ID() conf.BackendID {
@@ -65,6 +67,13 @@ func (f *fakeBackend) CreateSession(_ context.Context, repoPath string, worktree
 	}
 	f.createdOpencodeConfig = agentConfig.Opencode
 	return nil
+}
+
+func (f *fakeBackend) HydrateSession(_ context.Context, _ db.Session, _ backends.AgentConfig) (backends.HydrationResult, error) {
+	if f.hydrateResult.Status == "" && f.hydrateErr == nil {
+		return backends.HydrationResult{Status: db.SessionStatusRunning}, nil
+	}
+	return f.hydrateResult, f.hydrateErr
 }
 
 func (f *fakeBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {

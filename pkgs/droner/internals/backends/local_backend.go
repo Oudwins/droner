@@ -64,6 +64,38 @@ func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error
 	return nil
 }
 
+func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error) {
+	sessionName := tmuxSessionName(session.RepoPath, session.SimpleID)
+	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.SimpleID) == "" {
+		sessionName = tmuxSessionNameFromWorktreePath(session.WorktreePath)
+	}
+
+	exists, err := l.tmuxSessionExists(sessionName)
+	if err != nil {
+		return HydrationResult{Status: db.SessionStatusFailed, Error: fmt.Sprintf("failed to inspect tmux session: %v", err)}, nil
+	}
+	if exists {
+		return HydrationResult{Status: db.SessionStatusRunning}, nil
+	}
+
+	info, err := os.Stat(session.WorktreePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return HydrationResult{Status: db.SessionStatusDeleted}, nil
+		}
+		return HydrationResult{Status: db.SessionStatusFailed, Error: fmt.Sprintf("failed to stat worktree path: %v", err)}, nil
+	}
+	if !info.IsDir() {
+		return HydrationResult{Status: db.SessionStatusFailed, Error: "worktree path is not a directory"}, nil
+	}
+
+	if err := l.hydrateLocalRuntime(ctx, sessionName, session.WorktreePath, agentConfig); err != nil {
+		return HydrationResult{Status: db.SessionStatusFailed, Error: err.Error()}, nil
+	}
+
+	return HydrationResult{Status: db.SessionStatusRunning}, nil
+}
+
 func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) (retErr error) {
 	sessionName := tmuxSessionName(repoPath, sessionID)
 
@@ -279,6 +311,52 @@ func (l LocalBackend) createTmuxTerminalWindow(sessionName string, worktreePath 
 		return fmt.Errorf("failed to create tmux terminal window: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName string, worktreePath string, agentConfig AgentConfig) (retErr error) {
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		_ = l.killTmuxSession(sessionName)
+	}()
+
+	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
+		return err
+	}
+
+	opencodeConfig := agentConfig.Opencode
+	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
+		return err
+	}
+
+	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
+	if err != nil {
+		return err
+	}
+
+	agentConfig.Opencode = opencodeConfig
+	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
+		return err
+	}
+
+	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (l LocalBackend) tmuxSessionExists(sessionName string) (bool, error) {
+	check := execCommand("tmux", "has-session", "-t", sessionName)
+	if err := check.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (l LocalBackend) killTmuxSession(sessionName string) error {
