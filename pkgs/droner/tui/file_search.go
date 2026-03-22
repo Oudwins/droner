@@ -11,15 +11,15 @@ import (
 )
 
 func loadRepoFileCandidates(repoRoot string) ([]string, error) {
-	paths, err := gitTrackedAndUntrackedFiles(repoRoot)
+	paths, err := gitTrackedFiles(repoRoot)
 	if err == nil {
 		return paths, nil
 	}
 	return walkRepoFiles(repoRoot)
 }
 
-func gitTrackedAndUntrackedFiles(repoRoot string) ([]string, error) {
-	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "--cached", "--others", "--exclude-standard")
+func gitTrackedFiles(repoRoot string) ([]string, error) {
+	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "--cached")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
