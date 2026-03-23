@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
@@ -63,6 +64,8 @@ type sessionComposerModel struct {
 	prompt              composerPrompt
 	repoRoot            string
 	fileCandidates      []string
+	agentNames          []string
+	selectedAgentIndex  int
 	autocompleteActive  bool
 	autocompleteQuery   fileAutocompleteQuery
 	autocompleteResults []string
@@ -88,7 +91,8 @@ func Run(client *sdk.Client) error {
 	if err != nil {
 		return err
 	}
-	prompt, submitted, err := runSessionComposer(path, fileCandidates)
+	agentNames := conf.GetConfig().TUI.AgentNames
+	prompt, agentName, submitted, err := runSessionComposer(path, fileCandidates, agentNames)
 	if err != nil {
 		return err
 	}
@@ -98,7 +102,7 @@ func Run(client *sdk.Client) error {
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
 	}
-	request := buildSessionCreateRequest(path, prompt)
+	request := buildSessionCreateRequest(path, agentName, prompt)
 	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
@@ -121,39 +125,40 @@ func Run(client *sdk.Client) error {
 	return nil
 }
 
-func runSessionComposer(repoRoot string, fileCandidates []string) (*messages.Message, bool, error) {
-	model := newSessionComposerModel(repoRoot, fileCandidates)
+func runSessionComposer(repoRoot string, fileCandidates []string, agentNames []string) (*messages.Message, string, bool, error) {
+	model := newSessionComposerModel(repoRoot, fileCandidates, agentNames)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := program.Run()
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	finalModel, ok := result.(sessionComposerModel)
 	if !ok {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 	return extractComposerResult(finalModel)
 }
 
-func buildSessionCreateRequest(path string, prompt *messages.Message) schemas.SessionCreateRequest {
+func buildSessionCreateRequest(path string, agentName string, prompt *messages.Message) schemas.SessionCreateRequest {
 	request := schemas.SessionCreateRequest{Path: path}
 	if !messageHasContent(prompt) {
 		return request
 	}
 	request.AgentConfig = &schemas.SessionAgentConfig{
-		Message: messages.CloneMessage(prompt),
+		AgentName: strings.TrimSpace(agentName),
+		Message:   messages.CloneMessage(prompt),
 	}
 	return request
 }
 
-func extractComposerResult(model sessionComposerModel) (*messages.Message, bool, error) {
+func extractComposerResult(model sessionComposerModel) (*messages.Message, string, bool, error) {
 	if model.cancelled || !model.submitted {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
-	return model.prompt.Message(), true, nil
+	return model.prompt.Message(), model.selectedAgentName(), true, nil
 }
 
-func newSessionComposerModel(repoRoot string, fileCandidates []string) sessionComposerModel {
+func newSessionComposerModel(repoRoot string, fileCandidates []string, agentNames []string) sessionComposerModel {
 	focusedStyle, blurredStyle := textarea.DefaultStyles()
 	focusedStyle.Base = lipgloss.NewStyle().Background(textareaBackgroundColor).Foreground(textColor)
 	focusedStyle.Text = lipgloss.NewStyle().Foreground(textColor)
@@ -181,6 +186,7 @@ func newSessionComposerModel(repoRoot string, fileCandidates []string) sessionCo
 		prompt:             newComposerPrompt(),
 		repoRoot:           repoRoot,
 		fileCandidates:     append([]string(nil), fileCandidates...),
+		agentNames:         append([]string(nil), agentNames...),
 		width:              defaultPanelWidth,
 		height:             composerTextareaRows + 8,
 		readClipboardImage: defaultReadClipboardImage,
@@ -239,6 +245,9 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncPromptFromInput()
 			m.validationMessage = ""
 			return m, nil
+		case "tab":
+			m.cycleAgent(1)
+			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlV {
 			handled, cmd := m.handleClipboardPaste()
@@ -273,10 +282,10 @@ func (m sessionComposerModel) View() string {
 	titleBlock := lipgloss.JoinVertical(
 		lipgloss.Left,
 		titleStyle.Width(panelInnerWidth).Render("New Session"),
-		subtitleStyle.Width(panelInnerWidth).Render("Describe what you want to do"),
+		subtitleStyle.Width(panelInnerWidth).Render(fmt.Sprintf("Agent: %s", m.selectedAgentName())),
 	)
 
-	helpBlock := helpStyle.Width(panelInnerWidth).Render("@ file ref   Ctrl+V paste   Enter submit   Alt+Enter newline   Esc cancel")
+	helpBlock := helpStyle.Width(panelInnerWidth).Render("Tab agent   @ file ref   Ctrl+V paste   Enter submit   Alt+Enter newline   Esc cancel")
 
 	sections := []string{titleBlock, m.renderInputView()}
 	if attachmentView := m.imageAttachmentView(panelInnerWidth); attachmentView != "" {
@@ -322,6 +331,23 @@ func (m *sessionComposerModel) syncLayout(width int, height int) {
 
 func (m *sessionComposerModel) syncPromptFromInput() {
 	m.prompt.SyncText(m.input.Value())
+}
+
+func (m *sessionComposerModel) cycleAgent(delta int) {
+	if len(m.agentNames) == 0 {
+		return
+	}
+	m.selectedAgentIndex = (m.selectedAgentIndex + delta + len(m.agentNames)) % len(m.agentNames)
+}
+
+func (m sessionComposerModel) selectedAgentName() string {
+	if len(m.agentNames) == 0 {
+		return ""
+	}
+	if m.selectedAgentIndex < 0 || m.selectedAgentIndex >= len(m.agentNames) {
+		return ""
+	}
+	return m.agentNames[m.selectedAgentIndex]
 }
 
 func (m *sessionComposerModel) refreshAutocomplete() {
