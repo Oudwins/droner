@@ -70,6 +70,67 @@ func TestCloneMessageCopiesPartsSlice(t *testing.T) {
 	}
 }
 
+func TestNewDataURLFilePartIsValid(t *testing.T) {
+	t.Parallel()
+
+	part := NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ==")
+
+	if !part.isValid() {
+		t.Fatalf("expected inline data url part to be valid: %#v", part)
+	}
+	if part.File == nil || part.File.Source != nil {
+		t.Fatalf("expected inline file part without source, got %#v", part.File)
+	}
+}
+
+func TestFilePartRejectsMissingURLAndSource(t *testing.T) {
+	t.Parallel()
+
+	part := MessagePart{
+		Type: PartTypeFile,
+		File: &FilePartData{
+			Mime:     "image/png",
+			Filename: "broken.png",
+		},
+	}
+
+	if part.isValid() {
+		t.Fatalf("expected invalid file part, got %#v", part)
+	}
+}
+
+func TestFilePartRejectsMixedInlineURLAndSource(t *testing.T) {
+	t.Parallel()
+
+	part := NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ==")
+	part.File.Source = NewFilePart("README.md").File.Source
+
+	if part.isValid() {
+		t.Fatalf("expected mixed file part to be invalid, got %#v", part)
+	}
+}
+
+func TestCloneMessageCopiesInlineFileParts(t *testing.T) {
+	t.Parallel()
+
+	original := &Message{
+		Role: MessageRoleUser,
+		Parts: []MessagePart{
+			NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
+		},
+	}
+	clone := CloneMessage(original)
+	*clone.Parts[0].File.URL = "data:image/png;base64,Y2hhbmdlZA=="
+	clone.Parts[0].File.Filename = "changed.png"
+
+	if got := *original.Parts[0].File.URL; got != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("original url mutated to %q", got)
+	}
+	if got := original.Parts[0].File.Filename; got != "pasted-image-1.png" {
+		t.Fatalf("original filename mutated to %q", got)
+	}
+}
+
 func TestNewFilePartMarshalsNullURL(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +164,58 @@ func TestMessagePartsForLogExpandsNestedFileText(t *testing.T) {
 	}
 	if _, exists := fileItem["url"]; !exists {
 		t.Fatalf("expected url key in logged file item: %#v", fileItem)
+	}
+}
+
+func TestMessagePartsForLogRedactsInlineDataURLs(t *testing.T) {
+	t.Parallel()
+
+	parts := messagePartsForLog([]MessagePart{NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZUJhc2U2NA==")})
+	fileItem, ok := parts[0]["file"].(map[string]any)
+	if !ok {
+		t.Fatalf("file item = %#v, want map", parts[0]["file"])
+	}
+	if got := fileItem["url"]; got != "data:image/png;base64,<redacted>" {
+		t.Fatalf("url = %#v, want redacted data url", got)
+	}
+	if got := fileItem["urlTruncated"]; got != true {
+		t.Fatalf("urlTruncated = %#v, want true", got)
+	}
+	if got := fileItem["urlLength"]; got != len("data:image/png;base64,ZmFrZUJhc2U2NA==") {
+		t.Fatalf("urlLength = %#v, want %d", got, len("data:image/png;base64,ZmFrZUJhc2U2NA=="))
+	}
+	if got := fileItem["mime"]; got != "image/png" {
+		t.Fatalf("mime = %#v, want image/png", got)
+	}
+	if got := fileItem["filename"]; got != "pasted-image-1.png" {
+		t.Fatalf("filename = %#v, want pasted-image-1.png", got)
+	}
+}
+
+func TestMessagePartsForLogLeavesNonDataURLsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	url := "file:///tmp/example.txt"
+	parts := messagePartsForLog([]MessagePart{{
+		Type: PartTypeFile,
+		File: &FilePartData{
+			URL:      &url,
+			Mime:     "text/plain",
+			Filename: "example.txt",
+		},
+	}})
+	fileItem, ok := parts[0]["file"].(map[string]any)
+	if !ok {
+		t.Fatalf("file item = %#v, want map", parts[0]["file"])
+	}
+	if got := fileItem["url"]; got != url {
+		t.Fatalf("url = %#v, want %q", got, url)
+	}
+	if _, exists := fileItem["urlTruncated"]; exists {
+		t.Fatalf("expected non-data url to omit truncation metadata: %#v", fileItem)
+	}
+	if _, exists := fileItem["urlLength"]; exists {
+		t.Fatalf("expected non-data url to omit length metadata: %#v", fileItem)
 	}
 }
 

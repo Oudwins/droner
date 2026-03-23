@@ -72,6 +72,21 @@ func NewFilePart(path string) MessagePart {
 	}
 }
 
+func NewDataURLFilePart(mimeType string, filename string, dataURL string) MessagePart {
+	trimmedMime := strings.TrimSpace(mimeType)
+	trimmedFilename := strings.TrimSpace(filename)
+	trimmedURL := strings.TrimSpace(dataURL)
+	return MessagePart{
+		Type: PartTypeFile,
+		File: &FilePartData{
+			URL:      &trimmedURL,
+			Mime:     trimmedMime,
+			Filename: trimmedFilename,
+			Source:   nil,
+		},
+	}
+}
+
 func (p MessagePart) isValid() bool {
 	switch p.Type {
 	case PartTypeText:
@@ -84,13 +99,25 @@ func (p MessagePart) isValid() bool {
 }
 
 func (f *FilePartData) isValid() bool {
-	if f == nil || f.Source == nil {
+	if f == nil {
 		return false
 	}
 	if strings.TrimSpace(f.Filename) == "" {
 		return false
 	}
-	return f.Source.isValid()
+	url := ""
+	if f.URL != nil {
+		url = strings.TrimSpace(*f.URL)
+	}
+	sourceValid := f.Source != nil && f.Source.isValid()
+	switch {
+	case url == "":
+		return sourceValid
+	case f.Source != nil:
+		return false
+	default:
+		return strings.TrimSpace(f.Mime) != "" && isValidDataURL(url, f.Mime)
+	}
 }
 
 func (s *FilePartSourceData) isValid() bool {
@@ -119,6 +146,31 @@ func isValidRepoRelativePath(path string) bool {
 		return false
 	}
 	return !strings.HasPrefix(cleanPath, ".."+string(filepath.Separator))
+}
+
+func isValidDataURL(raw string, expectedMime string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return false
+	}
+	payload := strings.TrimPrefix(trimmed, "data:")
+	comma := strings.Index(payload, ",")
+	if comma <= 0 || comma == len(payload)-1 {
+		return false
+	}
+	metadata := payload[:comma]
+	if !strings.Contains(metadata, ";base64") {
+		return false
+	}
+	mimeType := metadata
+	if separator := strings.Index(metadata, ";"); separator >= 0 {
+		mimeType = metadata[:separator]
+	}
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		return false
+	}
+	return strings.EqualFold(mimeType, strings.TrimSpace(expectedMime))
 }
 
 type MessageMeta struct {
@@ -164,7 +216,12 @@ func messagePartsForLog(parts []MessagePart) []map[string]any {
 		if part.File != nil {
 			fileItem := map[string]any{}
 			if part.File.URL != nil {
-				fileItem["url"] = *part.File.URL
+				loggedURL, truncated, length := loggedFileURL(*part.File.URL)
+				fileItem["url"] = loggedURL
+				if truncated {
+					fileItem["urlTruncated"] = true
+					fileItem["urlLength"] = length
+				}
 			} else {
 				fileItem["url"] = nil
 			}
@@ -198,6 +255,18 @@ func messagePartsForLog(parts []MessagePart) []map[string]any {
 	}
 
 	return values
+}
+
+func loggedFileURL(raw string) (string, bool, int) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return raw, false, 0
+	}
+	comma := strings.Index(trimmed, ",")
+	if comma < 0 {
+		return "data:<redacted>", true, len(trimmed)
+	}
+	return trimmed[:comma+1] + "<redacted>", true, len(trimmed)
 }
 
 func mimeTypeForPath(path string) string {

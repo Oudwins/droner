@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -59,6 +60,30 @@ func TestBuildSessionCreateRequestPreservesFileParts(t *testing.T) {
 	}
 	if parts[1].File.URL != nil {
 		t.Fatalf("expected file url to be nil in TUI payload, got %#v", parts[1].File.URL)
+	}
+}
+
+func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
+	prompt := &messages.Message{
+		Role: messages.MessageRoleUser,
+		Parts: []messages.MessagePart{
+			messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
+		},
+	}
+	request := buildSessionCreateRequest("/tmp/repo", prompt)
+
+	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
+		t.Fatal("expected agent message to be included")
+	}
+	parts := request.AgentConfig.Message.Parts
+	if len(parts) != 1 {
+		t.Fatalf("expected one part, got %d", len(parts))
+	}
+	if parts[0].File == nil || parts[0].File.URL == nil || *parts[0].File.URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("unexpected inline image part: %#v", parts[0])
+	}
+	if parts[0].File.Source != nil {
+		t.Fatalf("expected inline image source to stay nil, got %#v", parts[0].File.Source)
 	}
 }
 
@@ -240,6 +265,44 @@ func TestComposerPromptEditingInsideFileReferenceDropsStructuredSpan(t *testing.
 	}
 }
 
+func TestComposerPromptPreservesMixedTextFileAndImageParts(t *testing.T) {
+	prompt := newComposerPrompt()
+	text := "inspect @pkgs/droner/tui/tui.go and [Image 1] now"
+	prompt.SetPlainText(text)
+	fileStart := strings.Index(text, "@pkgs/droner/tui/tui.go")
+	imageStart := strings.Index(text, "[Image 1]")
+	prompt.AddFileRef(fileStart, fileStart+len("@pkgs/droner/tui/tui.go"), "pkgs/droner/tui/tui.go")
+	prompt.AddStructuredPart(imageStart, imageStart+len("[Image 1]"), "[Image 1]", messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="))
+
+	message := prompt.Message()
+	if len(message.Parts) != 5 {
+		t.Fatalf("expected five parts, got %#v", message.Parts)
+	}
+	if message.Parts[1].File == nil || message.Parts[1].File.Source == nil || message.Parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
+		t.Fatalf("expected repo file part, got %#v", message.Parts[1])
+	}
+	if message.Parts[3].File == nil || message.Parts[3].File.URL == nil || *message.Parts[3].File.URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("expected inline image part, got %#v", message.Parts[3])
+	}
+}
+
+func TestComposerPromptEditingInsideImageMarkerDropsStructuredToken(t *testing.T) {
+	prompt := newComposerPrompt()
+	text := "inspect [Image 1] now"
+	prompt.SetPlainText(text)
+	imageStart := strings.Index(text, "[Image 1]")
+	prompt.AddStructuredPart(imageStart, imageStart+len("[Image 1]"), "[Image 1]", messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="))
+	prompt.SyncText("inspect [Image x] now")
+
+	message := prompt.Message()
+	if len(message.Parts) != 1 {
+		t.Fatalf("expected plain-text prompt after marker edit, got %#v", message.Parts)
+	}
+	if message.Parts[0].Type != messages.PartTypeText {
+		t.Fatalf("expected text part, got %#v", message.Parts[0])
+	}
+}
+
 func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
 	model := newSessionComposerModel("/tmp/repo", []string{"pkgs/droner/tui/tui.go", "README.md"})
 	model.input.SetValue("inspect @pkgs/dr")
@@ -261,5 +324,101 @@ func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
 	}
 	if message.Parts[1].Type != messages.PartTypeFile {
 		t.Fatalf("expected file part, got %#v", message.Parts[1])
+	}
+}
+
+func TestSessionComposerCtrlVPastesImageMarker(t *testing.T) {
+	model := newSessionComposerModel("", nil)
+	model.readClipboardImage = func() (clipboardImage, bool, error) {
+		return clipboardImage{Bytes: []byte("fake"), Mime: "image/png"}, true, nil
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	if cmd != nil {
+		t.Fatalf("expected inline image paste to complete synchronously, got cmd %v", cmd)
+	}
+	finalModel := updated.(sessionComposerModel)
+
+	if got := finalModel.input.Value(); got != "[Image 1]" {
+		t.Fatalf("input value = %q, want [Image 1]", got)
+	}
+	message := finalModel.prompt.Message()
+	if len(message.Parts) != 1 {
+		t.Fatalf("expected one inline image part, got %#v", message.Parts)
+	}
+	if message.Parts[0].File == nil || message.Parts[0].File.URL == nil {
+		t.Fatalf("expected inline image file payload, got %#v", message.Parts[0])
+	}
+	if !strings.HasPrefix(*message.Parts[0].File.URL, "data:image/png;base64,") {
+		t.Fatalf("url = %q, want data url", *message.Parts[0].File.URL)
+	}
+	if message.Parts[0].File.Filename != "pasted-image-1.png" {
+		t.Fatalf("filename = %q, want pasted-image-1.png", message.Parts[0].File.Filename)
+	}
+	attachmentView := finalModel.imageAttachmentView(80)
+	if !strings.Contains(attachmentView, "Images:") || !strings.Contains(attachmentView, "[Image 1]") {
+		t.Fatalf("attachment view = %q, want image feedback", attachmentView)
+	}
+}
+
+func TestSessionComposerCtrlVFallsBackToTextPasteWhenNoImage(t *testing.T) {
+	model := newSessionComposerModel("", nil)
+	model.readClipboardImage = func() (clipboardImage, bool, error) {
+		return clipboardImage{}, false, nil
+	}
+	model.pasteTextCmd = func() tea.Msg {
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("pasted")}
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	if cmd == nil {
+		t.Fatal("expected text paste fallback cmd")
+	}
+	updated, _ = updated.(sessionComposerModel).Update(cmd())
+	finalModel := updated.(sessionComposerModel)
+
+	if got := finalModel.input.Value(); got != "pasted" {
+		t.Fatalf("input value = %q, want pasted", got)
+	}
+	if finalModel.validationMessage != "" {
+		t.Fatalf("validation message = %q, want empty", finalModel.validationMessage)
+	}
+}
+
+func TestSessionComposerCtrlVShowsMessageWhenNoImageOrTextWasPasted(t *testing.T) {
+	model := newSessionComposerModel("", nil)
+	model.readClipboardImage = func() (clipboardImage, bool, error) {
+		return clipboardImage{}, false, nil
+	}
+	model.pasteTextCmd = func() tea.Msg { return nil }
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	if cmd == nil {
+		t.Fatal("expected text paste fallback cmd")
+	}
+	updated, _ = updated.(sessionComposerModel).Update(cmd())
+	finalModel := updated.(sessionComposerModel)
+
+	if finalModel.validationMessage != "No clipboard image was detected." {
+		t.Fatalf("validation message = %q", finalModel.validationMessage)
+	}
+}
+
+func TestSessionComposerViewShowsInlineImageFeedback(t *testing.T) {
+	model := newSessionComposerModel("", nil)
+	model.ready = true
+	model.width = 80
+	model.height = 24
+	model.input.SetWidth(60)
+	model.input.SetValue("inspect [Image 1]")
+	model.syncPromptFromInput()
+	model.prompt.AddStructuredPart(strings.Index(model.input.Value(), "[Image 1]"), strings.Index(model.input.Value(), "[Image 1]")+len("[Image 1]"), "[Image 1]", messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="))
+
+	view := model.View()
+	if !strings.Contains(view, "Images:") {
+		t.Fatalf("view = %q, want image feedback label", view)
+	}
+	if !strings.Contains(view, "[Image 1]") {
+		t.Fatalf("view = %q, want image marker", view)
 	}
 }
