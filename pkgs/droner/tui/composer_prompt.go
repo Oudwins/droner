@@ -8,15 +8,16 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
-type fileRefSpan struct {
-	Start int
-	End   int
-	Path  string
+type structuredPromptToken struct {
+	Start   int
+	End     int
+	Display string
+	Part    messages.MessagePart
 }
 
 type composerPrompt struct {
-	text  string
-	spans []fileRefSpan
+	text   string
+	tokens []structuredPromptToken
 }
 
 func newComposerPrompt() composerPrompt {
@@ -25,15 +26,20 @@ func newComposerPrompt() composerPrompt {
 
 func (p *composerPrompt) SetPlainText(text string) {
 	p.text = text
-	p.spans = nil
+	p.tokens = nil
 }
 
 func (p *composerPrompt) SyncText(text string) {
-	p.spans = remapFileRefSpans(p.spans, p.text, text)
+	p.tokens = remapStructuredPromptTokens(p.tokens, p.text, text)
 	p.text = text
 }
 
 func (p *composerPrompt) AddFileRef(start int, end int, path string) {
+	cleanPath := filepath.ToSlash(filepath.Clean(path))
+	p.AddStructuredPart(start, end, fileRefToken(cleanPath), messages.NewFilePart(cleanPath))
+}
+
+func (p *composerPrompt) AddStructuredPart(start int, end int, display string, part messages.MessagePart) {
 	if start < 0 || end < start {
 		return
 	}
@@ -41,11 +47,13 @@ func (p *composerPrompt) AddFileRef(start int, end int, path string) {
 	if end > len(runes) {
 		return
 	}
-	cleanPath := filepath.ToSlash(filepath.Clean(path))
-	span := fileRefSpan{Start: start, End: end, Path: cleanPath}
-	p.spans = append(nonOverlappingFileRefSpans(p.spans, span), span)
-	sort.Slice(p.spans, func(i int, j int) bool {
-		return p.spans[i].Start < p.spans[j].Start
+	if display == "" || string(runes[start:end]) != display {
+		return
+	}
+	token := structuredPromptToken{Start: start, End: end, Display: display, Part: part}
+	p.tokens = append(nonOverlappingStructuredPromptTokens(p.tokens, token), token)
+	sort.Slice(p.tokens, func(i int, j int) bool {
+		return p.tokens[i].Start < p.tokens[j].Start
 	})
 }
 
@@ -58,18 +66,18 @@ func (p composerPrompt) IsEmpty() bool {
 }
 
 func (p composerPrompt) Message() *messages.Message {
-	parts := make([]messages.MessagePart, 0, len(p.spans)*2+1)
+	parts := make([]messages.MessagePart, 0, len(p.tokens)*2+1)
 	runes := []rune(p.text)
 	position := 0
-	for _, span := range p.sortedSpans() {
-		if span.Start > len(runes) || span.End > len(runes) || span.Start >= span.End {
+	for _, token := range p.sortedTokens() {
+		if !token.matches(runes) {
 			continue
 		}
-		if position < span.Start {
-			parts = appendTextPart(parts, string(runes[position:span.Start]))
+		if position < token.Start {
+			parts = appendTextPart(parts, string(runes[position:token.Start]))
 		}
-		parts = append(parts, messages.NewFilePart(span.Path))
-		position = span.End
+		parts = append(parts, token.Part)
+		position = token.End
 	}
 	if position < len(runes) {
 		parts = appendTextPart(parts, string(runes[position:]))
@@ -77,15 +85,22 @@ func (p composerPrompt) Message() *messages.Message {
 	return &messages.Message{Role: messages.MessageRoleUser, Parts: parts}
 }
 
-func (p composerPrompt) sortedSpans() []fileRefSpan {
-	if len(p.spans) == 0 {
+func (p composerPrompt) sortedTokens() []structuredPromptToken {
+	if len(p.tokens) == 0 {
 		return nil
 	}
-	spans := append([]fileRefSpan(nil), p.spans...)
-	sort.Slice(spans, func(i int, j int) bool {
-		return spans[i].Start < spans[j].Start
+	tokens := append([]structuredPromptToken(nil), p.tokens...)
+	sort.Slice(tokens, func(i int, j int) bool {
+		return tokens[i].Start < tokens[j].Start
 	})
-	return spans
+	return tokens
+}
+
+func (t structuredPromptToken) matches(runes []rune) bool {
+	if t.Start < 0 || t.End <= t.Start || t.End > len(runes) {
+		return false
+	}
+	return string(runes[t.Start:t.End]) == t.Display
 }
 
 func appendTextPart(parts []messages.MessagePart, text string) []messages.MessagePart {
@@ -95,19 +110,19 @@ func appendTextPart(parts []messages.MessagePart, text string) []messages.Messag
 	return append(parts, messages.NewTextPart(text))
 }
 
-func nonOverlappingFileRefSpans(spans []fileRefSpan, candidate fileRefSpan) []fileRefSpan {
-	kept := spans[:0]
-	for _, span := range spans {
-		if span.End <= candidate.Start || span.Start >= candidate.End {
-			kept = append(kept, span)
+func nonOverlappingStructuredPromptTokens(tokens []structuredPromptToken, candidate structuredPromptToken) []structuredPromptToken {
+	kept := tokens[:0]
+	for _, token := range tokens {
+		if token.End <= candidate.Start || token.Start >= candidate.End {
+			kept = append(kept, token)
 		}
 	}
 	return kept
 }
 
-func remapFileRefSpans(spans []fileRefSpan, oldText string, newText string) []fileRefSpan {
-	if len(spans) == 0 || oldText == newText {
-		return append([]fileRefSpan(nil), spans...)
+func remapStructuredPromptTokens(tokens []structuredPromptToken, oldText string, newText string) []structuredPromptToken {
+	if len(tokens) == 0 || oldText == newText {
+		return append([]structuredPromptToken(nil), tokens...)
 	}
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
@@ -122,13 +137,16 @@ func remapFileRefSpans(spans []fileRefSpan, oldText string, newText string) []fi
 	oldChangeEnd := len(oldRunes) - commonSuffix
 	newChangeEnd := len(newRunes) - commonSuffix
 	delta := newChangeEnd - oldChangeEnd
-	remapped := make([]fileRefSpan, 0, len(spans))
-	for _, span := range spans {
+	remapped := make([]structuredPromptToken, 0, len(tokens))
+	for _, token := range tokens {
 		switch {
-		case span.End <= commonPrefix:
-			remapped = append(remapped, span)
-		case span.Start >= oldChangeEnd:
-			remapped = append(remapped, fileRefSpan{Start: span.Start + delta, End: span.End + delta, Path: span.Path})
+		case token.End <= commonPrefix:
+			remapped = append(remapped, token)
+		case token.Start >= oldChangeEnd:
+			shifted := token
+			shifted.Start += delta
+			shifted.End += delta
+			remapped = append(remapped, shifted)
 		default:
 			continue
 		}

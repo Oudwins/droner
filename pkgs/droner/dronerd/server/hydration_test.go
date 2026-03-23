@@ -163,7 +163,7 @@ func TestHydrateRunningSessionsBuildsAgentConfigFromPersistedSession(t *testing.
 	backend := &hydrationBackend{}
 	srv := newHydrationTestServer(t, backend)
 
-	agentConfig := sql.NullString{String: `{"model":"openai/gpt-5-mini","agentName":"plan","message":{"parts":[{"type":"text","text":"hello"}]}}`, Valid: true}
+	agentConfig := sql.NullString{String: `{"model":"openai/gpt-5-mini","agentName":"plan","message":{"parts":[{"type":"text","text":"hello"},{"type":"file","file":{"url":"data:image/png;base64,ZmFrZQ==","mime":"image/png","filename":"pasted-image-1.png"}}]}}`, Valid: true}
 	createHydrationTestSession(t, srv.Base.DB, db.SessionStatusRunning, agentConfig)
 
 	if err := srv.hydrateRunningSessions(context.Background()); err != nil {
@@ -176,11 +176,18 @@ func TestHydrateRunningSessionsBuildsAgentConfigFromPersistedSession(t *testing.
 	if backend.hydratedConfig.AgentName != "plan" {
 		t.Fatalf("agentName = %q, want %q", backend.hydratedConfig.AgentName, "plan")
 	}
-	if backend.hydratedConfig.Message == nil || len(backend.hydratedConfig.Message.Parts) != 1 {
+	if backend.hydratedConfig.Message == nil || len(backend.hydratedConfig.Message.Parts) != 2 {
 		t.Fatalf("expected persisted message to be passed to backend hydration")
 	}
 	if backend.hydratedConfig.Message.Parts[0] != (messages.NewTextPart("hello")) {
 		t.Fatalf("message part = %#v, want %#v", backend.hydratedConfig.Message.Parts[0], messages.NewTextPart("hello"))
+	}
+	inlinePart := backend.hydratedConfig.Message.Parts[1]
+	if inlinePart.File == nil || inlinePart.File.URL == nil || *inlinePart.File.URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("inline image part = %#v", inlinePart)
+	}
+	if inlinePart.File.Source != nil {
+		t.Fatalf("expected hydrated inline image source to stay nil, got %#v", inlinePart.File.Source)
 	}
 	if backend.hydratedConfig.Opencode.Hostname != "127.0.0.1" || backend.hydratedConfig.Opencode.Port != 4096 {
 		t.Fatalf("unexpected opencode config: %#v", backend.hydratedConfig.Opencode)

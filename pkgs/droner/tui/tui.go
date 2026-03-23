@@ -2,7 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -48,6 +51,11 @@ var (
 			Foreground(mutedTextColor)
 	validationStyle = lipgloss.NewStyle().
 			Foreground(errorTextColor)
+	imageMarkerStyle = lipgloss.NewStyle().
+				Foreground(accentColor).
+				Bold(true)
+	attachmentLabelStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor)
 )
 
 type sessionComposerModel struct {
@@ -65,6 +73,10 @@ type sessionComposerModel struct {
 	submitted           bool
 	cancelled           bool
 	validationMessage   string
+	readClipboardImage  clipboardImageReader
+	pasteTextCmd        tea.Cmd
+	pasteFallbackActive bool
+	pasteFallbackValue  string
 }
 
 func Run(client *sdk.Client) error {
@@ -165,12 +177,14 @@ func newSessionComposerModel(repoRoot string, fileCandidates []string) sessionCo
 	input.Focus()
 
 	model := sessionComposerModel{
-		input:          input,
-		prompt:         newComposerPrompt(),
-		repoRoot:       repoRoot,
-		fileCandidates: append([]string(nil), fileCandidates...),
-		width:          defaultPanelWidth,
-		height:         composerTextareaRows + 8,
+		input:              input,
+		prompt:             newComposerPrompt(),
+		repoRoot:           repoRoot,
+		fileCandidates:     append([]string(nil), fileCandidates...),
+		width:              defaultPanelWidth,
+		height:             composerTextareaRows + 8,
+		readClipboardImage: defaultReadClipboardImage,
+		pasteTextCmd:       textarea.Paste,
 	}
 	model.syncPromptFromInput()
 	model.refreshAutocomplete()
@@ -226,11 +240,18 @@ func (m sessionComposerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.validationMessage = ""
 			return m, nil
 		}
+		if msg.Type == tea.KeyCtrlV {
+			handled, cmd := m.handleClipboardPaste()
+			if handled {
+				return m, cmd
+			}
+		}
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.syncPromptFromInput()
+	m.resolvePasteFallback()
 	m.refreshAutocomplete()
 	if !m.prompt.IsEmpty() {
 		m.validationMessage = ""
@@ -255,9 +276,13 @@ func (m sessionComposerModel) View() string {
 		subtitleStyle.Width(panelInnerWidth).Render("Describe what you want to do"),
 	)
 
-	helpBlock := helpStyle.Width(panelInnerWidth).Render("@ file ref   Enter submit   Alt+Enter newline   Esc cancel")
+	helpBlock := helpStyle.Width(panelInnerWidth).Render("@ file ref   Ctrl+V paste   Enter submit   Alt+Enter newline   Esc cancel")
 
-	sections := []string{titleBlock, m.input.View(), helpBlock}
+	sections := []string{titleBlock, m.renderInputView()}
+	if attachmentView := m.imageAttachmentView(panelInnerWidth); attachmentView != "" {
+		sections = append(sections, attachmentView)
+	}
+	sections = append(sections, helpBlock)
 	if autocompleteView := m.autocompleteView(panelInnerWidth); autocompleteView != "" {
 		sections = append(sections, autocompleteView)
 	}
@@ -352,6 +377,104 @@ func (m *sessionComposerModel) applyAutocompleteSelection() bool {
 	m.validationMessage = ""
 	m.clearAutocomplete()
 	return true
+}
+
+func (m *sessionComposerModel) handleClipboardPaste() (bool, tea.Cmd) {
+	if m.readClipboardImage == nil {
+		m.startPasteFallback()
+		return true, m.pasteTextCmd
+	}
+	image, ok, err := m.readClipboardImage()
+	if err != nil {
+		m.validationMessage = err.Error()
+		return true, nil
+	}
+	if !ok {
+		m.startPasteFallback()
+		return true, m.pasteTextCmd
+	}
+	m.clearPasteFallback()
+	image, err = normalizeClipboardImage(image, m.nextImageIndex())
+	if err != nil {
+		m.validationMessage = err.Error()
+		return true, nil
+	}
+	label := m.nextImageLabel()
+	dataURL := fmt.Sprintf("data:%s;base64,%s", image.Mime, base64.StdEncoding.EncodeToString(image.Bytes))
+	part := messages.NewDataURLFilePart(image.Mime, image.Filename, dataURL)
+	m.insertStructuredMarker(label, part)
+	m.validationMessage = ""
+	m.refreshAutocomplete()
+	return true, nil
+}
+
+func (m *sessionComposerModel) startPasteFallback() {
+	m.pasteFallbackActive = true
+	m.pasteFallbackValue = m.input.Value()
+}
+
+func (m *sessionComposerModel) clearPasteFallback() {
+	m.pasteFallbackActive = false
+	m.pasteFallbackValue = ""
+}
+
+func (m *sessionComposerModel) resolvePasteFallback() {
+	if !m.pasteFallbackActive {
+		return
+	}
+	defer m.clearPasteFallback()
+	if m.input.Value() == m.pasteFallbackValue {
+		m.validationMessage = "No clipboard image was detected."
+	}
+}
+
+func (m *sessionComposerModel) insertStructuredMarker(display string, part messages.MessagePart) {
+	start := textareaCursorIndex(m.input)
+	m.input.InsertString(display)
+	m.syncPromptFromInput()
+	m.prompt.AddStructuredPart(start, start+len([]rune(display)), display, part)
+}
+
+func (m sessionComposerModel) renderInputView() string {
+	view := m.input.View()
+	for _, token := range m.inlineImageTokens() {
+		view = strings.ReplaceAll(view, token.Display, imageMarkerStyle.Render(token.Display))
+	}
+	return view
+}
+
+func (m sessionComposerModel) imageAttachmentView(width int) string {
+	tokens := m.inlineImageTokens()
+	if len(tokens) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		labels = append(labels, imageMarkerStyle.Render(token.Display))
+	}
+	return helpStyle.Width(width).Render(attachmentLabelStyle.Render("Images:") + " " + strings.Join(labels, "  "))
+}
+
+func (m sessionComposerModel) inlineImageTokens() []structuredPromptToken {
+	tokens := make([]structuredPromptToken, 0)
+	for _, token := range m.prompt.sortedTokens() {
+		if token.Part.Type != messages.PartTypeFile || token.Part.File == nil || token.Part.File.URL == nil {
+			continue
+		}
+		if strings.TrimSpace(*token.Part.File.URL) == "" {
+			continue
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens
+}
+
+func (m sessionComposerModel) nextImageIndex() int {
+	return len(m.inlineImageTokens()) + 1
+}
+
+func (m sessionComposerModel) nextImageLabel() string {
+	return fmt.Sprintf("[Image %d]", m.nextImageIndex())
 }
 
 func (m sessionComposerModel) autocompleteView(width int) string {

@@ -180,6 +180,49 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 	}
 }
 
+func TestSendOpencodeMessage_ForwardsInlineImagePartsUnchanged(t *testing.T) {
+	mux := http.NewServeMux()
+	inlinePart := messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ==")
+	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		parts, ok := body["parts"].([]any)
+		if !ok || len(parts) != 1 {
+			t.Fatalf("parts = %#v, want one part", body["parts"])
+		}
+		filePart, ok := parts[0].(map[string]any)
+		if !ok {
+			t.Fatalf("file part = %#v, want object", parts[0])
+		}
+		if filePart["url"] != "data:image/png;base64,ZmFrZQ==" {
+			t.Fatalf("url = %v, want inline data url", filePart["url"])
+		}
+		if filePart["mime"] != "image/png" {
+			t.Fatalf("mime = %v, want image/png", filePart["mime"])
+		}
+		if filePart["filename"] != "pasted-image-1.png" {
+			t.Fatalf("filename = %v, want pasted-image-1.png", filePart["filename"])
+		}
+		if _, exists := filePart["source"]; exists {
+			t.Fatalf("expected inline file part source to be omitted, got %#v", filePart["source"])
+		}
+		writePromptOK(w, "abc")
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	backend := LocalBackend{}
+	msg := &messages.Message{Parts: []messages.MessagePart{inlinePart}}
+	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "", "", msg); err != nil {
+		t.Fatalf("sendOpencodeMessage: %v", err)
+	}
+}
+
 func TestOpencodePartsFromMessageRejectsMissingFile(t *testing.T) {
 	t.Parallel()
 

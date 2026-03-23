@@ -471,7 +471,30 @@ func opencodePartsFromMessage(message *messages.Message, worktreePath string) ([
 }
 
 func opencodeFilePartFromMessagePart(part messages.MessagePart, worktreePath string) (opencode.FilePartInputParam, error) {
-	if part.File == nil || part.File.Source == nil {
+	if part.File == nil {
+		return opencode.FilePartInputParam{}, errors.New("file message part is missing file payload")
+	}
+	filename := strings.TrimSpace(part.File.Filename)
+	mimeType := strings.TrimSpace(part.File.Mime)
+	inlineURL := ""
+	if part.File.URL != nil {
+		inlineURL = strings.TrimSpace(*part.File.URL)
+	}
+	if inlineURL != "" {
+		if mimeType == "" {
+			return opencode.FilePartInputParam{}, errors.New("inline file message part is missing mime type")
+		}
+		if filename == "" {
+			return opencode.FilePartInputParam{}, errors.New("inline file message part is missing filename")
+		}
+		return opencode.FilePartInputParam{
+			Type:     opencode.F(opencode.FilePartInputTypeFile),
+			URL:      opencode.F(inlineURL),
+			Mime:     opencode.F(mimeType),
+			Filename: opencode.F(filename),
+		}, nil
+	}
+	if part.File.Source == nil {
 		return opencode.FilePartInputParam{}, errors.New("file message part is missing file source")
 	}
 	if strings.TrimSpace(worktreePath) == "" {
@@ -490,11 +513,9 @@ func opencodeFilePartFromMessagePart(part messages.MessagePart, worktreePath str
 	if err != nil {
 		return opencode.FilePartInputParam{}, fmt.Errorf("resolve file part %q url: %w", relativePath, err)
 	}
-	filename := strings.TrimSpace(part.File.Filename)
 	if filename == "" {
 		filename = filepath.Base(relativePath)
 	}
-	mimeType := strings.TrimSpace(part.File.Mime)
 	if mimeType == "" {
 		mimeType = mimeTypeForPath(relativePath)
 	}

@@ -295,6 +295,64 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 	}
 }
 
+func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
+	server, queries, _, repoDir := newCreateSessionTestServer(t)
+
+	payload, err := json.Marshal(schemas.SessionCreateRequest{
+		Path:      repoDir,
+		SessionID: schemas.NewSSessionID("inline-image-session"),
+		BackendID: conf.BackendLocal,
+		AgentConfig: &schemas.SessionAgentConfig{
+			Message: &messages.Message{
+				Role: messages.MessageRoleUser,
+				Parts: []messages.MessagePart{
+					messages.NewTextPart("inspect this"),
+					messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.HandlerCreateSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	session, err := queries.GetSessionBySimpleIDAnyStatus(context.Background(), "inline-image-session")
+	if err != nil {
+		t.Fatalf("GetSessionBySimpleIDAnyStatus: %v", err)
+	}
+	if !session.AgentConfig.Valid {
+		t.Fatal("expected agent config to be stored")
+	}
+	var stored schemas.SessionAgentConfig
+	if err := json.Unmarshal([]byte(session.AgentConfig.String), &stored); err != nil {
+		t.Fatalf("json.Unmarshal stored agent config: %v", err)
+	}
+	if stored.Message == nil || len(stored.Message.Parts) != 2 {
+		t.Fatalf("stored message parts = %#v", stored.Message)
+	}
+	imagePart := stored.Message.Parts[1]
+	if imagePart.Type != messages.PartTypeFile || imagePart.File == nil || imagePart.File.URL == nil {
+		t.Fatalf("stored image part = %#v", imagePart)
+	}
+	if *imagePart.File.URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("stored image url = %q, want inline data url", *imagePart.File.URL)
+	}
+	if imagePart.File.Mime != "image/png" || imagePart.File.Filename != "pasted-image-1.png" {
+		t.Fatalf("stored image metadata = %#v", imagePart.File)
+	}
+	if imagePart.File.Source != nil {
+		t.Fatalf("expected stored inline image source to be nil, got %#v", imagePart.File.Source)
+	}
+}
+
 func bytesReader(payload []byte) *io.SectionReader {
 	return io.NewSectionReader(bytes.NewReader(payload), 0, int64(len(payload)))
 }
