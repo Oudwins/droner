@@ -141,6 +141,9 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 			return err
 		}
 	}
+	if err := l.runCursorWorktreeSetup(repoPath, worktreePath, sessionID); err != nil {
+		return err
+	}
 	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
 		return err
 	}
