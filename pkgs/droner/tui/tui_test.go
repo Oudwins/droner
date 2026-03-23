@@ -15,7 +15,7 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 			messages.NewTextPart("first line\n\nsecond line\n"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "plan", prompt)
 
 	if request.Path != "/tmp/repo" {
 		t.Fatalf("expected path to be preserved, got %q", request.Path)
@@ -25,6 +25,9 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 	}
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
+	}
+	if request.AgentConfig.AgentName != "plan" {
+		t.Fatalf("expected agent name to be preserved, got %q", request.AgentConfig.AgentName)
 	}
 	if request.AgentConfig.Message.Role != messages.MessageRoleUser {
 		t.Fatalf("expected user role, got %q", request.AgentConfig.Message.Role)
@@ -46,7 +49,7 @@ func TestBuildSessionCreateRequestPreservesFileParts(t *testing.T) {
 			messages.NewFilePart("pkgs/droner/tui/tui.go"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "build", prompt)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -70,7 +73,7 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 			messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "build", prompt)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -88,7 +91,7 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 }
 
 func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
-	request := buildSessionCreateRequest("/tmp/repo", &messages.Message{
+	request := buildSessionCreateRequest("/tmp/repo", "plan", &messages.Message{
 		Role:  messages.MessageRoleUser,
 		Parts: []messages.MessagePart{messages.NewTextPart("  \n\t  ")},
 	})
@@ -102,7 +105,7 @@ func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
 }
 
 func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("first line\nsecond line\n")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -114,7 +117,7 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	if finalModel.cancelled {
 		t.Fatal("did not expect composer to cancel")
 	}
-	prompt, submitted, err := extractComposerResult(finalModel)
+	prompt, agentName, submitted, err := extractComposerResult(finalModel)
 	if err != nil {
 		t.Fatalf("unexpected error extracting result: %v", err)
 	}
@@ -123,6 +126,9 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	}
 	if prompt == nil {
 		t.Fatal("expected structured prompt message")
+	}
+	if agentName != "build" {
+		t.Fatalf("expected selected agent to be returned, got %q", agentName)
 	}
 	if prompt.Role != messages.MessageRoleUser {
 		t.Fatalf("expected user role, got %q", prompt.Role)
@@ -136,7 +142,7 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 }
 
 func TestSessionComposerAltEnterInsertsNewline(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
@@ -151,7 +157,7 @@ func TestSessionComposerAltEnterInsertsNewline(t *testing.T) {
 }
 
 func TestSessionComposerCtrlJFallbackInsertsNewline(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
@@ -166,7 +172,7 @@ func TestSessionComposerCtrlJFallbackInsertsNewline(t *testing.T) {
 }
 
 func TestSessionComposerEscCancels(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("alpha")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -178,7 +184,7 @@ func TestSessionComposerEscCancels(t *testing.T) {
 	if finalModel.submitted {
 		t.Fatal("did not expect cancelled composer to submit")
 	}
-	_, submitted, err := extractComposerResult(finalModel)
+	_, _, submitted, err := extractComposerResult(finalModel)
 	if err != nil {
 		t.Fatalf("unexpected error extracting cancelled result: %v", err)
 	}
@@ -188,7 +194,7 @@ func TestSessionComposerEscCancels(t *testing.T) {
 }
 
 func TestSessionComposerRejectsWhitespaceSubmit(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("  \n\t")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -304,7 +310,7 @@ func TestComposerPromptEditingInsideImageMarkerDropsStructuredToken(t *testing.T
 }
 
 func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
-	model := newSessionComposerModel("/tmp/repo", []string{"pkgs/droner/tui/tui.go", "README.md"})
+	model := newSessionComposerModel("/tmp/repo", []string{"pkgs/droner/tui/tui.go", "README.md"}, []string{"build", "plan"})
 	model.input.SetValue("inspect @pkgs/dr")
 	model.syncPromptFromInput()
 	model.refreshAutocomplete()
@@ -327,8 +333,36 @@ func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
 	}
 }
 
+func TestSessionComposerTabCyclesAgentWhenAutocompleteInactive(t *testing.T) {
+	model := newSessionComposerModel("", nil, []string{"build", "plan", "review"})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	finalModel := updated.(sessionComposerModel)
+
+	if got := finalModel.selectedAgentName(); got != "plan" {
+		t.Fatalf("selected agent = %q, want plan", got)
+	}
+}
+
+func TestSessionComposerViewShowsSelectedAgent(t *testing.T) {
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
+	model.ready = true
+	model.width = 80
+	model.height = 24
+	model.input.SetWidth(60)
+	model.selectedAgentIndex = 1
+
+	view := model.View()
+	if !strings.Contains(view, "Agent: plan") {
+		t.Fatalf("view = %q, want selected agent label", view)
+	}
+	if !strings.Contains(view, "Tab agent") {
+		t.Fatalf("view = %q, want tab help text", view)
+	}
+}
+
 func TestSessionComposerCtrlVPastesImageMarker(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.readClipboardImage = func() (clipboardImage, bool, error) {
 		return clipboardImage{Bytes: []byte("fake"), Mime: "image/png"}, true, nil
 	}
@@ -362,7 +396,7 @@ func TestSessionComposerCtrlVPastesImageMarker(t *testing.T) {
 }
 
 func TestSessionComposerCtrlVFallsBackToTextPasteWhenNoImage(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.readClipboardImage = func() (clipboardImage, bool, error) {
 		return clipboardImage{}, false, nil
 	}
@@ -386,7 +420,7 @@ func TestSessionComposerCtrlVFallsBackToTextPasteWhenNoImage(t *testing.T) {
 }
 
 func TestSessionComposerCtrlVShowsMessageWhenNoImageOrTextWasPasted(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.readClipboardImage = func() (clipboardImage, bool, error) {
 		return clipboardImage{}, false, nil
 	}
@@ -405,7 +439,7 @@ func TestSessionComposerCtrlVShowsMessageWhenNoImageOrTextWasPasted(t *testing.T
 }
 
 func TestSessionComposerViewShowsInlineImageFeedback(t *testing.T) {
-	model := newSessionComposerModel("", nil)
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.ready = true
 	model.width = 80
 	model.height = 24

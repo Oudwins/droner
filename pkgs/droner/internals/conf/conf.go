@@ -18,6 +18,7 @@ type Config struct {
 	Providers ProvidersConfig `json:"providers"`
 	Server    ServerConfig    `json:"server"`
 	Sessions  SessionsConfig  `json:"sessions"`
+	TUI       TUIConfig       `json:"tui" zog:"tui"`
 }
 
 type ProvidersConfig struct {
@@ -48,6 +49,7 @@ var ConfigSchema = z.Struct(z.Shape{
 	"Providers": providersSchema,
 	"Server":    serverSchema,
 	"Sessions":  SessionsConfigSchema,
+	"TUI":       TUIConfigSchema,
 })
 var config *Config
 
