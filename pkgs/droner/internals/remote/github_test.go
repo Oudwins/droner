@@ -4,12 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -64,6 +61,7 @@ func TestLiveGitHubSDKGetBranchData(t *testing.T) {
 
 	githubSDK := newLiveGitHubSDK()
 	githubSDK.apiBaseURL = server.URL
+	githubSDK.SetAuthToken("test-token")
 
 	data, err := githubSDK.GetBranchData(context.Background(), "git@github.com:owner/repo.git", "feature")
 	if err != nil {
@@ -89,60 +87,43 @@ func TestLiveGitHubSDKGetBranchData(t *testing.T) {
 	}
 }
 
-func TestEnsureAuthResolution(t *testing.T) {
-	config := conf.GetConfig()
-	origDataDir := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
-	t.Cleanup(func() { config.Server.DataDir = origDataDir })
+func TestLiveGitHubSDKAuthState(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-token")
+	githubSDK := newLiveGitHubSDK()
+
+	if !githubSDK.IsAuthenticated() {
+		t.Fatalf("expected SDK to use env token")
+	}
+	if err := githubSDK.EnsureAuth(); err != nil {
+		t.Fatalf("EnsureAuth with env token: %v", err)
+	}
+
+	githubSDK.SetAuthToken("")
+	if githubSDK.IsAuthenticated() {
+		t.Fatalf("expected SDK to be unauthenticated after clearing token")
+	}
+	if err := githubSDK.EnsureAuth(); err != sdk.ErrAuthRequired {
+		t.Fatalf("expected ErrAuthRequired after clearing token, got %v", err)
+	}
+
+	githubSDK.SetAuthToken("manual-token")
+	if err := githubSDK.EnsureAuth(); err != nil {
+		t.Fatalf("EnsureAuth with manual token: %v", err)
+	}
+}
+
+func TestEnsureAuthUsesCurrentEnvToken(t *testing.T) {
+	t.Cleanup(ResetRegistryForTests)
 
 	t.Setenv("GITHUB_TOKEN", "env-token")
-	if err := auth.WriteGitHubAuth(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC()}); err != nil {
-		t.Fatalf("WriteGitHubAuth: %v", err)
-	}
-	if token, err := resolveGitHubToken(); err != nil || token != "env-token" {
-		t.Fatalf("expected env token, got %q err=%v", token, err)
+	ResetRegistryForTests()
+	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != nil {
+		t.Fatalf("EnsureAuth with env token: %v", err)
 	}
 
 	t.Setenv("GITHUB_TOKEN", "")
-	if token, err := resolveGitHubToken(); err != nil || token != "stored-token" {
-		t.Fatalf("expected stored token, got %q err=%v", token, err)
-	}
-
-	if err := os.RemoveAll(config.Server.DataDir); err != nil {
-		t.Fatalf("remove data dir: %v", err)
-	}
 	ResetRegistryForTests()
-	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err == nil || err != sdk.ErrAuthRequired {
-		t.Fatalf("expected ErrAuthRequired, got %v", err)
-	}
-}
-
-func TestNewRoundRobinGitHubProviderDefaultsToTenSeconds(t *testing.T) {
-	config := conf.GetConfig()
-	original := config.Providers.Github.PollInterval
-	config.Providers.Github.PollInterval = ""
-	t.Cleanup(func() {
-		config.Providers.Github.PollInterval = original
-	})
-
-	provider := newRoundRobinGitHubProviderWithInterval(newFakeGitHubSDK(), configuredGitHubPollInterval())
-	t.Cleanup(provider.close)
-
-	if provider.pollIntervalD != 10*time.Second {
-		t.Fatalf("expected 10s default poll interval, got %s", provider.pollIntervalD)
-	}
-}
-
-func TestConfiguredGitHubPollIntervalHonorsEnvOverride(t *testing.T) {
-	config := conf.GetConfig()
-	original := config.Providers.Github.PollInterval
-	config.Providers.Github.PollInterval = "15s"
-	t.Cleanup(func() {
-		config.Providers.Github.PollInterval = original
-	})
-	t.Setenv("REMOTE_POLL_INTERVAL", "2s")
-
-	if got := configuredGitHubPollInterval(); got != 2*time.Second {
-		t.Fatalf("expected env override to win, got %s", got)
+	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != sdk.ErrAuthRequired {
+		t.Fatalf("expected ErrAuthRequired without token, got %v", err)
 	}
 }

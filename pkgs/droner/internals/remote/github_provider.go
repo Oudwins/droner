@@ -27,10 +27,14 @@ type githubBranchState struct {
 }
 
 func newGithubProvider(handler BranchEventHandler) provider {
+	return newGithubProviderDetailed(newLiveGitHubSDK(), handler, time.Duration(conf.GetConfig().Providers.Github.PollInterval))
+}
+
+func newGithubProviderDetailed(gh GitHubSDK, handler BranchEventHandler, interval time.Duration) *roundRobinGitHubProvider {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &roundRobinGitHubProvider{
-		githubSDK:     newLiveGitHubSDK(),
-		pollIntervalD: time.Duration(conf.GetConfig().Providers.Github.PollInterval),
+		githubSDK:     gh,
+		pollIntervalD: interval,
 		state:         make(map[subscriptionKey]githubBranchState),
 		subscriptions: make(map[subscriptionKey]struct{}),
 		stop:          cancel,
@@ -38,6 +42,7 @@ func newGithubProvider(handler BranchEventHandler) provider {
 	}
 	go p.run(ctx)
 	return p
+
 }
 
 func newRoundRobinGitHubProviderWithInterval(githubSDK GitHubSDK, interval time.Duration) *roundRobinGitHubProvider {
