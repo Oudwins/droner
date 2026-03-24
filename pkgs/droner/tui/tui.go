@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
@@ -20,43 +21,96 @@ import (
 
 const (
 	defaultPanelWidth     = 72
-	maxPanelWidth         = 88
+	maxPanelWidth         = 78
 	minPanelWidth         = 44
 	minRenderableWidth    = 24
-	composerTextareaRows  = 7
+	composerTextareaRows  = 4
 	validationEmptyPrompt = "Enter a prompt to create a session."
 )
 
 var (
-	appBackgroundColor      = lipgloss.Color("#111315")
-	panelBackgroundColor    = lipgloss.Color("#1B1F24")
-	textareaBackgroundColor = lipgloss.Color("#161A1F")
-	borderColor             = lipgloss.Color("#2E3944")
-	accentColor             = lipgloss.Color("#6EA8C8")
-	textColor               = lipgloss.Color("#E5E7EB")
-	mutedTextColor          = lipgloss.Color("#8B97A3")
-	errorTextColor          = lipgloss.Color("#D8A36B")
+	appBackgroundColor      = lipgloss.Color("#050505")
+	panelBackgroundColor    = lipgloss.Color("#1C1C1C")
+	sectionBackgroundColor  = lipgloss.Color("#101010")
+	textareaBackgroundColor = lipgloss.Color("#1F1F1F")
+	borderColor             = lipgloss.Color("#2D2D2D")
+	accentColor             = lipgloss.Color("#3B82F6")
+	accentStrongColor       = lipgloss.Color("#60A5FA")
+	textColor               = lipgloss.Color("#E7E5E4")
+	mutedTextColor          = lipgloss.Color("#8A8A8A")
+	logoMutedColor          = lipgloss.Color("#7A7A7A")
+	warningBackgroundColor  = lipgloss.Color("#231A0B")
+	errorTextColor          = lipgloss.Color("#FDBA74")
+	tipAccentColor          = lipgloss.Color("#F59E0B")
 
-	appStyle   = lipgloss.NewStyle().Background(appBackgroundColor).Foreground(textColor)
+	appStyle = lipgloss.NewStyle().
+			Background(appBackgroundColor).
+			Foreground(textColor)
 	panelStyle = lipgloss.NewStyle().
-			Background(panelBackgroundColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor).
-			Padding(1, 2)
-	titleStyle = lipgloss.NewStyle().
+			Padding(0, 0)
+	repoBadgeStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor)
+	brandMutedStyle = lipgloss.NewStyle().
+			Foreground(logoMutedColor).
+			Bold(true)
+	brandStyle = lipgloss.NewStyle().
 			Foreground(textColor).
 			Bold(true)
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(mutedTextColor)
+	sectionTitleStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor)
+	sectionShellStyle = lipgloss.NewStyle().
+				Background(sectionBackgroundColor).
+				Padding(0, 1)
+	inputCardStyle = lipgloss.NewStyle().
+			Padding(0, 0)
+	inputShellStyle = lipgloss.NewStyle().
+			Background(textareaBackgroundColor).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(accentColor).
+			BorderLeft(true).
+			BorderTop(false).
+			BorderRight(false).
+			BorderBottom(false).
+			Padding(0, 1, 0, 1)
+	inputMetaStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor).
+			Padding(0, 1)
 	helpStyle = lipgloss.NewStyle().
 			Foreground(mutedTextColor)
 	validationStyle = lipgloss.NewStyle().
-			Foreground(errorTextColor)
+			Foreground(errorTextColor).
+			Background(warningBackgroundColor).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(errorTextColor).
+			Padding(0, 1)
 	imageMarkerStyle = lipgloss.NewStyle().
 				Foreground(accentColor).
 				Bold(true)
+	promptGlyphStyle = lipgloss.NewStyle().
+				Foreground(accentColor)
 	attachmentLabelStyle = lipgloss.NewStyle().
 				Foreground(mutedTextColor)
+	agentChipStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor)
+	activeAgentChipStyle = lipgloss.NewStyle().
+				Foreground(accentStrongColor)
+	metaLabelStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor)
+	selectionStyle = lipgloss.NewStyle().
+			Foreground(textColor).
+			Background(sectionBackgroundColor).
+			Bold(true)
+	shortcutKeyStyle = lipgloss.NewStyle().
+				Foreground(textColor)
+	shortcutLabelStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor)
+	tipBulletStyle = lipgloss.NewStyle().
+			Foreground(tipAccentColor).
+			Bold(true)
+	tipLabelStyle = lipgloss.NewStyle().
+			Foreground(tipAccentColor)
 )
 
 type sessionComposerModel struct {
@@ -160,19 +214,25 @@ func extractComposerResult(model sessionComposerModel) (*messages.Message, strin
 
 func newSessionComposerModel(repoRoot string, fileCandidates []string, agentNames []string) sessionComposerModel {
 	focusedStyle, blurredStyle := textarea.DefaultStyles()
-	focusedStyle.Base = lipgloss.NewStyle().Background(textareaBackgroundColor).Foreground(textColor)
+	focusedStyle.Base = lipgloss.NewStyle().Foreground(textColor)
 	focusedStyle.Text = lipgloss.NewStyle().Foreground(textColor)
 	focusedStyle.Placeholder = lipgloss.NewStyle().Foreground(mutedTextColor)
 	focusedStyle.Prompt = lipgloss.NewStyle().Foreground(accentColor)
-	focusedStyle.CursorLine = lipgloss.NewStyle().Background(textareaBackgroundColor)
-	focusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(textareaBackgroundColor)
+	focusedStyle.CursorLine = lipgloss.NewStyle()
+	focusedStyle.EndOfBuffer = lipgloss.NewStyle()
 
 	blurredStyle = focusedStyle
 	blurredStyle.Prompt = lipgloss.NewStyle().Foreground(mutedTextColor)
 
 	input := textarea.New()
-	input.Prompt = "› "
-	input.Placeholder = "Describe what you want to do..."
+	input.Prompt = "  "
+	input.SetPromptFunc(2, func(lineIdx int) string {
+		if lineIdx == 0 {
+			return promptGlyphStyle.Render("›") + " "
+		}
+		return "  "
+	})
+	input.Placeholder = "Ask anything... \"Fix broken tests\""
 	input.ShowLineNumbers = false
 	input.CharLimit = 0
 	input.EndOfBufferCharacter = ' '
@@ -279,27 +339,19 @@ func (m sessionComposerModel) View() string {
 		panelInnerWidth = 1
 	}
 
-	titleBlock := lipgloss.JoinVertical(
-		lipgloss.Left,
-		titleStyle.Width(panelInnerWidth).Render("New Session"),
-		subtitleStyle.Width(panelInnerWidth).Render(fmt.Sprintf("Agent: %s", m.selectedAgentName())),
-	)
-
-	helpBlock := helpStyle.Width(panelInnerWidth).Render("Tab agent   @ file ref   Ctrl+V paste   Enter submit   Alt+Enter newline   Esc cancel")
-
-	sections := []string{titleBlock, m.renderInputView()}
+	sections := []string{m.headerView(panelInnerWidth), m.renderInputSection(panelInnerWidth)}
 	if attachmentView := m.imageAttachmentView(panelInnerWidth); attachmentView != "" {
 		sections = append(sections, attachmentView)
 	}
-	sections = append(sections, helpBlock)
 	if autocompleteView := m.autocompleteView(panelInnerWidth); autocompleteView != "" {
 		sections = append(sections, autocompleteView)
 	}
 	if m.validationMessage != "" {
 		sections = append(sections, validationStyle.Width(panelInnerWidth).Render(m.validationMessage))
 	}
+	sections = append(sections, m.helpView(panelInnerWidth), m.tipView(panelInnerWidth))
 
-	panel := panelStyle.Width(panelWidth).Render(lipgloss.JoinVertical(lipgloss.Left, sections...))
+	panel := panelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, sections...))
 	canvas := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return appStyle.Width(m.width).Height(m.height).Render(canvas)
 }
@@ -319,7 +371,7 @@ func (m *sessionComposerModel) syncLayout(width int, height int) {
 	if panelInnerWidth < 12 {
 		panelInnerWidth = 12
 	}
-	m.input.SetWidth(panelInnerWidth)
+	m.input.SetWidth(composerInputWidth(panelInnerWidth))
 	m.input.SetHeight(composerTextareaRows)
 	if width >= minRenderableWidth {
 		m.ready = true
@@ -461,12 +513,58 @@ func (m *sessionComposerModel) insertStructuredMarker(display string, part messa
 	m.prompt.AddStructuredPart(start, start+len([]rune(display)), display, part)
 }
 
+func (m sessionComposerModel) headerView(width int) string {
+	repoName := filepath.Base(strings.TrimSpace(m.repoRoot))
+	if repoName == "" || repoName == "." || repoName == string(filepath.Separator) {
+		repoName = "repo"
+	}
+	brand := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		brandMutedStyle.Render("D R O "),
+		brandStyle.Render("N E R"),
+	)
+	meta := subtitleStyle.Render(fmt.Sprintf("new session for %s", repoBadgeStyle.Render(repoName)))
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Bold(true).Render(brand),
+		lipgloss.NewStyle().Width(width).Align(lipgloss.Center).MarginBottom(1).Render(meta),
+	)
+}
+
+func (m sessionComposerModel) agentTabsView() string {
+	if len(m.agentNames) == 0 {
+		return helpStyle.Render("No agents configured")
+	}
+	chips := make([]string, 0, len(m.agentNames))
+	for i, agentName := range m.agentNames {
+		style := agentChipStyle
+		if i == m.selectedAgentIndex {
+			style = activeAgentChipStyle
+		}
+		chips = append(chips, style.Render(agentName))
+	}
+	return strings.Join(chips, "  ")
+}
+
 func (m sessionComposerModel) renderInputView() string {
 	view := m.input.View()
 	for _, token := range m.inlineImageTokens() {
 		view = strings.ReplaceAll(view, token.Display, imageMarkerStyle.Render(token.Display))
 	}
 	return view
+}
+
+func (m sessionComposerModel) renderInputSection(width int) string {
+	innerWidth := composerInputWidth(width)
+	inputBody := lipgloss.NewStyle().
+		Width(innerWidth).
+		Height(composerTextareaRows).
+		Render(m.renderInputView())
+	content := inputShellStyle.Width(width).Render(inputBody)
+	agentSummary := inputMetaStyle.Width(width).Render(metaLabelStyle.Render(fmt.Sprintf("Agent: %s", m.selectedAgentName())))
+	metaLine := lipgloss.JoinHorizontal(lipgloss.Left, m.agentTabsView(), "   ", subtitleStyle.Render("GPT-5.4 OpenAI"))
+	meta := inputMetaStyle.Width(width).Render(metaLine)
+	return inputCardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, content, agentSummary, meta))
 }
 
 func (m sessionComposerModel) imageAttachmentView(width int) string {
@@ -478,7 +576,12 @@ func (m sessionComposerModel) imageAttachmentView(width int) string {
 	for _, token := range tokens {
 		labels = append(labels, imageMarkerStyle.Render(token.Display))
 	}
-	return helpStyle.Width(width).Render(attachmentLabelStyle.Render("Images:") + " " + strings.Join(labels, "  "))
+	body := attachmentLabelStyle.Render("Images:") + " " + strings.Join(labels, "  ")
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		sectionTitleStyle.Width(width).Render("Attachments"),
+		sectionShellStyle.Width(width).Render(body),
+	)
 }
 
 func (m sessionComposerModel) inlineImageTokens() []structuredPromptToken {
@@ -508,20 +611,52 @@ func (m sessionComposerModel) autocompleteView(width int) string {
 		return ""
 	}
 	if len(m.autocompleteResults) == 0 {
-		return helpStyle.Width(width).Render("No matching files")
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			sectionTitleStyle.Width(width).Render("Files"),
+			sectionShellStyle.Width(width).Render(helpStyle.Render("No matching files")),
+		)
 	}
 	lines := make([]string, 0, len(m.autocompleteResults)+1)
-	lines = append(lines, helpStyle.Width(width).Render("Files"))
 	for i, result := range m.autocompleteResults {
 		prefix := "  "
 		style := helpStyle
 		if i == m.autocompleteIndex {
-			prefix = "- "
-			style = titleStyle.Foreground(accentColor)
+			prefix = "> "
+			style = selectionStyle
 		}
 		lines = append(lines, style.Width(width).Render(prefix+result))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		sectionTitleStyle.Width(width).Render("Files"),
+		sectionShellStyle.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...)),
+	)
+}
+
+func (m sessionComposerModel) helpView(width int) string {
+	items := []string{
+		shortcutKeyStyle.Render("Tab") + " " + shortcutLabelStyle.Render("agent"),
+		shortcutKeyStyle.Render("@") + " " + shortcutLabelStyle.Render("file ref"),
+		shortcutKeyStyle.Render("ctrl+v") + " " + shortcutLabelStyle.Render("paste"),
+		shortcutKeyStyle.Render("enter") + " " + shortcutLabelStyle.Render("submit"),
+		shortcutKeyStyle.Render("alt+enter") + " " + shortcutLabelStyle.Render("newline"),
+		shortcutKeyStyle.Render("esc") + " " + shortcutLabelStyle.Render("cancel"),
+	}
+	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(strings.Join(items, "   "))
+}
+
+func (m sessionComposerModel) tipView(width int) string {
+	content := tipBulletStyle.Render("•") + " " + tipLabelStyle.Render("Tip") + " " + helpStyle.Render("Press Ctrl+Alt+G or End to jump to the most recent message")
+	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(content)
+}
+
+func composerInputWidth(panelInnerWidth int) int {
+	width := panelInnerWidth - inputShellStyle.GetHorizontalFrameSize()
+	if width < 12 {
+		return 12
+	}
+	return width
 }
 
 func composerPanelWidth(totalWidth int) int {
@@ -529,12 +664,12 @@ func composerPanelWidth(totalWidth int) int {
 		return defaultPanelWidth
 	}
 
-	width := totalWidth - 10
+	width := totalWidth - 16
 	if width > maxPanelWidth {
 		width = maxPanelWidth
 	}
 	if width < minPanelWidth {
-		width = totalWidth - 4
+		width = totalWidth - 6
 	}
 	if width < 12 {
 		width = totalWidth
