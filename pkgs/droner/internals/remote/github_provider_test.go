@@ -60,7 +60,8 @@ func (s *fakeGitHubSDK) GetBranchData(ctx context.Context, remoteURL string, bra
 
 func TestRoundRobinGitHubProviderPollsSubscriptionsInOrder(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
-	provider := newRoundRobinGitHubProviderWithInterval(githubSDK, time.Hour)
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
 
 	first := subscriptionKey{remoteURL: "git@github.com:org/repo.git", branch: "one"}
@@ -90,7 +91,8 @@ func TestRoundRobinGitHubProviderPollsSubscriptionsInOrder(t *testing.T) {
 
 func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
-	provider := newRoundRobinGitHubProviderWithInterval(githubSDK, time.Hour)
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
 
 	key := subscriptionKey{remoteURL: "git@github.com:org/repo.git", branch: "feature"}
@@ -125,7 +127,8 @@ func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 
 func TestRoundRobinGitHubProviderDelegatesEnsureAuth(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
-	provider := newRoundRobinGitHubProviderWithInterval(githubSDK, time.Hour)
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
 
 	if err := provider.ensureAuth(context.Background(), "git@github.com:org/repo.git"); err != nil {
