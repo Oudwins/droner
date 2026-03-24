@@ -42,8 +42,6 @@ type subscriptionKey struct {
 
 // subscription represents an active subscription
 type subscription struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
 	handler BranchEventHandler
 }
 
@@ -61,8 +59,9 @@ func getRegistry() *registry {
 	once.Do(func() {
 		globalRegistry = &registry{
 			subscriptions: make(map[subscriptionKey]*subscription),
-			provider:      newGitHubProvider(),
 		}
+		provider := newGithubProvider(globalRegistry.dispatch)
+		globalRegistry.provider = provider
 	})
 	return globalRegistry
 }
@@ -75,26 +74,17 @@ func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName s
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	// If already subscribed, just update handler
 	if sub, exists := r.subscriptions[key]; exists {
 		sub.handler = handler
+		r.mu.Unlock()
 		return nil
 	}
 
-	// Create new subscription
-	subCtx, cancel := context.WithCancel(ctx)
-	sub := &subscription{
-		ctx:     subCtx,
-		cancel:  cancel,
-		handler: handler,
-	}
-
-	r.subscriptions[key] = sub
-
-	// Start polling in background
-	go r.pollLoop(subCtx, key)
+	r.subscriptions[key] = &subscription{handler: handler}
+	r.mu.Unlock()
+	r.provider.subscribe(key)
 
 	return nil
 }
@@ -103,43 +93,32 @@ func (r *registry) unsubscribe(ctx context.Context, remoteURL string, branchName
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if sub, exists := r.subscriptions[key]; exists {
-		sub.cancel()
+	_, exists := r.subscriptions[key]
+	if exists {
 		delete(r.subscriptions, key)
+	}
+	r.mu.Unlock()
+
+	if exists {
+		r.provider.unsubscribe(key)
 	}
 
 	return nil
 }
 
-func (r *registry) pollLoop(ctx context.Context, key subscriptionKey) {
-	ticker := time.NewTicker(r.provider.pollInterval())
-	defer ticker.Stop()
+func (r *registry) dispatch(event BranchEvent) {
+	key := subscriptionKey{remoteURL: event.RemoteURL, branch: event.Branch}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			events, err := r.provider.pollEvents(ctx, key.remoteURL, key.branch)
-			if err != nil {
-				// Log error but continue polling
-				continue
-			}
-			for _, event := range events {
-				r.mu.RLock()
-				sub := r.subscriptions[key]
-				if sub == nil {
-					r.mu.RUnlock()
-					return
-				}
-				h := sub.handler
-				r.mu.RUnlock()
-				h(event)
-			}
-		}
+	r.mu.RLock()
+	sub := r.subscriptions[key]
+	if sub == nil {
+		r.mu.RUnlock()
+		return
 	}
+	h := sub.handler
+	r.mu.RUnlock()
+
+	h(event)
 }
 
 // EnsureAuth validates provider auth for the remote URL.

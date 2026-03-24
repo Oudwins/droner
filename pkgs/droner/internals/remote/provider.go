@@ -2,12 +2,12 @@ package remote
 
 import (
 	"context"
-	"time"
 )
 
 // provider interface abstracts provider-specific implementations
 type provider interface {
-	pollEvents(ctx context.Context, remoteURL string, branchName string) ([]BranchEvent, error)
-	pollInterval() time.Duration
+	subscribe(key subscriptionKey)
+	unsubscribe(key subscriptionKey)
+	close()
 	ensureAuth(ctx context.Context, remoteURL string) error
 }

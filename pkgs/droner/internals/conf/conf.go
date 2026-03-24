@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/version"
 
@@ -26,7 +27,8 @@ type ProvidersConfig struct {
 }
 
 type GitHubConfig struct {
-	PollInterval string `json:"poll_interval"`
+	// Seconds
+	PollInterval int `json:"pollInterval"`
 }
 
 type ServerConfig struct {
@@ -34,7 +36,9 @@ type ServerConfig struct {
 }
 
 var gitHubSchema = z.Struct(z.Shape{
-	"PollInterval": z.String().Default("60"),
+	"PollInterval": z.Int().DefaultFunc(func() int {
+		return int(10 * time.Second)
+	}),
 })
 
 var providersSchema = z.Struct(z.Shape{
