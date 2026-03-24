@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,7 +11,8 @@ import (
 type fakeGitHubSDK struct {
 	mu            sync.Mutex
 	ensureErr     error
-	ensureCalls   []string
+	ensureCalls   int
+	authenticated bool
 	branchData    map[subscriptionKey][]GitHubBranchData
 	branchCalls   []subscriptionKey
 	branchDataErr error
@@ -23,8 +25,20 @@ func newFakeGitHubSDK() *fakeGitHubSDK {
 func (s *fakeGitHubSDK) EnsureAuth() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureCalls = append(s.ensureCalls, remoteURL)
+	s.ensureCalls++
 	return s.ensureErr
+}
+
+func (s *fakeGitHubSDK) IsAuthenticated() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authenticated
+}
+
+func (s *fakeGitHubSDK) SetAuthToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authenticated = strings.TrimSpace(token) != ""
 }
 
 func (s *fakeGitHubSDK) GetBranchData(ctx context.Context, remoteURL string, branch string) (GitHubBranchData, error) {
@@ -87,9 +101,9 @@ func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 	}
 
 	received := make(chan BranchEvent, 2)
-	provider.setEventHandler(func(event BranchEvent) {
+	provider.eventHandler = func(event BranchEvent) {
 		received <- event
-	})
+	}
 	provider.subscribe(key)
 
 	if err := provider.pollNext(context.Background()); err != nil {
@@ -120,7 +134,7 @@ func TestRoundRobinGitHubProviderDelegatesEnsureAuth(t *testing.T) {
 
 	githubSDK.mu.Lock()
 	defer githubSDK.mu.Unlock()
-	if len(githubSDK.ensureCalls) != 1 || githubSDK.ensureCalls[0] != "git@github.com:org/repo.git" {
+	if githubSDK.ensureCalls != 1 {
 		t.Fatalf("unexpected ensure auth calls: %#v", githubSDK.ensureCalls)
 	}
 }
