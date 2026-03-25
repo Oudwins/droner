@@ -329,7 +329,7 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 			Jobs:    []tasky.Job[Jobs]{createSessionJob, deleteSessionJob, completeSessionJob, nukeSessionsJob},
 			Backend: sqliteBackend,
 			OnError: func(err error, task *tasky.Task[Jobs], payload []byte) error {
-				base.Logger.Error("[QUEUE] Task failed to complete", slog.String("taskId", task.TaskID), slog.String("jobId", string(task.JobID)), slog.String("error", err.Error()))
+				logQueueTaskError(base.Logger, err, task)
 				return nil
 			},
 		},
@@ -337,4 +337,23 @@ func NewQueue(base *BaseServer) (*tasky.Queue[Jobs], error) {
 
 	assert.AssertNil(err, "[QUEUE] Failed to initialize")
 	return q, nil
+}
+
+func logQueueTaskError(logger *slog.Logger, err error, task *tasky.Task[Jobs]) {
+	if logger == nil || err == nil {
+		return
+	}
+
+	taskID := ""
+	jobID := ""
+	if task != nil {
+		taskID = task.TaskID
+		jobID = string(task.JobID)
+	}
+
+	logger.Error("[QUEUE] Task failed to complete",
+		slog.String("taskId", taskID),
+		slog.String("jobId", jobID),
+		slog.String("error", err.Error()),
+	)
 }
