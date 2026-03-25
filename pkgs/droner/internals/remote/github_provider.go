@@ -264,12 +264,8 @@ func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, curre
 }
 
 func initialGitHubBranchEvents(key subscriptionKey, current GitHubBranchData) []BranchEvent {
-	events := make([]BranchEvent, 0, 3)
+	events := make([]BranchEvent, 0, 2)
 	now := time.Now()
-
-	if !current.BranchExists {
-		events = append(events, BranchEvent{Type: BranchDeleted, RemoteURL: key.remoteURL, Branch: key.branch, Timestamp: now})
-	}
 
 	currentPR := current.PullRequest
 	if currentPR == nil {
