@@ -45,19 +45,6 @@ func newGithubProviderDetailed(gh GitHubSDK, handler BranchEventHandler, interva
 
 }
 
-func newRoundRobinGitHubProviderWithInterval(githubSDK GitHubSDK, interval time.Duration) *roundRobinGitHubProvider {
-	ctx, cancel := context.WithCancel(context.Background())
-	p := &roundRobinGitHubProvider{
-		githubSDK:     githubSDK,
-		pollIntervalD: interval,
-		state:         make(map[subscriptionKey]githubBranchState),
-		subscriptions: make(map[subscriptionKey]struct{}),
-		stop:          cancel,
-	}
-	go p.run(ctx)
-	return p
-}
-
 func (p *roundRobinGitHubProvider) ensureAuth(ctx context.Context, remoteURL string) error {
 	return p.githubSDK.EnsureAuth()
 }
@@ -117,6 +104,10 @@ func (p *roundRobinGitHubProvider) run(ctx context.Context) {
 }
 
 func (p *roundRobinGitHubProvider) pollNext(ctx context.Context) error {
+	if !p.githubSDK.IsAuthenticated() {
+		return nil
+	}
+
 	key, ok := p.nextSubscription()
 	if !ok {
 		return nil
