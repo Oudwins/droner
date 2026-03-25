@@ -234,3 +234,7 @@ just cli --help # build the CLI and run it
 just test       # run Go tests
 just build-all  # build both binaries into ./bin
 ```
+
+## Acknowledgements
+
+Huge thanks to everyone that inspired me to write this
