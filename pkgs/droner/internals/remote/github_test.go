@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
@@ -90,32 +88,18 @@ func TestLiveGitHubSDKGetBranchData(t *testing.T) {
 }
 
 func TestLiveGitHubSDKAuthState(t *testing.T) {
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
-	t.Cleanup(func() {
-		config.Server.DataDir = original
-	})
-
-	store, err := auth.Default()
-	if err != nil {
-		t.Fatalf("auth.Default: %v", err)
-	}
-	if err := store.SetGitHub(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}); err != nil {
-		t.Fatalf("SetGitHub: %v", err)
-	}
+	t.Setenv("GITHUB_TOKEN", "env-token")
 
 	githubSDK := newLiveGitHubSDK()
 
 	if !githubSDK.IsAuthenticated() {
-		t.Fatalf("expected SDK to use stored token")
+		t.Fatalf("expected SDK to use env token")
 	}
 	if err := githubSDK.EnsureAuth(); err != nil {
-		t.Fatalf("EnsureAuth with stored token: %v", err)
+		t.Fatalf("EnsureAuth with env token: %v", err)
 	}
 
 	githubSDK.SetAuthToken("")
-	config.Server.DataDir = t.TempDir()
 	if githubSDK.IsAuthenticated() {
 		t.Fatalf("expected SDK to be unauthenticated after clearing token")
 	}
@@ -131,27 +115,14 @@ func TestLiveGitHubSDKAuthState(t *testing.T) {
 
 func TestEnsureAuthUsesStoredToken(t *testing.T) {
 	t.Cleanup(ResetRegistryForTests)
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
-	t.Cleanup(func() {
-		config.Server.DataDir = original
-	})
-
-	store, err := auth.Default()
-	if err != nil {
-		t.Fatalf("auth.Default: %v", err)
-	}
-	if err := store.SetGitHub(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}); err != nil {
-		t.Fatalf("SetGitHub: %v", err)
-	}
+	t.Setenv("GITHUB_TOKEN", "env-token")
 
 	ResetRegistryForTests()
 	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != nil {
-		t.Fatalf("EnsureAuth with stored token: %v", err)
+		t.Fatalf("EnsureAuth with env token: %v", err)
 	}
 
-	config.Server.DataDir = t.TempDir()
+	t.Setenv("GITHUB_TOKEN", "")
 	ResetRegistryForTests()
 	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != sdk.ErrAuthRequired {
 		t.Fatalf("expected ErrAuthRequired without token, got %v", err)
@@ -160,12 +131,6 @@ func TestEnsureAuthUsesStoredToken(t *testing.T) {
 
 func TestEnsureAuthReturnsUnsupportedRemoteForUnknownProvider(t *testing.T) {
 	t.Cleanup(ResetRegistryForTests)
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
-	t.Cleanup(func() {
-		config.Server.DataDir = original
-	})
 	ResetRegistryForTests()
 
 	err := EnsureAuth(context.Background(), "git@example.com:owner/repo.git")
@@ -174,27 +139,14 @@ func TestEnsureAuthReturnsUnsupportedRemoteForUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestResolveGitHubTokenFallsBackToStoredAuth(t *testing.T) {
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
-	t.Cleanup(func() {
-		config.Server.DataDir = original
-	})
-
-	store, err := auth.Default()
-	if err != nil {
-		t.Fatalf("auth.Default: %v", err)
-	}
-	if err := store.SetGitHub(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}); err != nil {
-		t.Fatalf("SetGitHub: %v", err)
-	}
+func TestResolveGitHubTokenFallsBackToEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-token")
 
 	token, err := resolveGitHubToken()
 	if err != nil {
 		t.Fatalf("resolveGitHubToken: %v", err)
 	}
-	if token != "stored-token" {
-		t.Fatalf("token = %q, want %q", token, "stored-token")
+	if token != "env-token" {
+		t.Fatalf("token = %q, want %q", token, "env-token")
 	}
 }

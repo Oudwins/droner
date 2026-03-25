@@ -108,7 +108,6 @@ func newRootCmd() *cobra.Command {
 		newNukeCmd(),
 		newSessionsCmd(),
 		newTaskCmd(),
-		newAuthCmd(),
 	)
 
 	return cmd
@@ -349,23 +348,7 @@ func newSessionsCmd() *cobra.Command {
 				response, err = client.ListSessions(ctx)
 			}
 			if err != nil {
-				if errors.Is(err, sdk.ErrAuthRequired) {
-					if err := cliutil.RunGitHubAuthFlow(client); err != nil {
-						return err
-					}
-					ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
-					defer retryCancel()
-					if all {
-						response, err = client.ListSessionsAll(ctx)
-					} else {
-						response, err = client.ListSessions(ctx)
-					}
-					if err != nil {
-						return err
-					}
-				} else {
-					return err
-				}
+				return err
 			}
 			if len(response.Sessions) == 0 {
 				if all {
@@ -411,28 +394,6 @@ func newTaskCmd() *cobra.Command {
 
 	return cmd
 }
-
-func newAuthCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "auth <provider>",
-		Short: "Authenticate with a provider",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, inputs []string) error {
-			provider := inputs[0]
-			if provider != "github" {
-				return fmt.Errorf("unsupported auth provider: %s", provider)
-			}
-			client := sdk.NewClient()
-			if err := cliutil.EnsureDaemonRunning(client); err != nil {
-				return err
-			}
-			return cliutil.RunGitHubAuthFlow(client)
-		},
-	}
-
-	return cmd
-}
-
 func validateNewArgs(payload *NewArgs) error {
 	if issues := newArgsSchema.Validate(payload); len(issues) > 0 {
 		return fmt.Errorf("invalid arguments:\n%s", z.Issues.Prettify(issues))
@@ -475,19 +436,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	}
 	response, err := client.CreateSession(ctx, request)
 	if err != nil {
-		if errors.Is(err, sdk.ErrAuthRequired) {
-			if err := cliutil.RunGitHubAuthFlow(client); err != nil {
-				return err
-			}
-			ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.SecondDefault)
-			defer retryCancel()
-			response, err = client.CreateSession(ctx, request)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
 	cliutil.PrintSessionCreated(response)
 	if args.Wait {

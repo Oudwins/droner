@@ -19,7 +19,6 @@ import (
 
 type Server struct {
 	Base         *core.BaseServer
-	oauth        *oauthStateStore
 	httpServer   *http.Server
 	canceler     context.CancelFunc
 	consumer     *tasky.Consumer[core.Jobs]
@@ -36,7 +35,6 @@ func New() *Server {
 
 	return &Server{
 		Base:     base,
-		oauth:    newOAuthStateStore(),
 		canceler: func() {},
 	}
 }
