@@ -127,6 +127,39 @@ func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 	}
 }
 
+func TestRoundRobinGitHubProviderEmitsTerminalEventsFromInitialState(t *testing.T) {
+	githubSDK := newFakeGitHubSDK()
+	githubSDK.SetAuthToken("token")
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
+	defer provider.close()
+
+	key := subscriptionKey{remoteURL: "git@github.com:org/repo.git", branch: "feature"}
+	githubSDK.branchData[key] = []GitHubBranchData{{
+		BranchExists: false,
+		PullRequest:  &GitHubPullRequest{Number: 7, State: "closed"},
+	}}
+
+	received := make(chan BranchEvent, 2)
+	provider.eventHandler = func(event BranchEvent) {
+		received <- event
+	}
+	provider.subscribe(key)
+
+	if err := provider.pollNext(context.Background()); err != nil {
+		t.Fatalf("pollNext: %v", err)
+	}
+
+	firstEvent := <-received
+	secondEvent := <-received
+	if firstEvent.Type != BranchDeleted {
+		t.Fatalf("expected first event to be BranchDeleted, got %s", firstEvent.Type)
+	}
+	if secondEvent.Type != PRClosed {
+		t.Fatalf("expected second event to be PRClosed, got %s", secondEvent.Type)
+	}
+}
+
 func TestRoundRobinGitHubProviderDelegatesEnsureAuth(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
 	handler := func(e BranchEvent) {}

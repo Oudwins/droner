@@ -1,13 +1,16 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -405,5 +408,23 @@ func TestCompleteSessionTaskMarksCompletedAndKeepsWorktree(t *testing.T) {
 	}
 	if backend.removedWorktreePath != "" {
 		t.Fatalf("expected worktree to be kept, got removal %s", backend.removedWorktreePath)
+	}
+}
+
+func TestLogQueueTaskErrorHandlesNilTask(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+
+	logQueueTaskError(logger, errors.New("boom"), nil)
+
+	logged := output.String()
+	if !strings.Contains(logged, `"taskId":""`) {
+		t.Fatalf("expected empty taskId in log, got %q", logged)
+	}
+	if !strings.Contains(logged, `"jobId":""`) {
+		t.Fatalf("expected empty jobId in log, got %q", logged)
+	}
+	if !strings.Contains(logged, `"error":"boom"`) {
+		t.Fatalf("expected error in log, got %q", logged)
 	}
 }

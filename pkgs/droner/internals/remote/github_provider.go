@@ -225,7 +225,7 @@ func (p *roundRobinGitHubProvider) storeBranchData(key subscriptionKey, branchDa
 	p.mu.Unlock()
 
 	if !previous.initialized {
-		return nil
+		return initialGitHubBranchEvents(key, currentData)
 	}
 
 	return diffGitHubBranchState(key, previous.data, currentData)
@@ -258,6 +258,33 @@ func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, curre
 			number := currentPR.Number
 			events = append(events, BranchEvent{Type: PRMerged, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, Timestamp: now})
 		}
+	}
+
+	return events
+}
+
+func initialGitHubBranchEvents(key subscriptionKey, current GitHubBranchData) []BranchEvent {
+	events := make([]BranchEvent, 0, 3)
+	now := time.Now()
+
+	if !current.BranchExists {
+		events = append(events, BranchEvent{Type: BranchDeleted, RemoteURL: key.remoteURL, Branch: key.branch, Timestamp: now})
+	}
+
+	currentPR := current.PullRequest
+	if currentPR == nil {
+		return events
+	}
+
+	if currentPR.State == "closed" {
+		prState := currentPR.State
+		number := currentPR.Number
+		events = append(events, BranchEvent{Type: PRClosed, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, Timestamp: now})
+	}
+	if currentPR.MergedAt != nil {
+		prState := currentPR.State
+		number := currentPR.Number
+		events = append(events, BranchEvent{Type: PRMerged, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, Timestamp: now})
 	}
 
 	return events
