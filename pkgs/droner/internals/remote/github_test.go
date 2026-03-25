@@ -97,18 +97,25 @@ func TestLiveGitHubSDKAuthState(t *testing.T) {
 		config.Server.DataDir = original
 	})
 
-	t.Setenv("GITHUB_TOKEN", "env-token")
+	store, err := auth.Default()
+	if err != nil {
+		t.Fatalf("auth.Default: %v", err)
+	}
+	if err := store.SetGitHub(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}); err != nil {
+		t.Fatalf("SetGitHub: %v", err)
+	}
+
 	githubSDK := newLiveGitHubSDK()
 
 	if !githubSDK.IsAuthenticated() {
-		t.Fatalf("expected SDK to use env token")
+		t.Fatalf("expected SDK to use stored token")
 	}
 	if err := githubSDK.EnsureAuth(); err != nil {
-		t.Fatalf("EnsureAuth with env token: %v", err)
+		t.Fatalf("EnsureAuth with stored token: %v", err)
 	}
 
 	githubSDK.SetAuthToken("")
-	t.Setenv("GITHUB_TOKEN", "")
+	config.Server.DataDir = t.TempDir()
 	if githubSDK.IsAuthenticated() {
 		t.Fatalf("expected SDK to be unauthenticated after clearing token")
 	}
@@ -122,7 +129,7 @@ func TestLiveGitHubSDKAuthState(t *testing.T) {
 	}
 }
 
-func TestEnsureAuthUsesCurrentEnvToken(t *testing.T) {
+func TestEnsureAuthUsesStoredToken(t *testing.T) {
 	t.Cleanup(ResetRegistryForTests)
 	config := conf.GetConfig()
 	original := config.Server.DataDir
@@ -131,13 +138,20 @@ func TestEnsureAuthUsesCurrentEnvToken(t *testing.T) {
 		config.Server.DataDir = original
 	})
 
-	t.Setenv("GITHUB_TOKEN", "env-token")
-	ResetRegistryForTests()
-	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != nil {
-		t.Fatalf("EnsureAuth with env token: %v", err)
+	store, err := auth.Default()
+	if err != nil {
+		t.Fatalf("auth.Default: %v", err)
+	}
+	if err := store.SetGitHub(auth.GitHubAuth{AccessToken: "stored-token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}); err != nil {
+		t.Fatalf("SetGitHub: %v", err)
 	}
 
-	t.Setenv("GITHUB_TOKEN", "")
+	ResetRegistryForTests()
+	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != nil {
+		t.Fatalf("EnsureAuth with stored token: %v", err)
+	}
+
+	config.Server.DataDir = t.TempDir()
 	ResetRegistryForTests()
 	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != sdk.ErrAuthRequired {
 		t.Fatalf("expected ErrAuthRequired without token, got %v", err)
@@ -167,7 +181,6 @@ func TestResolveGitHubTokenFallsBackToStoredAuth(t *testing.T) {
 	t.Cleanup(func() {
 		config.Server.DataDir = original
 	})
-	t.Setenv("GITHUB_TOKEN", "")
 
 	store, err := auth.Default()
 	if err != nil {

@@ -52,10 +52,8 @@ type liveGitHubSDK struct {
 
 func newLiveGitHubSDK() *liveGitHubSDK {
 	var token string
-	if a, err := auth.Default(); err == nil {
-		if g, ok := a.GitHub(); ok {
-			token = g.AccessToken
-		}
+	if resolvedToken, err := resolveGitHubToken(); err == nil {
+		token = resolvedToken
 	}
 	return &liveGitHubSDK{
 		token:      token,
@@ -179,6 +177,21 @@ func (s *liveGitHubSDK) doGET(ctx context.Context, requestURL string) (int, []by
 	}
 
 	return resp.StatusCode, body, nil
+}
+
+func resolveGitHubToken() (string, error) {
+	store, err := auth.Default()
+	if err != nil {
+		return "", err
+	}
+
+	if githubAuth, ok := store.GitHub(); ok {
+		if token := strings.TrimSpace(githubAuth.AccessToken); token != "" {
+			return token, nil
+		}
+	}
+
+	return "", sdk.ErrAuthRequired
 }
 
 func isGitHubURL(remoteURL string) bool {
