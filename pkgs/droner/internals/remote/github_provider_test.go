@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+func expectEvent(t *testing.T, received <-chan BranchEvent) BranchEvent {
+	t.Helper()
+
+	select {
+	case event := <-received:
+		return event
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected event")
+		return BranchEvent{}
+	}
+}
+
+func expectNoEvent(t *testing.T, received <-chan BranchEvent) {
+	t.Helper()
+
+	select {
+	case event := <-received:
+		t.Fatalf("unexpected event: %s", event.Type)
+	default:
+	}
+}
+
 type fakeGitHubSDK struct {
 	mu            sync.Mutex
 	ensureErr     error
@@ -150,13 +172,64 @@ func TestRoundRobinGitHubProviderEmitsTerminalEventsFromInitialState(t *testing.
 		t.Fatalf("pollNext: %v", err)
 	}
 
-	firstEvent := <-received
-	secondEvent := <-received
-	if firstEvent.Type != BranchDeleted {
-		t.Fatalf("expected first event to be BranchDeleted, got %s", firstEvent.Type)
+	event := expectEvent(t, received)
+	if event.Type != PRClosed {
+		t.Fatalf("expected event to be PRClosed, got %s", event.Type)
 	}
-	if secondEvent.Type != PRClosed {
-		t.Fatalf("expected second event to be PRClosed, got %s", secondEvent.Type)
+	expectNoEvent(t, received)
+}
+
+func TestRoundRobinGitHubProviderDoesNotEmitBranchDeletedForInitialMissingBranch(t *testing.T) {
+	githubSDK := newFakeGitHubSDK()
+	githubSDK.SetAuthToken("token")
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
+	defer provider.close()
+
+	key := subscriptionKey{remoteURL: "git@github.com:org/repo.git", branch: "feature"}
+	githubSDK.branchData[key] = []GitHubBranchData{{BranchExists: false}}
+
+	received := make(chan BranchEvent, 1)
+	provider.eventHandler = func(event BranchEvent) {
+		received <- event
+	}
+	provider.subscribe(key)
+
+	if err := provider.pollNext(context.Background()); err != nil {
+		t.Fatalf("pollNext: %v", err)
+	}
+
+	expectNoEvent(t, received)
+}
+
+func TestRoundRobinGitHubProviderEmitsBranchDeletedAfterBranchWasPreviouslyObserved(t *testing.T) {
+	githubSDK := newFakeGitHubSDK()
+	githubSDK.SetAuthToken("token")
+	handler := func(e BranchEvent) {}
+	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
+	defer provider.close()
+
+	key := subscriptionKey{remoteURL: "git@github.com:org/repo.git", branch: "feature"}
+	githubSDK.branchData[key] = []GitHubBranchData{{BranchExists: true}, {BranchExists: false}}
+
+	received := make(chan BranchEvent, 1)
+	provider.eventHandler = func(event BranchEvent) {
+		received <- event
+	}
+	provider.subscribe(key)
+
+	if err := provider.pollNext(context.Background()); err != nil {
+		t.Fatalf("first pollNext: %v", err)
+	}
+	expectNoEvent(t, received)
+
+	if err := provider.pollNext(context.Background()); err != nil {
+		t.Fatalf("second pollNext: %v", err)
+	}
+
+	event := expectEvent(t, received)
+	if event.Type != BranchDeleted {
+		t.Fatalf("expected event to be BranchDeleted, got %s", event.Type)
 	}
 }
 
