@@ -69,7 +69,7 @@ func getRegistry() *registry {
 func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName string, handler BranchEventHandler) error {
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
 
-	if err := r.provider.ensureAuth(ctx, remoteURL); err != nil {
+	if err := r.provider.ensureAuth(); err != nil {
 		return err
 	}
 
@@ -123,7 +123,7 @@ func (r *registry) dispatch(event BranchEvent) {
 
 // EnsureAuth validates provider auth for the remote URL.
 func EnsureAuth(ctx context.Context, remoteURL string) error {
-	return getRegistry().provider.ensureAuth(ctx, remoteURL)
+	return getRegistry().provider.ensureAuth()
 }
 
 // SubscribeBranchEvents subscribes to branch/PR events for a given remote URL and branch
