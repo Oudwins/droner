@@ -1,148 +1,87 @@
-# droner
+# Droner
 
-Droner is a local session manager for running coding-agent work in isolated git worktrees.
-
-It runs a small daemon (`dronerd`) with an HTTP API, and a CLI (`droner`) to create/list/complete/delete sessions.
-When you create a session, Droner:
-
-- creates a git worktree (default under `~/.droner/worktrees/<repo>..<sessionId>`)
-- starts a `tmux` session rooted in that worktree (with `nvim`, an `opencode` window, and a terminal window)
-- optionally sends an initial prompt/message to the agent
-
-This project targets macOS and Linux (no Windows support).
-
-## Requirements
-
-- `git`
-- `tmux`
-- `nvim`
-- `opencode` (CLI) available on `PATH`
+## TODO
+- Need to support droner giving it an existing branch
 
 ## Installation
-
-Install the CLI + daemon with Go:
 
 ```bash
 GOPROXY=direct go install github.com/Oudwins/droner/pkgs/droner/droner@latest
 GOPROXY=direct go install github.com/Oudwins/droner/pkgs/droner/dronerd@latest
+
 ```
 
-## Usage
 
-Start the server:
+## Useful commands
+
 
 ```bash
-# background
-droner serve --detach
+# dev cli
+just cli *args
 
-# or foreground
-dronerd
+# help command
+droner help
+
+#
+
 ```
 
-Create a new session from inside a git repo:
-
 ```bash
-cd /path/to/repo
-droner new --id readme-demo --prompt "review the repo" --wait
-```
-
-List sessions:
-
-```bash
-droner sessions
-droner sessions --all
-```
-
-Complete (stop the runtime but keep the worktree for reuse) or delete:
-
-```bash
-droner complete readme-demo --wait
-droner del readme-demo --wait
-```
-
-If a command returns a `taskId`, you can poll it:
-
-```bash
-droner task <taskId>
-```
-
-## HTTP API
-
-Health/version:
-
-```bash
-curl -sS http://localhost:57876/version
-```
-
-Create a session:
-
-```bash
+# is server running
+curl -X GET http://localhost:57876/version
+# Create session (auto session_id):
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
-  -d '{
-    "path": "/home/you/projects/myrepo",
-    "sessionId": "readme-demo",
-    "agentConfig": {
-      "model": "openai/gpt-5.2-codex",
-      "message": {
-        "parts": [{"type": "text", "text": "review the repo"}]
-      }
-    }
-  }'
-```
-
-Complete or delete a session:
-
-```bash
-curl -sS -X POST http://localhost:57876/sessions/complete \
+  -d '{"path":"/home/tmx/projects/droner/"}'
+# Create session (explicit session_id):
+curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
-  -d '{"sessionId":"readme-demo"}'
-
+  -d '{"path":"/home/tmx/projects/droner/","session_id":"abc-12"}'
+# Create session with agent prompt/model:
+curl -sS -X POST http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/home/tmx/projects/droner/","agentConfig":{"model":"openai/gpt-5.2-codex","prompt":"review the repo"}}'
+# Delete session by path:
 curl -sS -X DELETE http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
-  -d '{"sessionId":"readme-demo"}'
+  -d '{"path":"/home/tmx/projects/droner/"}'
+# Delete session by session_id:
+curl -sS -X DELETE http://localhost:57876/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"abc-12"}'
 ```
 
-List sessions and check task status:
+## Cursor worktree setup
 
-```bash
-curl -sS http://localhost:57876/sessions
-curl -sS http://localhost:57876/tasks/<taskId>
+When using the local backend, droner will look for an optional repo-local config at `.cursor/worktrees.json` when creating a new session. If the file exists, droner runs each command in `setup-worktree` independently inside the new worktree before tmux and agent startup.
+
+Example:
+
+```json
+{
+  "setup-worktree": [
+    "nix develop",
+    "cp $ROOT_WORKTREE_PATH/README.md README_COPY.md"
+  ]
+}
 ```
 
-## Local development
+Available environment variables for each command:
 
-The Go module lives in `pkgs/droner`.
+- `ROOT_WORKTREE_PATH`: path to the root repo/worktree droner was started from
+- `WORKTREE_PATH`: path to the newly created session worktree
+- `SESSION_ID`: droner session id for the new worktree
 
-If you use `nix` + `direnv`:
+Notes:
 
-```bash
-direnv allow
-```
+- Commands run with `sh -lc` and use the new worktree as the working directory
+- Commands run independently, so environment changes from one command do not carry over to later commands
+- If any setup command fails, session creation fails
+- This is currently supported by the local backend only
 
-Run the server (kills anything on port `57876` first):
 
-```bash
-just dev
-```
 
-Build binaries into `./bin`:
 
-```bash
-just build-all
-```
 
-Run the CLI from source:
 
-```bash
-just cli --version
-just cli new --id dev-demo --prompt "hello" --wait
-```
 
-Run tests:
-
-```bash
-just test
-# or
-cd pkgs/droner && go test ./...
-```
