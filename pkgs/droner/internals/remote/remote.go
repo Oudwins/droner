@@ -19,7 +19,7 @@ const (
 	BranchDeleted BranchEventType = "branch_deleted"
 )
 
-var ErrAuthRequired = errors.New("github auth required")
+var ErrUnsupportedRemote = errors.New("unsupported remote provider")
 
 // BranchEvent represents a branch or PR lifecycle event
 type BranchEvent struct {
@@ -49,7 +49,7 @@ type subscription struct {
 type registry struct {
 	mu            sync.RWMutex
 	subscriptions map[subscriptionKey]*subscription
-	provider      provider
+	providers     []remoteProvider
 }
 
 var globalRegistry *registry
@@ -59,9 +59,9 @@ func getRegistry() *registry {
 	once.Do(func() {
 		globalRegistry = &registry{
 			subscriptions: make(map[subscriptionKey]*subscription),
+			providers:     []remoteProvider{},
 		}
-		provider := newGithubProvider(globalRegistry.dispatch)
-		globalRegistry.provider = provider
+		globalRegistry.providers = append(globalRegistry.providers, newGithubProvider(globalRegistry.dispatch))
 	})
 	return globalRegistry
 }
@@ -69,41 +69,34 @@ func getRegistry() *registry {
 func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName string, handler BranchEventHandler) error {
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
 
-	if err := r.provider.ensureAuth(); err != nil {
-		return err
-	}
+	if p, ok := r.providerForKey(key); ok {
+		if err := p.ensureAuth(); err != nil {
+			return err
+		}
 
-	r.mu.Lock()
-
-	// If already subscribed, just update handler
-	if sub, exists := r.subscriptions[key]; exists {
-		sub.handler = handler
+		r.mu.Lock()
+		r.subscriptions[key] = &subscription{handler: handler}
 		r.mu.Unlock()
+		p.subscribe(key)
+
 		return nil
 	}
 
-	r.subscriptions[key] = &subscription{handler: handler}
-	r.mu.Unlock()
-	r.provider.subscribe(key)
-
-	return nil
+	return ErrUnsupportedRemote
 }
 
 func (r *registry) unsubscribe(ctx context.Context, remoteURL string, branchName string) error {
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
 
 	r.mu.Lock()
-	_, exists := r.subscriptions[key]
-	if exists {
-		delete(r.subscriptions, key)
-	}
+	delete(r.subscriptions, key)
 	r.mu.Unlock()
 
-	if exists {
-		r.provider.unsubscribe(key)
+	if p, ok := r.providerForKey(key); ok {
+		p.unsubscribe(key)
+		return nil
 	}
-
-	return nil
+	return ErrUnsupportedRemote
 }
 
 func (r *registry) dispatch(event BranchEvent) {
@@ -121,9 +114,29 @@ func (r *registry) dispatch(event BranchEvent) {
 	h(event)
 }
 
+func (r *registry) providerForKey(key subscriptionKey) (remoteProvider, bool) {
+	for _, p := range r.providers {
+		if p.isValidKey(key) {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+func (r *registry) close() {
+	for _, p := range r.providers {
+		p.close()
+	}
+}
+
 // EnsureAuth validates provider auth for the remote URL.
 func EnsureAuth(ctx context.Context, remoteURL string) error {
-	return getRegistry().provider.ensureAuth()
+	_ = ctx
+	key := subscriptionKey{remoteURL: remoteURL}
+	if p, ok := getRegistry().providerForKey(key); ok {
+		return p.ensureAuth()
+	}
+	return ErrUnsupportedRemote
 }
 
 // SubscribeBranchEvents subscribes to branch/PR events for a given remote URL and branch

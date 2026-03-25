@@ -60,6 +60,7 @@ func (s *fakeGitHubSDK) GetBranchData(ctx context.Context, remoteURL string, bra
 
 func TestRoundRobinGitHubProviderPollsSubscriptionsInOrder(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
+	githubSDK.SetAuthToken("token")
 	handler := func(e BranchEvent) {}
 	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
@@ -91,6 +92,7 @@ func TestRoundRobinGitHubProviderPollsSubscriptionsInOrder(t *testing.T) {
 
 func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 	githubSDK := newFakeGitHubSDK()
+	githubSDK.SetAuthToken("token")
 	handler := func(e BranchEvent) {}
 	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
@@ -131,7 +133,7 @@ func TestRoundRobinGitHubProviderDelegatesEnsureAuth(t *testing.T) {
 	provider := newGithubProviderDetailed(githubSDK, handler, time.Hour)
 	defer provider.close()
 
-	if err := provider.ensureAuth(context.Background(), "git@github.com:org/repo.git"); err != nil {
+	if err := provider.ensureAuth(); err != nil {
 		t.Fatalf("ensureAuth: %v", err)
 	}
 

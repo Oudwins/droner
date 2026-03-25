@@ -1,7 +1,8 @@
 package remote
 
-// provider interface abstracts provider-specific implementations
-type provider interface {
+// remoteProvider abstracts provider-specific implementations.
+type remoteProvider interface {
+	isValidKey(key subscriptionKey) bool
 	subscribe(key subscriptionKey)
 	unsubscribe(key subscriptionKey)
 	close()

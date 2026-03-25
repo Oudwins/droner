@@ -247,7 +247,13 @@ func (s *Server) HandlerGitHubOAuthStatus(_ *slog.Logger, w http.ResponseWriter,
 
 	switch result.Status {
 	case oauthStatusComplete:
-		if err := auth.WriteGitHubAuth(auth.GitHubAuth{
+		store, err := auth.Default()
+		if err != nil {
+			s.oauth.mark(state, oauthStatusFailed, "failed_to_store_token")
+			RenderJSON(w, r, oauthStatusResponse{Status: string(oauthStatusFailed), Error: "failed_to_store_token"})
+			return
+		}
+		if err := store.SetGitHub(auth.GitHubAuth{
 			AccessToken: result.AccessToken,
 			TokenType:   result.TokenType,
 			Scope:       result.Scope,

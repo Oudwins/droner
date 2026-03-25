@@ -8,11 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
@@ -51,8 +51,14 @@ type liveGitHubSDK struct {
 }
 
 func newLiveGitHubSDK() *liveGitHubSDK {
+	var token string
+	if a, err := auth.Default(); err == nil {
+		if g, ok := a.GitHub(); ok {
+			token = g.AccessToken
+		}
+	}
 	return &liveGitHubSDK{
-		token:      os.Getenv("GITHUB_TOKEN"),
+		token:      token,
 		apiBaseURL: "https://api.github.com",
 		httpClient: &http.Client{Timeout: timeouts.SecondDefault},
 	}
@@ -81,8 +87,8 @@ func (s *liveGitHubSDK) GetBranchData(ctx context.Context, remoteURL string, bra
 	if !isGitHubURL(remoteURL) {
 		return GitHubBranchData{}, errors.New("Remote URL is not a github URL")
 	}
-	if !s.IsAuthenticated() {
-		return GitHubBranchData{}, sdk.ErrAuthRequired
+	if err := s.EnsureAuth(); err != nil {
+		return GitHubBranchData{}, err
 	}
 
 	owner, repo, err := parseGitHubURL(remoteURL)
