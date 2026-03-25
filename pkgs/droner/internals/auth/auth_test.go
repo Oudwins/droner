@@ -4,90 +4,82 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
-func withTempDataDir(t *testing.T) string {
-	t.Helper()
-	dataDir := t.TempDir()
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = dataDir
-	t.Cleanup(func() { config.Server.DataDir = original })
-	return dataDir
-}
+func TestNewMissingFileStartsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
 
-func TestReadGitHubAuthMissingFile(t *testing.T) {
-	withTempDataDir(t)
-
-	auth, ok, err := ReadGitHubAuth()
+	store, err := New(path)
 	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
+		t.Fatalf("New: %v", err)
 	}
-	if ok {
-		t.Fatalf("expected ok=false")
+
+	if got := store.Path(); got != path {
+		t.Fatalf("Path = %q, want %q", got, path)
 	}
-	if auth != nil {
-		t.Fatalf("expected nil auth")
+	if auth, ok := store.GitHub(); ok || auth != nil {
+		t.Fatalf("expected empty github auth, got ok=%v auth=%+v", ok, auth)
 	}
 }
 
-func TestReadGitHubAuthMalformedJSON(t *testing.T) {
-	withTempDataDir(t)
+func TestNewBlankFileStartsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(path, []byte(" \n\t "), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
-	path, err := authFilePath()
+	store, err := New(path)
 	if err != nil {
-		t.Fatalf("authFilePath: %v", err)
+		t.Fatalf("New: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
+
+	if auth, ok := store.GitHub(); ok || auth != nil {
+		t.Fatalf("expected empty github auth, got ok=%v auth=%+v", ok, auth)
 	}
+}
+
+func TestNewMalformedJSONReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
 	if err := os.WriteFile(path, []byte("{invalid"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, _, err = ReadGitHubAuth()
+	_, err := New(path)
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+	if !strings.Contains(err.Error(), "failed to parse auth file JSON") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
-func TestReadGitHubAuthMissingToken(t *testing.T) {
-	withTempDataDir(t)
-
-	path, err := authFilePath()
-	if err != nil {
-		t.Fatalf("authFilePath: %v", err)
-	}
-	payload := map[string]any{"github": map[string]any{"access_token": ""}}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+func TestNewRejectsInvalidGitHubAuth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	data := []byte(`{"github":{"access_token":"   "}}`)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+		t.Fatalf("WriteFile: %v", err)
 	}
 
-	auth, ok, err := ReadGitHubAuth()
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
+	_, err := New(path)
+	if err == nil {
+		t.Fatalf("expected error")
 	}
-	if ok {
-		t.Fatalf("expected ok=false")
-	}
-	if auth != nil {
-		t.Fatalf("expected nil auth")
+	if !strings.Contains(err.Error(), "failed to parse auth file") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestWriteGitHubAuthRoundTrip(t *testing.T) {
-	withTempDataDir(t)
+func TestSetGitHubRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	want := GitHubAuth{
 		AccessToken: "token",
@@ -95,41 +87,142 @@ func TestWriteGitHubAuthRoundTrip(t *testing.T) {
 		Scope:       "repo",
 		UpdatedAt:   time.Now().UTC().Truncate(time.Second),
 	}
-	if err := WriteGitHubAuth(want); err != nil {
-		t.Fatalf("WriteGitHubAuth: %v", err)
+	if err := store.SetGitHub(want); err != nil {
+		t.Fatalf("SetGitHub: %v", err)
 	}
 
-	got, ok, err := ReadGitHubAuth()
+	loaded, err := New(path)
 	if err != nil {
-		t.Fatalf("ReadGitHubAuth: %v", err)
+		t.Fatalf("New reload: %v", err)
 	}
-	if !ok {
-		t.Fatalf("expected ok=true")
+
+	got, ok := loaded.GitHub()
+	if !ok || got == nil {
+		t.Fatalf("expected github auth")
 	}
-	if got == nil {
-		t.Fatalf("expected auth")
+	assertGitHubAuth(t, got, want)
+}
+
+func TestSetGitHubUpdatesInMemoryState(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
-	if got.AccessToken != want.AccessToken || got.TokenType != want.TokenType || got.Scope != want.Scope {
-		t.Fatalf("unexpected auth: %+v", got)
+
+	want := GitHubAuth{AccessToken: "token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
+	if err := store.SetGitHub(want); err != nil {
+		t.Fatalf("SetGitHub: %v", err)
+	}
+
+	got, ok := store.GitHub()
+	if !ok || got == nil {
+		t.Fatalf("expected github auth")
+	}
+	assertGitHubAuth(t, got, want)
+}
+
+func TestSetGitHubFailedSaveKeepsInMemoryState(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	original := GitHubAuth{AccessToken: "first", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
+	if err := store.SetGitHub(original); err != nil {
+		t.Fatalf("SetGitHub original: %v", err)
+	}
+
+	store.path = t.TempDir()
+	err = store.SetGitHub(GitHubAuth{AccessToken: "second", UpdatedAt: time.Now().UTC().Truncate(time.Second)})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	got, ok := store.GitHub()
+	if !ok || got == nil {
+		t.Fatalf("expected github auth")
+	}
+	assertGitHubAuth(t, got, original)
+}
+
+func TestNewExpandsHomeInExplicitPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	store, err := New("~/nested/auth.json")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	want := filepath.Join(home, "nested", "auth.json")
+	if got := store.Path(); got != want {
+		t.Fatalf("Path = %q, want %q", got, want)
 	}
 }
 
-func TestAuthFilePathExpandsHome(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
+func TestDefaultUsesConfigDataDir(t *testing.T) {
 	config := conf.GetConfig()
 	original := config.Server.DataDir
-	config.Server.DataDir = "~/droner-test"
-	t.Cleanup(func() { config.Server.DataDir = original })
+	config.Server.DataDir = t.TempDir()
+	t.Cleanup(func() {
+		config.Server.DataDir = original
+	})
 
-	path, err := authFilePath()
+	store, err := Default()
 	if err != nil {
-		t.Fatalf("authFilePath: %v", err)
+		t.Fatalf("Default: %v", err)
 	}
 
-	expected := filepath.Join(tmp, "droner-test", "auth.json")
-	if path != expected {
-		t.Fatalf("expected %q, got %q", expected, path)
+	want := filepath.Join(config.Server.DataDir, "auth.json")
+	if got := store.Path(); got != want {
+		t.Fatalf("Path = %q, want %q", got, want)
+	}
+}
+
+func TestReloadPicksUpExternalFileChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	first := GitHubAuth{AccessToken: "first", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
+	if err := store.SetGitHub(first); err != nil {
+		t.Fatalf("SetGitHub first: %v", err)
+	}
+
+	replacement := File{GitHub: &GitHubAuth{AccessToken: "second", TokenType: "bearer", UpdatedAt: time.Now().UTC().Add(time.Minute).Truncate(time.Second)}}
+	data, err := json.MarshalIndent(replacement, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := store.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	got, ok := store.GitHub()
+	if !ok || got == nil {
+		t.Fatalf("expected github auth")
+	}
+	assertGitHubAuth(t, got, *replacement.GitHub)
+}
+
+func assertGitHubAuth(t *testing.T, got *GitHubAuth, want GitHubAuth) {
+	t.Helper()
+	if got.AccessToken != want.AccessToken {
+		t.Fatalf("AccessToken = %q, want %q", got.AccessToken, want.AccessToken)
+	}
+	if got.TokenType != want.TokenType {
+		t.Fatalf("TokenType = %q, want %q", got.TokenType, want.TokenType)
+	}
+	if got.Scope != want.Scope {
+		t.Fatalf("Scope = %q, want %q", got.Scope, want.Scope)
+	}
+	if !got.UpdatedAt.Equal(want.UpdatedAt) {
+		t.Fatalf("UpdatedAt = %s, want %s", got.UpdatedAt, want.UpdatedAt)
 	}
 }

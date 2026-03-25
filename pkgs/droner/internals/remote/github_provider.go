@@ -26,7 +26,7 @@ type githubBranchState struct {
 	data        GitHubBranchData
 }
 
-func newGithubProvider(handler BranchEventHandler) provider {
+func newGithubProvider(handler BranchEventHandler) remoteProvider {
 	return newGithubProviderDetailed(newLiveGitHubSDK(), handler, time.Duration(conf.GetConfig().Providers.Github.PollInterval))
 }
 
