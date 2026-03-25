@@ -45,7 +45,11 @@ func newGithubProviderDetailed(gh GitHubSDK, handler BranchEventHandler, interva
 
 }
 
-func (p *roundRobinGitHubProvider) ensureAuth(ctx context.Context, remoteURL string) error {
+func (p *roundRobinGitHubProvider) isValidKey(key subscriptionKey) bool {
+	return isGitHubURL(key.remoteURL)
+}
+
+func (p *roundRobinGitHubProvider) ensureAuth() error {
 	return p.githubSDK.EnsureAuth()
 }
 
