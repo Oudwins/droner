@@ -36,6 +36,8 @@ Or build from source:
 just build-all
 ```
 
+Inside `nix develop` (or when `.envrc` is loaded through direnv), `droner` is also available on `PATH` as a wrapper around `just cli`, so you can use the in-repo development build without installing it globally.
+
 ## Quick start
 
 Start the server:
@@ -230,6 +232,8 @@ Notes:
 
 ```bash
 just dev        # run the server on port 57876
+just cli *args  # build the CLI and run it with arguments
+droner help     # same as above inside nix develop / direnv
 just cli --help # build the CLI and run it
 just test       # run Go tests
 just build-all  # build both binaries into ./bin
