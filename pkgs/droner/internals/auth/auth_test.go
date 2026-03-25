@@ -1,171 +1,48 @@
 package auth
 
 import (
-	"encoding/json"
-	"os"
+	"errors"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
-func TestNewMissingFileStartsEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-
-	store, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	if got := store.Path(); got != path {
-		t.Fatalf("Path = %q, want %q", got, path)
-	}
-	if auth, ok := store.GitHub(); ok || auth != nil {
-		t.Fatalf("expected empty github auth, got ok=%v auth=%+v", ok, auth)
-	}
-}
-
-func TestNewBlankFileStartsEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(path, []byte(" \n\t "), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	store, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	if auth, ok := store.GitHub(); ok || auth != nil {
-		t.Fatalf("expected empty github auth, got ok=%v auth=%+v", ok, auth)
-	}
-}
-
-func TestNewMalformedJSONReturnsError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(path, []byte("{invalid"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	_, err := New(path)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if !strings.Contains(err.Error(), "failed to parse auth file JSON") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestNewRejectsInvalidGitHubAuth(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	data := []byte(`{"github":{"access_token":"   "}}`)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	_, err := New(path)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if !strings.Contains(err.Error(), "failed to parse auth file") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestSetGitHubRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	store, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	want := GitHubAuth{
-		AccessToken: "token",
-		TokenType:   "bearer",
-		Scope:       "repo",
-		UpdatedAt:   time.Now().UTC().Truncate(time.Second),
-	}
-	if err := store.SetGitHub(want); err != nil {
-		t.Fatalf("SetGitHub: %v", err)
-	}
-
-	loaded, err := New(path)
-	if err != nil {
-		t.Fatalf("New reload: %v", err)
-	}
-
-	got, ok := loaded.GitHub()
-	if !ok || got == nil {
-		t.Fatalf("expected github auth")
-	}
-	assertGitHubAuth(t, got, want)
-}
-
-func TestSetGitHubUpdatesInMemoryState(t *testing.T) {
+func TestNewReturnsStore(t *testing.T) {
 	store, err := New(filepath.Join(t.TempDir(), "auth.json"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-
-	want := GitHubAuth{AccessToken: "token", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
-	if err := store.SetGitHub(want); err != nil {
-		t.Fatalf("SetGitHub: %v", err)
+	if store == nil {
+		t.Fatalf("expected store")
 	}
-
-	got, ok := store.GitHub()
-	if !ok || got == nil {
-		t.Fatalf("expected github auth")
-	}
-	assertGitHubAuth(t, got, want)
 }
 
-func TestSetGitHubFailedSaveKeepsInMemoryState(t *testing.T) {
-	store, err := New(filepath.Join(t.TempDir(), "auth.json"))
+func TestDefaultReturnsStore(t *testing.T) {
+	store, err := Default()
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("Default: %v", err)
 	}
-
-	original := GitHubAuth{AccessToken: "first", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
-	if err := store.SetGitHub(original); err != nil {
-		t.Fatalf("SetGitHub original: %v", err)
-	}
-
-	store.path = t.TempDir()
-	err = store.SetGitHub(GitHubAuth{AccessToken: "second", UpdatedAt: time.Now().UTC().Truncate(time.Second)})
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-
-	got, ok := store.GitHub()
-	if !ok || got == nil {
-		t.Fatalf("expected github auth")
-	}
-	assertGitHubAuth(t, got, original)
-}
-
-func TestNewExpandsHomeInExplicitPath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	store, err := New("~/nested/auth.json")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	want := filepath.Join(home, "nested", "auth.json")
-	if got := store.Path(); got != want {
-		t.Fatalf("Path = %q, want %q", got, want)
+	if store == nil {
+		t.Fatalf("expected store")
 	}
 }
 
-func TestDefaultUsesConfigDataDir(t *testing.T) {
-	config := conf.GetConfig()
-	original := config.Server.DataDir
-	config.Server.DataDir = t.TempDir()
+func TestGitHubUsesEnvTokenFirst(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-token")
+
+	originalLookPath := lookPath
+	originalExecCommand := execCommand
+	lookPath = func(file string) (string, error) {
+		t.Fatalf("unexpected lookPath call for %q", file)
+		return "", nil
+	}
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Fatalf("unexpected execCommand call for %q", name)
+		return nil
+	}
 	t.Cleanup(func() {
-		config.Server.DataDir = original
+		lookPath = originalLookPath
+		execCommand = originalExecCommand
 	})
 
 	store, err := Default()
@@ -173,56 +50,105 @@ func TestDefaultUsesConfigDataDir(t *testing.T) {
 		t.Fatalf("Default: %v", err)
 	}
 
-	want := filepath.Join(config.Server.DataDir, "auth.json")
-	if got := store.Path(); got != want {
-		t.Fatalf("Path = %q, want %q", got, want)
-	}
-}
-
-func TestReloadPicksUpExternalFileChanges(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	store, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	first := GitHubAuth{AccessToken: "first", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
-	if err := store.SetGitHub(first); err != nil {
-		t.Fatalf("SetGitHub first: %v", err)
-	}
-
-	replacement := File{GitHub: &GitHubAuth{AccessToken: "second", TokenType: "bearer", UpdatedAt: time.Now().UTC().Add(time.Minute).Truncate(time.Second)}}
-	data, err := json.MarshalIndent(replacement, "", "  ")
-	if err != nil {
-		t.Fatalf("MarshalIndent: %v", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	if err := store.Reload(); err != nil {
-		t.Fatalf("Reload: %v", err)
-	}
-
-	got, ok := store.GitHub()
-	if !ok || got == nil {
+	githubAuth, ok := store.GitHub()
+	if !ok || githubAuth == nil {
 		t.Fatalf("expected github auth")
 	}
-	assertGitHubAuth(t, got, *replacement.GitHub)
+	if githubAuth.AccessToken != "env-token" {
+		t.Fatalf("AccessToken = %q, want %q", githubAuth.AccessToken, "env-token")
+	}
 }
 
-func assertGitHubAuth(t *testing.T, got *GitHubAuth, want GitHubAuth) {
-	t.Helper()
-	if got.AccessToken != want.AccessToken {
-		t.Fatalf("AccessToken = %q, want %q", got.AccessToken, want.AccessToken)
+func TestGitHubFallsBackToGhAuthToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	originalLookPath := lookPath
+	originalExecCommand := execCommand
+	lookPath = func(file string) (string, error) {
+		if file != "gh" {
+			t.Fatalf("lookPath file = %q, want %q", file, "gh")
+		}
+		return "/usr/bin/gh", nil
 	}
-	if got.TokenType != want.TokenType {
-		t.Fatalf("TokenType = %q, want %q", got.TokenType, want.TokenType)
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "gh" {
+			t.Fatalf("command name = %q, want %q", name, "gh")
+		}
+		if len(args) != 2 || args[0] != "auth" || args[1] != "token" {
+			t.Fatalf("command args = %q, want [auth token]", args)
+		}
+		return exec.Command("sh", "-c", "printf 'gh-token\n'")
 	}
-	if got.Scope != want.Scope {
-		t.Fatalf("Scope = %q, want %q", got.Scope, want.Scope)
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		execCommand = originalExecCommand
+	})
+
+	store, err := Default()
+	if err != nil {
+		t.Fatalf("Default: %v", err)
 	}
-	if !got.UpdatedAt.Equal(want.UpdatedAt) {
-		t.Fatalf("UpdatedAt = %s, want %s", got.UpdatedAt, want.UpdatedAt)
+
+	githubAuth, ok := store.GitHub()
+	if !ok || githubAuth == nil {
+		t.Fatalf("expected github auth")
+	}
+	if githubAuth.AccessToken != "gh-token" {
+		t.Fatalf("AccessToken = %q, want %q", githubAuth.AccessToken, "gh-token")
+	}
+}
+
+func TestGitHubReturnsEmptyWhenGhMissing(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	originalLookPath := lookPath
+	originalExecCommand := execCommand
+	lookPath = func(file string) (string, error) {
+		return "", errors.New("missing")
+	}
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Fatalf("unexpected execCommand call for %q", name)
+		return nil
+	}
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		execCommand = originalExecCommand
+	})
+
+	store, err := Default()
+	if err != nil {
+		t.Fatalf("Default: %v", err)
+	}
+
+	githubAuth, ok := store.GitHub()
+	if ok || githubAuth != nil {
+		t.Fatalf("expected no github auth, got ok=%v auth=%+v", ok, githubAuth)
+	}
+}
+
+func TestGitHubReturnsEmptyWhenGhAuthTokenFails(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	originalLookPath := lookPath
+	originalExecCommand := execCommand
+	lookPath = func(file string) (string, error) {
+		return "/usr/bin/gh", nil
+	}
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "exit 1")
+	}
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		execCommand = originalExecCommand
+	})
+
+	store, err := Default()
+	if err != nil {
+		t.Fatalf("Default: %v", err)
+	}
+
+	githubAuth, ok := store.GitHub()
+	if ok || githubAuth != nil {
+		t.Fatalf("expected no github auth, got ok=%v auth=%+v", ok, githubAuth)
 	}
 }

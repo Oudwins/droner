@@ -12,10 +12,6 @@ func (s *Server) Router() http.Handler {
 		r.Get("/version", HandlerWithLogger(s.HandlerVersion))
 		r.Post("/shutdown", HandlerWithLogger(s.HandlerShutdown))
 	})
-	r.Group(func(r chi.Router) {
-		r.Get("/oauth/github/start", HandlerWithLogger(s.HandlerGitHubOAuthStart))
-		r.Get("/oauth/github/status", HandlerWithLogger(s.HandlerGitHubOAuthStatus))
-	})
 
 	r.Group(func(r chi.Router) {
 		r.Get("/sessions", HandlerWithLogger(s.HandlerListSessions))

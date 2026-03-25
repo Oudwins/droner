@@ -7,13 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/desktop"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
@@ -167,87 +164,6 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	}
 	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
 		t.Fatalf("unexpected complete output: %s", output)
-	}
-}
-
-func TestCLIAuthFlow(t *testing.T) {
-	originalExec := desktop.ExecCommand
-	originalGOOS := desktop.RuntimeGOOS
-	desktop.ExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("sh", "-c", "true")
-	}
-	desktop.RuntimeGOOS = "linux"
-	t.Cleanup(func() {
-		desktop.ExecCommand = originalExec
-		desktop.RuntimeGOOS = originalGOOS
-	})
-
-	completeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/version":
-			_, _ = w.Write([]byte("test-version"))
-		case "/oauth/github/start":
-			_ = json.NewEncoder(w).Encode(map[string]any{"state": "state1", "verification_uri": "https://example.com", "expires_in": 30, "interval": 1})
-		case "/oauth/github/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "complete"})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer completeServer.Close()
-	setupCLIEnv(t, completeServer.URL)
-
-	if _, err := captureOutput(t, func() error {
-		return executeCLI([]string{"auth", "github"})
-	}); err != nil {
-		t.Fatalf("expected auth to succeed: %v", err)
-	}
-
-	failedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/version":
-			_, _ = w.Write([]byte("test-version"))
-		case "/oauth/github/start":
-			_ = json.NewEncoder(w).Encode(map[string]any{"state": "state2", "verification_uri": "https://example.com", "expires_in": 30, "interval": 1})
-		case "/oauth/github/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "failed", "error": "denied"})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer failedServer.Close()
-	setupCLIEnv(t, failedServer.URL)
-
-	if _, err := captureOutput(t, func() error {
-		return executeCLI([]string{"auth", "github"})
-	}); err == nil {
-		t.Fatalf("expected auth to fail")
-	}
-
-	timeoutServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/version":
-			_, _ = w.Write([]byte("test-version"))
-		case "/oauth/github/start":
-			_ = json.NewEncoder(w).Encode(map[string]any{"state": "state3", "verification_uri": "https://example.com", "expires_in": 1, "interval": 1})
-		case "/oauth/github/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer timeoutServer.Close()
-	setupCLIEnv(t, timeoutServer.URL)
-
-	start := time.Now()
-	_, err := captureOutput(t, func() error {
-		return executeCLI([]string{"auth", "github"})
-	})
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("expected timeout error, got %v", err)
-	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatalf("timeout test took too long")
 	}
 }
 

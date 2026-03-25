@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -161,19 +160,7 @@ func Run(client *sdk.Client) error {
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
 	if err != nil {
-		if errors.Is(err, sdk.ErrAuthRequired) {
-			if err := cliutil.RunGitHubAuthFlow(client); err != nil {
-				return err
-			}
-			ctx, retryCancel := context.WithTimeout(context.Background(), timeouts.SecondDefault)
-			defer retryCancel()
-			response, err = client.CreateSession(ctx, request)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
 	cliutil.PrintSessionCreated(response)
 	return nil
