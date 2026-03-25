@@ -18,6 +18,7 @@
 ## Environment setup
 - `direnv` is used; `.envrc` calls `use flake`.
 - `flake.nix` provides Go, gopls, git, just, sqlc, and psmisc.
+- Inside the flake dev shell, `droner` is provided as a wrapper for `just cli` so repo-local CLI changes can be used without a global install.
 - Optional env vars can be set in `.env` (loaded by justfile).
 
 ## Build and run
@@ -124,4 +125,3 @@
 - `just dev` starts the server and frees port 57876.
 - `go test ./pkgs/droner/...` should pass before PRs.
 - `gofmt -w` should produce no diffs on committed Go files.
-
