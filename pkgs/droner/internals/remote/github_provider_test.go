@@ -55,7 +55,7 @@ func (s *fakeGitHubSDK) GetBranchData(ctx context.Context, remoteURL string, bra
 	}
 	response := responses[0]
 	s.branchData[key] = responses[1:]
-	return cloneGitHubBranchData(response), nil
+	return response, nil
 }
 
 func TestRoundRobinGitHubProviderPollsSubscriptionsInOrder(t *testing.T) {

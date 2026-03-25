@@ -68,6 +68,8 @@ func (p *roundRobinGitHubProvider) unsubscribe(key subscriptionKey) {
 
 	delete(p.subscriptions, key)
 	delete(p.state, key)
+
+	// TODO this is nasty maybe we can do something different
 	for i, candidate := range p.order {
 		if candidate != key {
 			continue
@@ -152,7 +154,7 @@ func (p *roundRobinGitHubProvider) pollSubscription(ctx context.Context, key sub
 }
 
 func (p *roundRobinGitHubProvider) storeBranchData(key subscriptionKey, branchData GitHubBranchData) []BranchEvent {
-	currentData := cloneGitHubBranchData(branchData)
+	currentData := branchData
 	current := githubBranchState{initialized: true, data: currentData}
 
 	p.mu.Lock()
@@ -201,13 +203,4 @@ func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, curre
 	}
 
 	return events
-}
-
-func cloneGitHubBranchData(branchData GitHubBranchData) GitHubBranchData {
-	clone := branchData
-	if branchData.PullRequest != nil {
-		pr := *branchData.PullRequest
-		clone.PullRequest = &pr
-	}
-	return clone
 }
