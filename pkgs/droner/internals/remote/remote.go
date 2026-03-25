@@ -67,49 +67,104 @@ func getRegistry() *registry {
 }
 
 func (r *registry) subscribe(ctx context.Context, remoteURL string, branchName string, handler BranchEventHandler) error {
+	_ = ctx
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
+	logger := remoteLogger()
+	logger.Debug("subscribe requested",
+		"remote_url", remoteURL,
+		"branch", branchName,
+	)
 
 	if p, ok := r.providerForKey(key); ok {
 		if err := p.ensureAuth(); err != nil {
+			logger.Debug("subscribe failed auth",
+				"remote_url", remoteURL,
+				"branch", branchName,
+				"error", err,
+			)
 			return err
 		}
 
 		r.mu.Lock()
 		r.subscriptions[key] = &subscription{handler: handler}
 		r.mu.Unlock()
+		logger.Debug("subscription stored",
+			"remote_url", remoteURL,
+			"branch", branchName,
+		)
 		p.subscribe(key)
+		logger.Debug("provider subscribed",
+			"remote_url", remoteURL,
+			"branch", branchName,
+		)
 
 		return nil
 	}
 
+	logger.Debug("subscribe unsupported",
+		"remote_url", remoteURL,
+		"branch", branchName,
+	)
 	return ErrUnsupportedRemote
 }
 
 func (r *registry) unsubscribe(ctx context.Context, remoteURL string, branchName string) error {
+	_ = ctx
 	key := subscriptionKey{remoteURL: remoteURL, branch: branchName}
+	logger := remoteLogger()
+	logger.Debug("unsubscribe requested",
+		"remote_url", remoteURL,
+		"branch", branchName,
+	)
 
 	r.mu.Lock()
 	delete(r.subscriptions, key)
 	r.mu.Unlock()
+	logger.Debug("subscription removed",
+		"remote_url", remoteURL,
+		"branch", branchName,
+	)
 
 	if p, ok := r.providerForKey(key); ok {
 		p.unsubscribe(key)
+		logger.Debug("provider unsubscribed",
+			"remote_url", remoteURL,
+			"branch", branchName,
+		)
 		return nil
 	}
+	logger.Debug("unsubscribe unsupported",
+		"remote_url", remoteURL,
+		"branch", branchName,
+	)
 	return ErrUnsupportedRemote
 }
 
 func (r *registry) dispatch(event BranchEvent) {
 	key := subscriptionKey{remoteURL: event.RemoteURL, branch: event.Branch}
+	logger := remoteLogger()
 
 	r.mu.RLock()
 	sub := r.subscriptions[key]
 	if sub == nil {
 		r.mu.RUnlock()
+		logger.Debug("event dropped without subscription",
+			"event_type", event.Type,
+			"remote_url", event.RemoteURL,
+			"branch", event.Branch,
+			"pr_number", event.PRNumber,
+		)
 		return
 	}
 	h := sub.handler
 	r.mu.RUnlock()
+
+	logger.Debug("event dispatched",
+		"event_type", event.Type,
+		"remote_url", event.RemoteURL,
+		"branch", event.Branch,
+		"pr_number", event.PRNumber,
+	)
 
 	h(event)
 }

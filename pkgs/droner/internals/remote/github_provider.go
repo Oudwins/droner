@@ -54,19 +54,34 @@ func (p *roundRobinGitHubProvider) ensureAuth() error {
 }
 
 func (p *roundRobinGitHubProvider) subscribe(key subscriptionKey) {
+	logger := githubProviderLogger()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, exists := p.subscriptions[key]; exists {
+		logger.Debug("subscription already active",
+			"remote_url", key.remoteURL,
+			"branch", key.branch,
+		)
 		return
 	}
 	p.subscriptions[key] = struct{}{}
 	p.order = append(p.order, key)
+	logger.Debug("subscription registered",
+		"remote_url", key.remoteURL,
+		"branch", key.branch,
+		"subscription_count", len(p.order),
+	)
 }
 
 func (p *roundRobinGitHubProvider) unsubscribe(key subscriptionKey) {
+	logger := githubProviderLogger()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, exists := p.subscriptions[key]; !exists {
+		logger.Debug("subscription already absent",
+			"remote_url", key.remoteURL,
+			"branch", key.branch,
+		)
 		return
 	}
 
@@ -87,6 +102,11 @@ func (p *roundRobinGitHubProvider) unsubscribe(key subscriptionKey) {
 		}
 		break
 	}
+	logger.Debug("subscription removed",
+		"remote_url", key.remoteURL,
+		"branch", key.branch,
+		"subscription_count", len(p.order),
+	)
 }
 
 func (p *roundRobinGitHubProvider) close() {
@@ -110,14 +130,21 @@ func (p *roundRobinGitHubProvider) run(ctx context.Context) {
 }
 
 func (p *roundRobinGitHubProvider) pollNext(ctx context.Context) error {
+	logger := githubProviderLogger()
 	if !p.githubSDK.IsAuthenticated() {
+		logger.Debug("poll skipped unauthenticated")
 		return nil
 	}
 
 	key, ok := p.nextSubscription()
 	if !ok {
+		logger.Debug("poll skipped no subscriptions")
 		return nil
 	}
+	logger.Debug("poll starting",
+		"remote_url", key.remoteURL,
+		"branch", key.branch,
+	)
 	return p.pollSubscription(ctx, key)
 }
 
@@ -136,22 +163,49 @@ func (p *roundRobinGitHubProvider) nextSubscription() (subscriptionKey, bool) {
 }
 
 func (p *roundRobinGitHubProvider) pollSubscription(ctx context.Context, key subscriptionKey) error {
+	logger := githubProviderLogger()
 	if !isGitHubURL(key.remoteURL) {
+		logger.Debug("poll skipped invalid url",
+			"remote_url", key.remoteURL,
+			"branch", key.branch,
+		)
 		return nil
 	}
 
 	branchData, err := p.githubSDK.GetBranchData(ctx, key.remoteURL, key.branch)
 	if err != nil {
+		logger.Debug("poll failed",
+			"remote_url", key.remoteURL,
+			"branch", key.branch,
+			"error", err,
+		)
 		return err
 	}
+	logger.Debug("poll completed",
+		"remote_url", key.remoteURL,
+		"branch", key.branch,
+		"branch_exists", branchData.BranchExists,
+		"has_pull_request", branchData.PullRequest != nil,
+	)
 
 	events := p.storeBranchData(key, branchData)
 	handler := p.currentEventHandler()
 	if handler == nil {
+		logger.Debug("poll has no handler",
+			"remote_url", key.remoteURL,
+			"branch", key.branch,
+			"event_count", len(events),
+		)
 		return nil
 	}
 
 	for _, event := range events {
+		logger.Debug("emitting event",
+			"event_type", event.Type,
+			"remote_url", event.RemoteURL,
+			"branch", event.Branch,
+			"pr_number", event.PRNumber,
+		)
 		handler(event)
 	}
 	return nil
