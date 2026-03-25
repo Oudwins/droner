@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
@@ -44,6 +45,7 @@ type GitHubSDK interface {
 
 type liveGitHubSDK struct {
 	token      string
+	mu         sync.RWMutex
 	apiBaseURL string
 	httpClient *http.Client
 }
@@ -57,10 +59,14 @@ func newLiveGitHubSDK() *liveGitHubSDK {
 }
 
 func (s *liveGitHubSDK) SetAuthToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.token = strings.TrimSpace(token)
 }
 
 func (s *liveGitHubSDK) IsAuthenticated() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.token != ""
 }
 
@@ -150,9 +156,10 @@ func (s *liveGitHubSDK) doGET(ctx context.Context, requestURL string) (int, []by
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "droner")
-	if strings.TrimSpace(s.token) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.token))
-	}
+
+	s.mu.RLock()
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.token))
+	s.mu.RUnlock()
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
