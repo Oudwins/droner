@@ -151,15 +151,19 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
 		return err
 	}
-	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
-	if err != nil {
-		return err
+	opencodeSessionID := ""
+	var err error
+	if opencodeMessageHasContent(agentConfig.Message) {
+		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
+		if err != nil {
+			return err
+		}
 	}
 	agentConfig.Opencode = opencodeConfig
 	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
-	if agentConfig.Message != nil && len(agentConfig.Message.Parts) > 0 {
+	if opencodeMessageHasContent(agentConfig.Message) {
 		cfg := opencodeConfig
 		session := opencodeSessionID
 		dir := worktreePath
@@ -302,12 +306,33 @@ func (l LocalBackend) createTmuxBaseSession(sessionName string, worktreePath str
 
 func (l LocalBackend) createTmuxOpencodeWindow(sessionName string, worktreePath string, agentConfig AgentConfig, opencodeSessionID string) error {
 	opencodeURL := fmt.Sprintf("http://%s:%d", agentConfig.Opencode.Hostname, agentConfig.Opencode.Port)
-	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL, "--session", opencodeSessionID, "--dir", worktreePath}
+	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL}
+	if strings.TrimSpace(opencodeSessionID) != "" {
+		opencodeArgs = append(opencodeArgs, "--session", opencodeSessionID)
+	}
+	opencodeArgs = append(opencodeArgs, "--dir", worktreePath)
 	newOpencode := execCommand("tmux", opencodeArgs...)
 	if output, err := newOpencode.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func opencodeMessageHasContent(message *messages.Message) bool {
+	if message == nil || len(message.Parts) == 0 {
+		return false
+	}
+	for _, part := range message.Parts {
+		switch part.Type {
+		case messages.PartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (l LocalBackend) createTmuxTerminalWindow(sessionName string, worktreePath string) error {
@@ -335,9 +360,13 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 		return err
 	}
 
-	opencodeSessionID, err := l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
-	if err != nil {
-		return err
+	opencodeSessionID := ""
+	var err error
+	if opencodeMessageHasContent(agentConfig.Message) {
+		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
+		if err != nil {
+			return err
+		}
 	}
 
 	agentConfig.Opencode = opencodeConfig
