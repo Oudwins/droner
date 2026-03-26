@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
 func TestLocalBackend_CreateSession_StartsOpencodeInWorktreeDir(t *testing.T) {
@@ -55,6 +56,7 @@ func TestLocalBackend_CreateSession_StartsOpencodeInWorktreeDir(t *testing.T) {
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
 	agentCfg := AgentConfig{
+		Message: &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
 		Opencode: conf.OpenCodeConfig{
 			Hostname: opencodeCfg.Hostname,
 			Port:     opencodeCfg.Port,
@@ -84,6 +86,68 @@ func TestLocalBackend_CreateSession_StartsOpencodeInWorktreeDir(t *testing.T) {
 	}
 	if !containsSubsequence(args, []string{"--dir", worktreePath}) {
 		t.Fatalf("expected opencode attach to include --dir worktreePath, got: %v", args)
+	}
+}
+
+func TestLocalBackend_CreateSession_OpensOpencodeWithoutSessionWhenPromptMissing(t *testing.T) {
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+
+	tmp := t.TempDir()
+	repoPath := filepath.Join(tmp, "repo")
+	worktreePath := filepath.Join(tmp, "worktree")
+
+	var tmuxOpencodeArgs []string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "tmux" && len(args) > 0 && args[0] == "new-window" {
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-n" && args[i+1] == "opencode" {
+					tmuxOpencodeArgs = append([]string{name}, args...)
+					break
+				}
+			}
+		}
+		return exec.Command("sh", "-c", "exit 0")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/global/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	})
+	opencodeCfg := opencodeConfigFromServer(t, srv)
+
+	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
+	agentCfg := AgentConfig{
+		Opencode: conf.OpenCodeConfig{
+			Hostname: opencodeCfg.Hostname,
+			Port:     opencodeCfg.Port,
+		},
+	}
+
+	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if len(tmuxOpencodeArgs) == 0 {
+		t.Fatalf("expected tmux new-window call for opencode")
+	}
+	args := tmuxOpencodeArgs[1:]
+	opencodeURL := fmt.Sprintf("http://%s:%d", opencodeCfg.Hostname, opencodeCfg.Port)
+
+	if !containsSubsequence(args, []string{"opencode", "attach", opencodeURL, "--dir", worktreePath}) {
+		t.Fatalf("expected opencode attach url/dir args, got: %v", args)
+	}
+	if containsString(args, "--session") {
+		t.Fatalf("expected opencode attach to omit --session, got: %v", args)
 	}
 }
 

@@ -202,3 +202,55 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 		t.Fatalf("expected autorun request to start")
 	}
 }
+
+func TestLocalBackend_CreateSession_DoesNotCreateOpencodeSessionWithoutPrompt(t *testing.T) {
+	origExec := execCommand
+	execCommand = func(_ string, _ ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "exit 0")
+	}
+	t.Cleanup(func() { execCommand = origExec })
+
+	tmp := t.TempDir()
+	repoPath := filepath.Join(tmp, "repo")
+	worktreePath := filepath.Join(tmp, "worktree")
+
+	sessionCalled := false
+	messageCalled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/global/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+		sessionCalled = true
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+		messageCalled = true
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	opencodeCfg := opencodeConfigFromServer(t, srv)
+
+	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: tmp}}
+	agentCfg := AgentConfig{
+		Model:     "openai/gpt-5-mini",
+		AgentName: "plan",
+		Opencode: conf.OpenCodeConfig{
+			Hostname: opencodeCfg.Hostname,
+			Port:     opencodeCfg.Port,
+		},
+	}
+
+	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sessionCalled {
+		t.Fatal("expected no POST to /session when prompt is empty")
+	}
+	if messageCalled {
+		t.Fatal("expected no POST to /session/abc/message when prompt is empty")
+	}
+}
