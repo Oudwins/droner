@@ -360,18 +360,43 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 		return err
 	}
 
-	opencodeSessionID := ""
-	var err error
-	if opencodeMessageHasContent(agentConfig.Message) {
+	opencodeSessionID, err := l.latestOpencodeSessionID(ctx, opencodeConfig, worktreePath)
+	if err != nil {
+		return err
+	}
+	shouldAutorun := false
+	if opencodeSessionID == "" && opencodeMessageHasContent(agentConfig.Message) {
 		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
 		if err != nil {
 			return err
 		}
+		shouldAutorun = true
 	}
 
 	agentConfig.Opencode = opencodeConfig
 	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
+	}
+
+	if shouldAutorun {
+		cfg := opencodeConfig
+		session := opencodeSessionID
+		dir := worktreePath
+		model := agentConfig.Model
+		agentName := agentConfig.AgentName
+		message := agentConfig.Message
+		go func() {
+			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
+			defer cancel()
+			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, agentName, message); err != nil {
+				slog.Warn(
+					"failed to autorun opencode prompt during hydration",
+					slog.String("sessionName", sessionName),
+					slog.String("opencodeSessionID", session),
+					slog.String("error", err.Error()),
+				)
+			}
+		}()
 	}
 
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
@@ -605,6 +630,22 @@ func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.Ope
 		return "", errors.New("opencode session id missing from response")
 	}
 	return session.ID, nil
+}
+
+func (l LocalBackend) latestOpencodeSessionID(ctx context.Context, config conf.OpenCodeConfig, worktreePath string) (string, error) {
+	client := newOpencodeClient(config)
+	params := opencode.SessionListParams{}
+	if strings.TrimSpace(worktreePath) != "" {
+		params.Directory = opencode.F(worktreePath)
+	}
+	sessions, err := client.Session.List(ctx, params, option.WithRequestTimeout(timeouts.SecondLong))
+	if err != nil {
+		return "", err
+	}
+	if sessions == nil || len(*sessions) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace((*sessions)[0].ID), nil
 }
 
 func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message) error {
