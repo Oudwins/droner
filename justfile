@@ -19,6 +19,9 @@ dev: kill
 serve:
     cd ./pkgs/droner && go run ./dronerd serve
 
+eventdebug:
+    cd ./pkgs/droner && go run ./droner-eventdebug
+
 build:
     mkdir -p {{bin_dir}}
     cd ./pkgs/droner && go build -o ../../{{droner_bin}} ./droner
