@@ -96,7 +96,6 @@ droner serve --detach
 droner new --help
 droner sessions --all
 droner task <task-id>
-droner auth github
 droner nuke
 ```
 
@@ -106,6 +105,7 @@ Notes:
 - `droner new` uses the current repo if `--path` is omitted
 - `droner complete` stops the tmux session but leaves the worktree on disk
 - `droner del` stops tmux, removes the worktree, and deletes the backing branch
+- GitHub access comes from `GITHUB_TOKEN` or `gh auth login`
 
 ## Local server API
 
@@ -196,9 +196,7 @@ Example:
 Environment variables:
 
 - `DRONER_ENV_PORT`: change the local server port
-- `GITHUB_TOKEN`: optional GitHub token
-
-GitHub auth obtained through `droner auth github` is stored in `~/.droner/auth.json`.
+- `GITHUB_TOKEN`: optional GitHub token (preferred for CI); otherwise droner falls back to `gh auth token`
 
 ## Cursor worktree setup
 

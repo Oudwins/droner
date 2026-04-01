@@ -16,7 +16,13 @@ const (
 )
 
 const (
+	provisioningModeInitial = "initial"
+	provisioningModeRestart = "restart"
+)
+
+const (
 	eventTypeSessionQueued                         = eventlog.EventType("session.queued")
+	eventTypeSessionHydrationRequested             = eventlog.EventType("session.hydration.requested")
 	eventTypeSessionEnvironmentProvisioningStarted = eventlog.EventType("session.environment_provisioning.started")
 	eventTypeSessionEnvironmentProvisioningSuccess = eventlog.EventType("session.environment_provisioning.success")
 	eventTypeSessionEnvironmentProvisioningFailed  = eventlog.EventType("session.environment_provisioning.failed")
@@ -51,6 +57,11 @@ type failedPayload struct {
 
 type sessionIDPayload struct {
 	SimpleID string `json:"simpleId"`
+}
+
+type provisioningPayload struct {
+	SimpleID string `json:"simpleId"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 type remoteObservationPayload struct {
@@ -101,6 +112,12 @@ func decodeSessionIDPayload(evt eventlog.Envelope) (sessionIDPayload, error) {
 	return payload, err
 }
 
+func decodeProvisioningPayload(evt eventlog.Envelope) (provisioningPayload, error) {
+	var payload provisioningPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
 func decodeRemoteObservationPayload(evt eventlog.Envelope) (remoteObservationPayload, error) {
 	var payload remoteObservationPayload
 	err := json.Unmarshal(evt.Payload, &payload)
@@ -132,6 +149,10 @@ func readyStepPayload(queued queuedPayload) map[string]string {
 
 func requestStepPayload(simpleID string) sessionIDPayload {
 	return newSessionIDPayload(simpleID)
+}
+
+func provisioningStepPayload(simpleID string, mode string) provisioningPayload {
+	return provisioningPayload{SimpleID: simpleID, Mode: mode}
 }
 
 func queuedBackendID(payload queuedPayload) conf.BackendID {

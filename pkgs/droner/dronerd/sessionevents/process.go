@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -17,7 +18,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 	}
 	if err == nil {
 		switch projection.LifecycleState {
-		case string(eventTypeSessionReady), string(eventTypeSessionEnvironmentProvisioningFailed):
+		case string(eventTypeSessionReady), string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess):
 			return nil
 		}
 	}
@@ -27,33 +28,98 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 		return err
 	}
 
-	if _, err := s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnvironmentProvisioningStarted, provisionStartedPayload(queued), string(evt.ID), string(evt.StreamID)); err != nil {
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnvironmentProvisioningStarted, provisioningStepPayload(queued.SimpleID, provisioningModeInitial), string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Envelope) error {
+	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	if err != nil {
 		return err
 	}
 
-	backend, err := s.backends.Get(queuedBackendID(queued))
-	if err != nil {
-		return s.appendFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
+	var nextType eventlog.EventType
+	var nextPayload any
+	switch projection.LifecycleState {
+	case string(eventTypeSessionQueued):
+		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextPayload = provisioningStepPayload(projection.SimpleID, provisioningModeInitial)
+	case string(eventTypeSessionEnvironmentProvisioningStarted):
+		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextPayload = provisioningStepPayload(projection.SimpleID, provisioningModeInitial)
+	case string(eventTypeSessionReady):
+		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextPayload = provisioningStepPayload(projection.SimpleID, provisioningModeRestart)
+	case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted):
+		nextType = eventTypeSessionCompletionStarted
+		nextPayload = requestStepPayload(projection.SimpleID)
+	case string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted):
+		nextType = eventTypeSessionDeletionStarted
+		nextPayload = requestStepPayload(projection.SimpleID)
+	default:
+		return nil
 	}
 
-	agentConfig, err := s.agentConfigFromJSON(queued.AgentConfigJSON)
+	_, err = s.appendEvent(ctx, string(evt.StreamID), nextType, nextPayload, string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Envelope) error {
+	projection, err := s.loadProjection(ctx, string(evt.StreamID))
 	if err != nil {
-		return s.appendFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
+		return err
+	}
+	payload, err := decodeProvisioningPayload(evt)
+	if err != nil {
+		return err
 	}
 
-	if err := backend.CreateSession(ctx, queued.RepoPath, queued.WorktreePath, queued.SimpleID, agentConfig); err != nil {
-		return s.appendFailure(ctx, evt, err)
+	agentConfig, err := s.agentConfigFromJSON(projection.AgentConfig)
+	if err != nil {
+		return s.appendProvisioningFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
+	}
+
+	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
+	if err != nil {
+		return s.appendProvisioningFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
+	}
+
+	if payload.Mode == provisioningModeRestart {
+		result, hydrateErr := backend.HydrateSession(ctx, coredb.Session{
+			ID:           projection.StreamID,
+			SimpleID:     projection.SimpleID,
+			Status:       coredb.SessionStatusRunning,
+			BackendID:    projection.BackendID,
+			RepoPath:     projection.RepoPath,
+			RemoteUrl:    sql.NullString{String: projection.RemoteURL, Valid: projection.RemoteURL != ""},
+			WorktreePath: projection.WorktreePath,
+			AgentConfig:  sql.NullString{String: projection.AgentConfig, Valid: projection.AgentConfig != ""},
+		}, agentConfig)
+		if hydrateErr != nil {
+			return s.appendProvisioningFailure(ctx, evt, hydrateErr)
+		}
+		if result.Status != coredb.SessionStatusRunning {
+			message := result.Error
+			if message == "" {
+				message = fmt.Sprintf("hydration returned %s", result.Status)
+			}
+			return s.appendProvisioningFailure(ctx, evt, errors.New(message))
+		}
+	} else {
+		if err := backend.CreateSession(ctx, projection.RepoPath, projection.WorktreePath, projection.SimpleID, agentConfig); err != nil {
+			return s.appendProvisioningFailure(ctx, evt, err)
+		}
 	}
 
 	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionReady} {
-		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, readyStepPayload(queued), string(evt.ID), string(evt.StreamID)); err != nil {
+		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, requestStepPayload(projection.SimpleID), string(evt.ID), string(evt.StreamID)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *System) appendFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
+func (s *System) appendProvisioningFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
 	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionEnvironmentProvisioningFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
@@ -63,15 +129,24 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionCompletionSuccess) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if projection.LifecycleState == string(eventTypeSessionCompletionStarted) || projection.LifecycleState == string(eventTypeSessionCompletionSuccess) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
 	payload, err := decodeSessionIDPayload(evt)
 	if err != nil {
 		return err
 	}
-	if _, err := s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionStarted, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID)); err != nil {
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionStarted, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleCompletionStarted(ctx context.Context, evt eventlog.Envelope) error {
+	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	if err != nil {
 		return err
+	}
+	if projection.LifecycleState == string(eventTypeSessionCompletionSuccess) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		return nil
 	}
 	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
 	if err != nil {
@@ -89,15 +164,24 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if projection.LifecycleState == string(eventTypeSessionDeletionStarted) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
 	payload, err := decodeSessionIDPayload(evt)
 	if err != nil {
 		return err
 	}
-	if _, err := s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionStarted, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID)); err != nil {
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionStarted, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelope) error {
+	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	if err != nil {
 		return err
+	}
+	if projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		return nil
 	}
 	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
 	if err != nil {

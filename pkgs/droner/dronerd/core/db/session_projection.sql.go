@@ -140,6 +140,49 @@ func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllS
 	return items, nil
 }
 
+const listHydratableSessionProjectionRefs = `-- name: ListHydratableSessionProjectionRefs :many
+SELECT stream_id, simple_id, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+FROM session_projection
+WHERE public_state IN ('queued', 'running', 'completing', 'deleting')
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]SessionProjection, error) {
+	rows, err := q.db.QueryContext(ctx, listHydratableSessionProjectionRefs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SessionProjection
+	for rows.Next() {
+		var i SessionProjection
+		if err := rows.Scan(
+			&i.StreamID,
+			&i.SimpleID,
+			&i.BackendID,
+			&i.RepoPath,
+			&i.WorktreePath,
+			&i.RemoteUrl,
+			&i.AgentConfig,
+			&i.LifecycleState,
+			&i.PublicState,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisibleSessionProjectionItems = `-- name: ListVisibleSessionProjectionItems :many
 SELECT simple_id, public_state
 FROM session_projection

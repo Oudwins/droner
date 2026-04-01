@@ -22,9 +22,12 @@ import (
 type remoteTestBackend struct {
 	worktreeRoot string
 
-	mu            sync.Mutex
-	completeCalls int
-	deleteCalls   int
+	createHydrateStatus coredb.SessionStatus
+	mu                  sync.Mutex
+	createCalls         int
+	hydrateCalls        int
+	completeCalls       int
+	deleteCalls         int
 }
 
 func (b *remoteTestBackend) ID() conf.BackendID {
@@ -40,11 +43,21 @@ func (b *remoteTestBackend) ValidateSessionID(repoPath string, sessionID string)
 }
 
 func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
+	b.mu.Lock()
+	b.createCalls++
+	b.mu.Unlock()
 	return nil
 }
 
 func (b *remoteTestBackend) HydrateSession(ctx context.Context, session coredb.Session, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
-	return backends.HydrationResult{}, nil
+	b.mu.Lock()
+	b.hydrateCalls++
+	status := b.createHydrateStatus
+	b.mu.Unlock()
+	if status == "" {
+		status = coredb.SessionStatusRunning
+	}
+	return backends.HydrationResult{Status: status}, nil
 }
 
 func (b *remoteTestBackend) CompleteSession(ctx context.Context, worktreePath string, sessionID string) error {
@@ -65,6 +78,18 @@ func (b *remoteTestBackend) CompleteCalls() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.completeCalls
+}
+
+func (b *remoteTestBackend) CreateCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.createCalls
+}
+
+func (b *remoteTestBackend) HydrateCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hydrateCalls
 }
 
 type remoteSubscriptionStub struct {
@@ -290,5 +315,58 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 		eventTypeSessionCompletionRequested,
 		eventTypeSessionCompletionStarted,
 		eventTypeSessionCompletionSuccess,
+	)
+}
+
+func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
+	system, backend, dataDir, _ := newRemoteTestSystem(t)
+
+	const (
+		streamID = "stream-hydrate-1"
+		simpleID = "hydrate-branch"
+	)
+
+	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
+		StreamID:     streamID,
+		SimpleID:     simpleID,
+		BackendID:    conf.BackendLocal,
+		RepoPath:     "/tmp/repo",
+		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..hydrate-branch"),
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	waitForPublicState(t, system, simpleID, "running")
+	beforeCreateCalls := backend.CreateCalls()
+	if beforeCreateCalls == 0 {
+		t.Fatal("expected initial create provisioning to run")
+	}
+
+	if err := system.Hydrate(context.Background()); err != nil {
+		t.Fatalf("Hydrate: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if backend.HydrateCalls() > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if backend.HydrateCalls() == 0 {
+		t.Fatal("expected hydrate session to be called for ready session")
+	}
+	if backend.CreateCalls() != beforeCreateCalls {
+		t.Fatalf("expected no additional create provisioning for ready session, create calls before=%d after=%d", beforeCreateCalls, backend.CreateCalls())
+	}
+
+	eventTypes := loadEventTypes(t, dataDir, streamID)
+	assertEventOrder(t, eventTypes,
+		eventTypeSessionQueued,
+		eventTypeSessionReady,
+		eventTypeSessionHydrationRequested,
+		eventTypeSessionEnvironmentProvisioningStarted,
+		eventTypeSessionEnvironmentProvisioningSuccess,
+		eventTypeSessionReady,
 	)
 }

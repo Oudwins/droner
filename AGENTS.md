@@ -21,7 +21,7 @@
 - `flake.nix` provides Go, gopls, git, just, sqlc, and psmisc.
 - Inside the flake dev shell, `droner` is provided as a wrapper for `just cli` so repo-local CLI changes can be used without a global install.
 - Optional env vars can be set in `.env` (loaded by justfile).
-- Create/list/task-status tracer-bullet data now lives in `<data dir>/db/droner.new.db`; server startup skips old-session hydration, and `sessionevents` now uses the shared SQLite-backed `internals/eventlog` package for topic-scoped event storage/checkpoints.
+- Create/list/task-status tracer-bullet projection data lives in `<data dir>/db/droner.new.db`; the sessions event log now lives separately in `<data dir>/db/droner.sessionslog.db`, owned exclusively by the shared SQLite-backed `internals/eventlog` backend via `dronerd/sessionslog`. On startup, `sessionevents` now appends `session.hydration.requested` for hydratable projection rows, re-enters the normal started-event flow for provisioning/completion/deletion, and restores live GitHub branch/PR subscriptions after `session.ready`.
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
 - Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.

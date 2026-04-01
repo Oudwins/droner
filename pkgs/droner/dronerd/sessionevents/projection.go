@@ -16,6 +16,7 @@ type sessionProjection struct {
 	RepoPath       string
 	WorktreePath   string
 	RemoteURL      string
+	AgentConfig    string
 	LifecycleState string
 	PublicState    string
 	LastError      string
@@ -199,6 +200,18 @@ func (s *System) listActiveProjectionRefs(ctx context.Context) ([]SessionRef, er
 	return refs, nil
 }
 
+func (s *System) listHydratableProjectionRefs(ctx context.Context) ([]SessionRef, error) {
+	rows, err := s.queries.ListHydratableSessionProjectionRefs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := []SessionRef{}
+	for _, row := range rows {
+		refs = append(refs, sessionRefFromRow(row))
+	}
+	return refs, nil
+}
+
 func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 	return sessionProjection{
 		StreamID:       row.StreamID,
@@ -207,6 +220,7 @@ func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 		RepoPath:       row.RepoPath,
 		WorktreePath:   row.WorktreePath,
 		RemoteURL:      row.RemoteUrl,
+		AgentConfig:    row.AgentConfig,
 		LifecycleState: row.LifecycleState,
 		PublicState:    row.PublicState,
 		LastError:      row.LastError,

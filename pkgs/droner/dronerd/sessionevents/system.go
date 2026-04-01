@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	consumerHydrationProcess   = "session_hydration_process"
 	consumerProjection         = "session_projection"
 	consumerCreateProcess      = "session_create_process"
 	consumerCompleteProcess    = "session_complete_process"
@@ -160,6 +161,7 @@ func (s *System) Start(ctx context.Context) {
 		return
 	}
 	s.startOnce.Do(func() {
+		go s.enqueueHydrationRequests(ctx)
 		go s.runSubscription(ctx, consumerProjection, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerProjection),
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
@@ -169,28 +171,46 @@ func (s *System) Start(ctx context.Context) {
 		go s.runSubscription(ctx, consumerCreateProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerCreateProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionQueued
+				return evt.Type == eventTypeSessionQueued || evt.Type == eventTypeSessionEnvironmentProvisioningStarted
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				return s.handleQueuedEvent(ctx, evt)
+				if evt.Type == eventTypeSessionQueued {
+					return s.handleQueuedEvent(ctx, evt)
+				}
+				return s.handleProvisioningStarted(ctx, evt)
+			},
+		})
+		go s.runSubscription(ctx, consumerHydrationProcess, eventlog.Subscription{
+			ID: eventlog.SubscriberID(consumerHydrationProcess),
+			Filter: func(evt eventlog.Envelope) bool {
+				return evt.Type == eventTypeSessionHydrationRequested
+			},
+			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
+				return s.handleHydrationRequested(ctx, evt)
 			},
 		})
 		go s.runSubscription(ctx, consumerCompleteProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerCompleteProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionCompletionRequested
+				return evt.Type == eventTypeSessionCompletionRequested || evt.Type == eventTypeSessionCompletionStarted
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				return s.handleCompletionRequested(ctx, evt)
+				if evt.Type == eventTypeSessionCompletionRequested {
+					return s.handleCompletionRequested(ctx, evt)
+				}
+				return s.handleCompletionStarted(ctx, evt)
 			},
 		})
 		go s.runSubscription(ctx, consumerDeleteProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerDeleteProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionDeletionRequested
+				return evt.Type == eventTypeSessionDeletionRequested || evt.Type == eventTypeSessionDeletionStarted
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				return s.handleDeletionRequested(ctx, evt)
+				if evt.Type == eventTypeSessionDeletionRequested {
+					return s.handleDeletionRequested(ctx, evt)
+				}
+				return s.handleDeletionStarted(ctx, evt)
 			},
 		})
 		go s.runSubscription(ctx, consumerRemoteSubscription, eventlog.Subscription{
@@ -217,6 +237,32 @@ func (s *System) Start(ctx context.Context) {
 			},
 		})
 	})
+}
+
+func (s *System) enqueueHydrationRequests(ctx context.Context) {
+	refs, err := s.listHydratableProjectionRefs(ctx)
+	if err != nil {
+		s.logger.Error("failed to list hydratable sessions", "error", err)
+		return
+	}
+	for _, ref := range refs {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+			s.logger.Error("failed to append session hydration request", "stream_id", ref.StreamID, "simple_id", ref.SimpleID, "error", err)
+		}
+	}
+}
+
+func (s *System) Hydrate(ctx context.Context) error {
+	refs, err := s.listHydratableProjectionRefs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *System) CreateSession(ctx context.Context, input CreateSessionInput) (CreateSessionResult, error) {
