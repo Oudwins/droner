@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -83,13 +81,7 @@ type SessionRef struct {
 }
 
 func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) (*System, error) {
-	cleanDataDir := filepath.Clean(dataDir)
-	dbPath := filepath.Join(cleanDataDir, "db", "droner.new.db")
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, err
-	}
-
-	conn, err := sql.Open("sqlite", dbPath)
+	conn, err := coredb.OpenSQLiteDB(coredb.DBPath(dataDir))
 	if err != nil {
 		return nil, err
 	}
@@ -98,19 +90,7 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = conn.Close()
 		}
 	}()
-	conn.SetMaxOpenConns(1)
-	conn.SetMaxIdleConns(1)
-	if _, err := conn.Exec("PRAGMA journal_mode = WAL;"); err != nil {
-		return nil, err
-	}
-	if _, err := conn.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
-		return nil, err
-	}
-	if _, err := conn.Exec("PRAGMA synchronous = NORMAL;"); err != nil {
-		return nil, err
-	}
-
-	log, err := sessionslog.Open(cleanDataDir)
+	log, err := sessionslog.Open(dataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +99,6 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = log.Close()
 		}
 	}()
-	if err := coredb.ApplySchemas(conn); err != nil {
-		return nil, err
-	}
-
 	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState()}, nil
 }
 

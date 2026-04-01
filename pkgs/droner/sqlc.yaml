@@ -7,7 +7,3 @@ sql:
       go:
         package: "db"
         out: "dronerd/db"
-        overrides:
-          - column: "sessions.status"
-            go_type:
-              type: "SessionStatus"

@@ -58,7 +58,7 @@ func (b *createSessionBackend) DeleteSession(ctx context.Context, worktreePath s
 	return nil
 }
 
-func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, *db.Queries, string) {
+func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, string, string) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -87,12 +87,7 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 		},
 	}
 
-	legacyQueries, err := db.InitDB(config)
-	if err != nil {
-		t.Fatalf("InitDB: %v", err)
-	}
-
-	projectionConn, err := db.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.new.db"))
+	projectionConn, err := db.OpenSQLiteDB(db.DBPath(dataDir))
 	if err != nil {
 		t.Fatalf("OpenSQLiteDB projection db: %v", err)
 	}
@@ -122,7 +117,7 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 		_ = projectionConn.Close()
 	})
 
-	return server, legacyQueries, projectionQueries, repoDir
+	return server, projectionQueries, repoDir, dataDir
 }
 
 func initGitRepo(t *testing.T, repoDir string) {
@@ -137,7 +132,7 @@ func initGitRepo(t *testing.T, repoDir string) {
 }
 
 func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
-	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -165,7 +160,7 @@ func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
 }
 
 func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
-	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -212,7 +207,7 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 }
 
 func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
-	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -265,8 +260,8 @@ func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
 	}
 }
 
-func TestHandlerCreateSessionLeavesLegacySessionsTableUntouched(t *testing.T) {
-	server, legacyQueries, _, repoDir := newEventSourcedCreateSessionTestServer(t)
+func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
+	server, projectionQueries, repoDir, dataDir := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -291,15 +286,30 @@ func TestHandlerCreateSessionLeavesLegacySessionsTableUntouched(t *testing.T) {
 	if response.TaskID == "" {
 		t.Fatal("expected event task id")
 	}
-	_, err = legacyQueries.GetSessionBySimpleIDAnyStatus(context.Background(), "evented-session")
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected no legacy session row, got err=%v", err)
+	projection := waitForProjection(t, projectionQueries, "evented-session")
+	if projection.SimpleID != "evented-session" {
+		t.Fatalf("projection simple_id = %q, want evented-session", projection.SimpleID)
+	}
+
+	projectionConn, err := sql.Open("sqlite", db.DBPath(dataDir))
+	if err != nil {
+		t.Fatalf("sql.Open droner.db: %v", err)
+	}
+	defer projectionConn.Close()
+
+	var sessionsTableCount int
+	err = projectionConn.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sessions'`).Scan(&sessionsTableCount)
+	if err != nil {
+		t.Fatalf("count sessions table: %v", err)
+	}
+	if sessionsTableCount != 0 {
+		t.Fatalf("sessions table count = %d, want 0", sessionsTableCount)
 	}
 	waitForSessionState(t, server, "evented-session", "running")
 }
 
 func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
-	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
 	waitForSessionState(t, server, "complete-me", "running")
@@ -338,7 +348,7 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 }
 
 func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
-	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
 	waitForSessionState(t, server, "delete-me", "running")
@@ -377,7 +387,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 }
 
 func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) {
-	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nuke-a")
 	createEventSourcedSession(t, server, repoDir, "nuke-b")

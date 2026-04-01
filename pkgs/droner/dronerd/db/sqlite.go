@@ -10,25 +10,28 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-
 	_ "modernc.org/sqlite"
 )
 
 //go:embed schemas/*.sql
 var schemaFS embed.FS
 
-func InitDB(config *conf.Config) (*Queries, error) {
-	dbPath := filepath.Join(config.Server.DataDir, "db", "droner.db")
-	conn, err := OpenSQLiteDB(dbPath)
-	if err != nil {
-		return nil, err
-	}
+const (
+	DBFileName       = "droner.db"
+	legacyDBFileName = "droner.new.db"
+)
 
-	return New(conn), nil
+func DBPath(dataDir string) string {
+	return filepath.Join(filepath.Clean(dataDir), "db", DBFileName)
 }
 
 func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
+	if filepath.Base(dbPath) == DBFileName {
+		if err := migrateLegacyDBPath(dbPath); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
@@ -37,8 +40,13 @@ func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
 
 	if _, err := conn.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
 		return nil, err
 	}
 	if _, err := conn.Exec("PRAGMA synchronous = NORMAL;"); err != nil {
@@ -55,54 +63,34 @@ func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
 		}
 	}
 
-	if err := ensureSessionsRemoteURLColumn(conn); err != nil {
-		return nil, err
-	}
-
 	return conn, nil
 }
 
-func ApplySchemas(conn *sql.DB) error {
-	schemas, err := loadSchemas()
-	if err != nil {
-		return err
+func migrateLegacyDBPath(dbPath string) error {
+	legacyPath := filepath.Join(filepath.Dir(dbPath), legacyDBFileName)
+	if _, err := os.Stat(dbPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat db path: %w", err)
 	}
-	for _, schema := range schemas {
-		if _, err := conn.Exec(schema); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ensureSessionsRemoteURLColumn(conn *sql.DB) error {
-	rows, err := conn.Query("PRAGMA table_info(sessions);")
-	if err != nil {
-		return fmt.Errorf("failed to query sessions table info: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name string
-		var typ string
-		var notNull int
-		var defaultValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return fmt.Errorf("failed to scan sessions table info: %w", err)
-		}
-		if name == "remote_url" {
+	if _, err := os.Stat(legacyPath); err != nil {
+		if os.IsNotExist(err) {
 			return nil
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to iterate sessions table info: %w", err)
+		return fmt.Errorf("stat legacy db path: %w", err)
 	}
 
-	if _, err := conn.Exec("ALTER TABLE sessions ADD COLUMN remote_url TEXT;"); err != nil {
-		return fmt.Errorf("failed to add sessions.remote_url column: %w", err)
+	for _, suffix := range []string{"", "-shm", "-wal"} {
+		from := legacyPath + suffix
+		to := dbPath + suffix
+		if err := os.Rename(from, to); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("rename %s to %s: %w", from, to, err)
+		}
 	}
+
 	return nil
 }
 
