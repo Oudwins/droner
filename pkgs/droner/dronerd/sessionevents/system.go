@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 
 	_ "modernc.org/sqlite"
 )
@@ -83,17 +81,6 @@ type SessionRef struct {
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-}
-
-type TaskSnapshot struct {
-	TaskID       string
-	Status       schemas.TaskStatus
-	SimpleID     string
-	WorktreePath string
-	Error        string
-	CreatedAt    time.Time
-	StartedAt    time.Time
-	FinishedAt   time.Time
 }
 
 func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) (*System, error) {
@@ -346,44 +333,6 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 		requested++
 	}
 	return NukeResult{Requested: requested}, nil
-}
-
-func (s *System) TaskStatus(ctx context.Context, taskID string) (*TaskSnapshot, error) {
-	taskType, streamID := parseTaskID(taskID)
-	if taskType == "" || streamID == "" {
-		return nil, sql.ErrNoRows
-	}
-
-	projection, err := s.loadProjection(ctx, streamID)
-	if err != nil {
-		return nil, err
-	}
-
-	status, startedAt, finishedAt := projection.taskTimes(taskType)
-	return &TaskSnapshot{
-		TaskID:       taskID,
-		Status:       status,
-		SimpleID:     projection.SimpleID,
-		WorktreePath: projection.WorktreePath,
-		Error:        projection.LastError,
-		CreatedAt:    projection.CreatedAt,
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-	}, nil
-}
-
-func parseTaskID(taskID string) (string, string) {
-	trimmed := strings.TrimSpace(taskID)
-	switch {
-	case strings.HasPrefix(trimmed, taskIDPrefixCreate):
-		return "session_create", strings.TrimPrefix(trimmed, taskIDPrefixCreate)
-	case strings.HasPrefix(trimmed, taskIDPrefixComplete):
-		return "session_complete", strings.TrimPrefix(trimmed, taskIDPrefixComplete)
-	case strings.HasPrefix(trimmed, taskIDPrefixDelete):
-		return "session_delete", strings.TrimPrefix(trimmed, taskIDPrefixDelete)
-	default:
-		return "", ""
-	}
 }
 
 func (s *System) runSubscription(ctx context.Context, consumerName string, sub eventlog.Subscription) {

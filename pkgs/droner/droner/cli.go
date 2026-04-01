@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
@@ -32,8 +31,6 @@ type NewArgs struct {
 	Model     string `zog:"model"`
 	AgentName string `zog:"agent"`
 	Prompt    string `zog:"prompt"`
-	Wait      bool   `zog:"wait"`
-	Timeout   string `zog:"timeout"`
 }
 
 var newArgsSchema = z.Struct(z.Shape{
@@ -42,8 +39,6 @@ var newArgsSchema = z.Struct(z.Shape{
 	"Model":     z.String().Optional().Trim(),
 	"AgentName": z.String().Optional().Trim(),
 	"Prompt":    z.String().Optional().Trim(),
-	"Wait":      z.Bool().Optional(),
-	"Timeout":   z.String().Optional().Trim(),
 })
 
 type ServeArgs struct {
@@ -51,27 +46,19 @@ type ServeArgs struct {
 }
 
 type DelArgs struct {
-	ID      string `zog:"id"`
-	Wait    bool   `zog:"wait"`
-	Timeout string `zog:"timeout"`
+	ID string `zog:"id"`
 }
 
 type CompleteArgs struct {
-	ID      string `zog:"id"`
-	Wait    bool   `zog:"wait"`
-	Timeout string `zog:"timeout"`
+	ID string `zog:"id"`
 }
 
 type NukeArgs struct {
-	Yes     bool
-	Wait    bool
-	Timeout string
+	Yes bool
 }
 
 var delArgsSchema = z.Struct(z.Shape{
-	"ID":      z.String().Required().Trim(),
-	"Wait":    z.Bool().Optional(),
-	"Timeout": z.String().Optional().Trim(),
+	"ID": z.String().Required().Trim(),
 })
 
 func main() {
@@ -107,7 +94,6 @@ func newRootCmd() *cobra.Command {
 		newCompleteCmd(),
 		newNukeCmd(),
 		newSessionsCmd(),
-		newTaskCmd(),
 	)
 
 	return cmd
@@ -166,24 +152,10 @@ func newCompleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printTaskSummary(response)
-			if args.Wait {
-				timeout, err := parseWaitTimeout(args.Timeout)
-				if err != nil {
-					return err
-				}
-				final, err := waitForTask(client, response.TaskID, timeout)
-				if err != nil {
-					return err
-				}
-				printTaskSummary(final)
-			}
+			printOperationSummary(response)
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
-	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
 }
 
@@ -228,8 +200,6 @@ func newNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&args.Model, "model", "", "agent model")
 	cmd.Flags().StringVar(&args.AgentName, "agent", "", "opencode agent")
 	cmd.Flags().StringVar(&args.Prompt, "prompt", "", "agent prompt")
-	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
-	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
 }
 
@@ -254,24 +224,10 @@ func newDelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printTaskSummary(response)
-			if args.Wait {
-				timeout, err := parseWaitTimeout(args.Timeout)
-				if err != nil {
-					return err
-				}
-				final, err := waitForTask(client, response.TaskID, timeout)
-				if err != nil {
-					return err
-				}
-				printTaskSummary(final)
-			}
+			printOperationSummary(response)
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
-	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
 }
 
@@ -305,25 +261,12 @@ func newNukeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printTaskSummary(response)
-			if args.Wait {
-				timeout, err := parseWaitTimeout(args.Timeout)
-				if err != nil {
-					return err
-				}
-				final, err := waitForTask(client, response.TaskID, timeout)
-				if err != nil {
-					return err
-				}
-				printTaskSummary(final)
-			}
+			printOperationSummary(response)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&args.Yes, "dangerously-skip-confirmation", false, "skip confirmation prompt")
-	cmd.Flags().BoolVar(&args.Wait, "wait", false, "wait for the task to complete")
-	cmd.Flags().StringVar(&args.Timeout, "wait-timeout", "", "maximum wait duration")
 	return cmd
 }
 
@@ -371,29 +314,6 @@ func newSessionsCmd() *cobra.Command {
 	return cmd
 }
 
-func newTaskCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "task <id>",
-		Short: "Check a task status",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, inputs []string) error {
-			client := sdk.NewClient()
-			if err := cliutil.EnsureDaemonRunning(client); err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
-			defer cancel()
-			response, err := client.TaskStatus(ctx, inputs[0])
-			if err != nil {
-				return err
-			}
-			printTaskSummary(response)
-			return nil
-		},
-	}
-
-	return cmd
-}
 func validateNewArgs(payload *NewArgs) error {
 	if issues := newArgsSchema.Validate(payload); len(issues) > 0 {
 		return fmt.Errorf("invalid arguments:\n%s", z.Issues.Prettify(issues))
@@ -439,17 +359,6 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 		return err
 	}
 	cliutil.PrintSessionCreated(response)
-	if args.Wait {
-		timeout, err := parseWaitTimeout(args.Timeout)
-		if err != nil {
-			return err
-		}
-		final, err := waitForTask(client, response.TaskID, timeout)
-		if err != nil {
-			return err
-		}
-		printTaskSummary(final)
-	}
 	return nil
 }
 
@@ -458,17 +367,6 @@ func isInteractiveTerminal() bool {
 	stdout := os.Stdout.Fd()
 	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
 		(isatty.IsTerminal(stdout) || isatty.IsCygwinTerminal(stdout))
-}
-
-func parseWaitTimeout(raw string) (time.Duration, error) {
-	if strings.TrimSpace(raw) == "" {
-		return timeouts.DefaultMinutes, nil
-	}
-	value, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid wait timeout: %w", err)
-	}
-	return value, nil
 }
 
 func confirmAction(prompt string) (bool, error) {
@@ -482,35 +380,21 @@ func confirmAction(prompt string) (bool, error) {
 	return input == "y" || input == "yes", nil
 }
 
-func waitForTask(client *sdk.Client, taskID string, timeout time.Duration) (*schemas.TaskResponse, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeouts.PollInterval)
-		response, err := client.TaskStatus(ctx, taskID)
-		cancel()
-		if err != nil {
-			return nil, err
+func printOperationSummary(response *schemas.TaskResponse) {
+	if response.Type == "session_nuke" {
+		fmt.Printf("status: %s\n", response.Status)
+		if response.Result != nil && response.Result.SessionID != "" {
+			fmt.Printf("requested: %s\n", response.Result.SessionID)
 		}
-		switch response.Status {
-		case schemas.TaskStatusSucceeded:
-			return response, nil
-		case schemas.TaskStatusFailed:
-			if response.Error != "" {
-				return response, fmt.Errorf("task failed: %s", response.Error)
-			}
-			return response, errors.New("task failed")
-		default:
-			time.Sleep(2 * time.Second)
+		if response.Error != "" {
+			fmt.Printf("error: %s\n", response.Error)
 		}
+		return
 	}
 
-	return nil, fmt.Errorf("timed out waiting for task %s", taskID)
-}
-
-func printTaskSummary(response *schemas.TaskResponse) {
-	fmt.Printf("task: %s\nstatus: %s\n", response.TaskID, response.Status)
+	fmt.Printf("status: %s\n", response.Status)
 	if response.Result != nil {
-		if sessionID := taskSimpleSessionID(response.Result); sessionID != "" {
+		if sessionID := operationSimpleSessionID(response.Result); sessionID != "" {
 			fmt.Printf("session: %s\n", sessionID)
 		}
 		if response.Result.WorktreePath != "" {
@@ -522,7 +406,7 @@ func printTaskSummary(response *schemas.TaskResponse) {
 	}
 }
 
-func taskSimpleSessionID(result *schemas.TaskResult) string {
+func operationSimpleSessionID(result *schemas.TaskResult) string {
 	if result == nil {
 		return ""
 	}

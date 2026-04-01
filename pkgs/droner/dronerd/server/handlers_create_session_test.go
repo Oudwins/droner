@@ -24,8 +24,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
-	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
-	"github.com/go-chi/chi/v5"
 )
 
 type createSessionBackend struct {
@@ -60,44 +58,7 @@ func (b *createSessionBackend) DeleteSession(ctx context.Context, worktreePath s
 	return nil
 }
 
-type enqueueRecorderBackend struct {
-	enqueueCalls  int
-	lastTask      *tasky.Task[core.Jobs]
-	enqueueCtxErr error
-	hasDeadline   bool
-	timeoutWindow time.Duration
-	enqueueErr    error
-}
-
-func (b *enqueueRecorderBackend) Enqueue(ctx context.Context, task *tasky.Task[core.Jobs], job *tasky.Job[core.Jobs]) error {
-	b.enqueueCalls++
-	b.enqueueCtxErr = ctx.Err()
-	if deadline, ok := ctx.Deadline(); ok {
-		b.hasDeadline = true
-		b.timeoutWindow = time.Until(deadline)
-	}
-	copyTask := *task
-	b.lastTask = &copyTask
-	return b.enqueueErr
-}
-
-func (b *enqueueRecorderBackend) Dequeue(ctx context.Context) (core.Jobs, tasky.TaskID, []byte, error) {
-	return "", "", nil, context.Canceled
-}
-
-func (b *enqueueRecorderBackend) Ack(ctx context.Context, taskID tasky.TaskID) error {
-	return nil
-}
-
-func (b *enqueueRecorderBackend) Nack(ctx context.Context, taskID tasky.TaskID) error {
-	return nil
-}
-
-func (b *enqueueRecorderBackend) ForceFlush(ctx context.Context) error {
-	return nil
-}
-
-func newCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, *enqueueRecorderBackend, string) {
+func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, *db.Queries, string) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -122,49 +83,30 @@ func newCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, *enqueueRec
 				Default: conf.BackendLocal,
 				Local:   conf.LocalBackendConfig{WorktreeDir: worktreeDir},
 			},
-			Naming: conf.SessionNamingConfig{
-				Strategy: conf.SessionNamingStrategyRandom,
-			},
+			Naming: conf.SessionNamingConfig{Strategy: conf.SessionNamingStrategyRandom},
 		},
 	}
 
-	queries, err := core.InitDB(config)
+	legacyQueries, err := core.InitDB(config)
 	if err != nil {
 		t.Fatalf("InitDB: %v", err)
 	}
 
-	store := backends.NewStore(config, queries)
-	store.Register(&createSessionBackend{worktreeRoot: worktreeDir})
-
-	queueBackend := &enqueueRecorderBackend{}
-	queue, err := tasky.NewQueue(tasky.QueueConfig[core.Jobs]{
-		Jobs: []tasky.Job[core.Jobs]{
-			tasky.NewJob(core.JobCreateSession, tasky.JobConfig[core.Jobs]{
-				Run: func(ctx context.Context, task *tasky.Task[core.Jobs]) error { return nil },
-			}),
-		},
-		Backend: queueBackend,
-	})
+	projectionConn, err := core.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.new.db"))
 	if err != nil {
-		t.Fatalf("NewQueue: %v", err)
+		t.Fatalf("OpenSQLiteDB projection db: %v", err)
 	}
+	projectionQueries := db.New(projectionConn)
+
+	store := backends.NewStore(config)
+	store.Register(&createSessionBackend{worktreeRoot: worktreeDir})
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	server := &Server{Base: &core.BaseServer{
 		Config:       config,
 		Logger:       logger,
-		DB:           queries,
 		BackendStore: store,
-		TaskQueue:    queue,
 	}}
-
-	return server, queries, queueBackend, repoDir
-}
-
-func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries, string, context.CancelFunc) {
-	t.Helper()
-
-	server, queries, _, repoDir := newCreateSessionTestServer(t)
 
 	events, err := sessionevents.Open(server.Base.Config.Server.DataDir, server.Base.Logger, server.Base.Config, server.Base.BackendStore)
 	if err != nil {
@@ -177,9 +119,10 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 	t.Cleanup(func() {
 		cancel()
 		_ = server.events.Close()
+		_ = projectionConn.Close()
 	})
 
-	return server, queries, repoDir, cancel
+	return server, legacyQueries, projectionQueries, repoDir
 }
 
 func initGitRepo(t *testing.T, repoDir string) {
@@ -193,8 +136,8 @@ func initGitRepo(t *testing.T, repoDir string) {
 	}
 }
 
-func TestHandlerCreateSessionUsesRequestContextForDBCreate(t *testing.T) {
-	server, queries, queueBackend, repoDir := newCreateSessionTestServer(t)
+func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
+	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -212,64 +155,17 @@ func TestHandlerCreateSessionUsesRequestContextForDBCreate(t *testing.T) {
 
 	server.HandlerCreateSession(server.Base.Logger, rec, req)
 
-	if queueBackend.enqueueCalls != 0 {
-		t.Fatalf("expected no enqueue calls, got %d", queueBackend.enqueueCalls)
-	}
-	_, err = queries.GetSessionBySimpleIDAnyStatus(context.Background(), "cancelled-session")
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected no session row, got err=%v", err)
-	}
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-}
-
-func TestHandlerCreateSessionUsesBoundedBackgroundContextForEnqueue(t *testing.T) {
-	server, queries, queueBackend, repoDir := newCreateSessionTestServer(t)
-
-	payload, err := json.Marshal(schemas.SessionCreateRequest{
-		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("queued-session"),
-		BackendID: conf.BackendLocal,
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
-	rec := httptest.NewRecorder()
-
-	server.HandlerCreateSession(server.Base.Logger, rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
-	}
-	if queueBackend.enqueueCalls != 1 {
-		t.Fatalf("enqueue calls = %d, want 1", queueBackend.enqueueCalls)
-	}
-	if queueBackend.enqueueCtxErr != nil {
-		t.Fatalf("enqueue ctx err = %v, want nil", queueBackend.enqueueCtxErr)
-	}
-	if !queueBackend.hasDeadline {
-		t.Fatal("expected enqueue context to have a deadline")
-	}
-	if queueBackend.timeoutWindow <= 0 || queueBackend.timeoutWindow > 2*time.Second {
-		t.Fatalf("enqueue timeout window = %v, want within 0-2s", queueBackend.timeoutWindow)
-	}
-	if queueBackend.lastTask == nil || queueBackend.lastTask.JobID != core.JobCreateSession {
-		t.Fatalf("expected create-session task to be enqueued, got %#v", queueBackend.lastTask)
-	}
-	session, err := queries.GetSessionBySimpleIDAnyStatus(context.Background(), "queued-session")
-	if err != nil {
-		t.Fatalf("GetSessionBySimpleIDAnyStatus: %v", err)
-	}
-	if session.Status != db.SessionStatusQueued {
-		t.Fatalf("status = %s, want %s", session.Status, db.SessionStatusQueued)
+	_, err = projectionQueries.GetSessionProjectionBySimpleID(context.Background(), "cancelled-session")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected no projection row, got err=%v", err)
 	}
 }
 
 func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
-	server, queries, _, repoDir := newCreateSessionTestServer(t)
+	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -291,21 +187,17 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
 	rec := httptest.NewRecorder()
-
 	server.HandlerCreateSession(server.Base.Logger, rec, req)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
 	}
-	session, err := queries.GetSessionBySimpleIDAnyStatus(context.Background(), "file-prompt-session")
-	if err != nil {
-		t.Fatalf("GetSessionBySimpleIDAnyStatus: %v", err)
-	}
-	if !session.AgentConfig.Valid {
+	projection := waitForProjection(t, projectionQueries, "file-prompt-session")
+	if projection.AgentConfig == "" {
 		t.Fatal("expected agent config to be stored")
 	}
 	var stored schemas.SessionAgentConfig
-	if err := json.Unmarshal([]byte(session.AgentConfig.String), &stored); err != nil {
+	if err := json.Unmarshal([]byte(projection.AgentConfig), &stored); err != nil {
 		t.Fatalf("json.Unmarshal stored agent config: %v", err)
 	}
 	if stored.Message == nil || len(stored.Message.Parts) != 2 {
@@ -320,7 +212,7 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 }
 
 func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
-	server, queries, _, repoDir := newCreateSessionTestServer(t)
+	server, _, projectionQueries, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -342,21 +234,17 @@ func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
 	rec := httptest.NewRecorder()
-
 	server.HandlerCreateSession(server.Base.Logger, rec, req)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
 	}
-	session, err := queries.GetSessionBySimpleIDAnyStatus(context.Background(), "inline-image-session")
-	if err != nil {
-		t.Fatalf("GetSessionBySimpleIDAnyStatus: %v", err)
-	}
-	if !session.AgentConfig.Valid {
+	projection := waitForProjection(t, projectionQueries, "inline-image-session")
+	if projection.AgentConfig == "" {
 		t.Fatal("expected agent config to be stored")
 	}
 	var stored schemas.SessionAgentConfig
-	if err := json.Unmarshal([]byte(session.AgentConfig.String), &stored); err != nil {
+	if err := json.Unmarshal([]byte(projection.AgentConfig), &stored); err != nil {
 		t.Fatalf("json.Unmarshal stored agent config: %v", err)
 	}
 	if stored.Message == nil || len(stored.Message.Parts) != 2 {
@@ -377,8 +265,8 @@ func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
 	}
 }
 
-func TestHandlerCreateSessionEventSourcedPathLeavesLegacySessionsTableUntouched(t *testing.T) {
-	server, queries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+func TestHandlerCreateSessionLeavesLegacySessionsTableUntouched(t *testing.T) {
+	server, legacyQueries, _, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
@@ -391,7 +279,6 @@ func TestHandlerCreateSessionEventSourcedPathLeavesLegacySessionsTableUntouched(
 
 	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
 	rec := httptest.NewRecorder()
-
 	server.HandlerCreateSession(server.Base.Logger, rec, req)
 
 	if rec.Code != http.StatusAccepted {
@@ -402,82 +289,17 @@ func TestHandlerCreateSessionEventSourcedPathLeavesLegacySessionsTableUntouched(
 		t.Fatalf("json.Unmarshal response: %v", err)
 	}
 	if response.TaskID == "" {
-		t.Fatal("expected synthetic task id")
+		t.Fatal("expected event task id")
 	}
-	_, err = queries.GetSessionBySimpleIDAnyStatus(context.Background(), "evented-session")
+	_, err = legacyQueries.GetSessionBySimpleIDAnyStatus(context.Background(), "evented-session")
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected no legacy session row, got err=%v", err)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		items, err := server.events.ListSessions(context.Background(), false)
-		if err != nil {
-			t.Fatalf("ListSessions: %v", err)
-		}
-		if len(items) == 1 && items[0].SimpleID == "evented-session" && items[0].State == "running" {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for event-sourced session projection")
-}
-
-func TestHandlerTaskStatusSynthesizesCreateTaskFromProjection(t *testing.T) {
-	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
-
-	payload, err := json.Marshal(schemas.SessionCreateRequest{
-		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("projection-task"),
-		BackendID: conf.BackendLocal,
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-
-	createReq := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
-	createRec := httptest.NewRecorder()
-	server.HandlerCreateSession(server.Base.Logger, createRec, createReq)
-	if createRec.Code != http.StatusAccepted {
-		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusAccepted, createRec.Body.String())
-	}
-	var createResponse schemas.SessionCreateResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &createResponse); err != nil {
-		t.Fatalf("json.Unmarshal create response: %v", err)
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		taskReq := httptest.NewRequest(http.MethodGet, "/tasks/"+createResponse.TaskID, nil)
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", createResponse.TaskID)
-		taskReq = taskReq.WithContext(context.WithValue(taskReq.Context(), chi.RouteCtxKey, rctx))
-		taskRec := httptest.NewRecorder()
-		server.HandlerTaskStatus(server.Base.Logger, taskRec, taskReq)
-		if taskRec.Code == http.StatusNotFound {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		if taskRec.Code != http.StatusOK {
-			t.Fatalf("task status code = %d, want 200; body=%s", taskRec.Code, taskRec.Body.String())
-		}
-		var task schemas.TaskResponse
-		if err := json.Unmarshal(taskRec.Body.Bytes(), &task); err != nil {
-			t.Fatalf("json.Unmarshal task response: %v", err)
-		}
-		if task.Status == schemas.TaskStatusSucceeded {
-			if task.Result == nil || task.Result.SessionID != "projection-task" {
-				t.Fatalf("unexpected task result: %#v", task.Result)
-			}
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for synthetic task success")
+	waitForSessionState(t, server, "evented-session", "running")
 }
 
 func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
-	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
 	waitForSessionState(t, server, "complete-me", "running")
@@ -505,19 +327,18 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	if response.Type != "session_complete" {
 		t.Fatalf("task type = %q, want session_complete", response.Type)
 	}
+	if response.Status != schemas.TaskStatusPending {
+		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
+	}
 	if response.Result == nil || response.Result.SessionID != "complete-me" || response.Result.WorktreePath != createResponse.WorktreePath {
 		t.Fatalf("unexpected task result: %#v", response.Result)
 	}
 
-	task := waitForTaskStatus(t, server, response.TaskID, schemas.TaskStatusSucceeded)
-	if task.Result == nil || task.Result.SessionID != "complete-me" {
-		t.Fatalf("unexpected final task result: %#v", task.Result)
-	}
 	waitForSessionState(t, server, "complete-me", "completed")
 }
 
 func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
-	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
 	waitForSessionState(t, server, "delete-me", "running")
@@ -545,19 +366,18 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	if response.Type != "session_delete" {
 		t.Fatalf("task type = %q, want session_delete", response.Type)
 	}
-	if response.Result == nil || response.Result.SessionID != "delete-me" {
+	if response.Status != schemas.TaskStatusPending {
+		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
+	}
+	if response.Result == nil || response.Result.SessionID != "delete-me" || createResponse.WorktreePath == "" {
 		t.Fatalf("unexpected delete task result: %#v", response.Result)
 	}
 
-	task := waitForTaskStatus(t, server, response.TaskID, schemas.TaskStatusSucceeded)
-	if task.Result == nil || task.Result.SessionID != "delete-me" || task.Result.WorktreePath != createResponse.WorktreePath {
-		t.Fatalf("unexpected final delete task result: %#v", task.Result)
-	}
 	waitForSessionState(t, server, "delete-me", "deleted")
 }
 
 func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) {
-	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+	server, _, _, repoDir := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nuke-a")
 	createEventSourcedSession(t, server, repoDir, "nuke-b")
@@ -645,36 +465,22 @@ func waitForSessionState(t *testing.T, server *Server, simpleID, wantState strin
 	return sessionevents.SessionRef{}
 }
 
-func waitForTaskStatus(t *testing.T, server *Server, taskID string, wantStatus schemas.TaskStatus) schemas.TaskResponse {
+func waitForProjection(t *testing.T, queries *db.Queries, simpleID string) db.SessionProjection {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		taskReq := httptest.NewRequest(http.MethodGet, "/tasks/"+taskID, nil)
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", taskID)
-		taskReq = taskReq.WithContext(context.WithValue(taskReq.Context(), chi.RouteCtxKey, rctx))
-		taskRec := httptest.NewRecorder()
-		server.HandlerTaskStatus(server.Base.Logger, taskRec, taskReq)
-		if taskRec.Code == http.StatusNotFound {
-			time.Sleep(50 * time.Millisecond)
-			continue
+		projection, err := queries.GetSessionProjectionBySimpleID(context.Background(), simpleID)
+		if err == nil {
+			return projection
 		}
-		if taskRec.Code != http.StatusOK {
-			t.Fatalf("task status code = %d, want 200; body=%s", taskRec.Code, taskRec.Body.String())
-		}
-
-		var task schemas.TaskResponse
-		if err := json.Unmarshal(taskRec.Body.Bytes(), &task); err != nil {
-			t.Fatalf("json.Unmarshal task response: %v", err)
-		}
-		if task.Status == wantStatus {
-			return task
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetSessionProjectionBySimpleID(%q): %v", simpleID, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for task %q status %q", taskID, wantStatus)
-	return schemas.TaskResponse{}
+	t.Fatalf("timed out waiting for projection %q", simpleID)
+	return db.SessionProjection{}
 }
 
 func bytesReader(payload []byte) *io.SectionReader {

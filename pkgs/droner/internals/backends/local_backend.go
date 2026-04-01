@@ -2,7 +2,6 @@ package backends
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -153,17 +152,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 			}
 		}
 	}
-	if !reused && l.db != nil && !l.disableCompletedWorktreeReuse {
-		reused, err := l.tryReuseCompletedWorktree(ctx, repoPath, worktreePath, sessionID)
-		if err != nil {
-			return err
-		}
-		if !reused {
-			if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
-				return err
-			}
-		}
-	} else if !reused {
+	if !reused {
 		if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
 			return err
 		}
@@ -817,72 +806,6 @@ func parseOpencodeModel(raw string) (providerID string, modelID string, ok bool)
 		return "", "", false
 	}
 	return parts[0], parts[1], true
-}
-
-func (l LocalBackend) tryReuseCompletedWorktree(ctx context.Context, repoPath string, worktreePath string, sessionID string) (bool, error) {
-	completed, err := l.db.ListSessionsByStatus(ctx, db.SessionStatusCompleted)
-	if err != nil {
-		return false, fmt.Errorf("failed to list completed sessions: %w", err)
-	}
-	if len(completed) == 0 {
-		return false, nil
-	}
-
-	cleanRepoPath := filepath.Clean(repoPath)
-	cleanTarget := filepath.Clean(worktreePath)
-	cleanRoot := filepath.Clean(l.config.WorktreeDir)
-
-	for _, session := range completed {
-		if session.BackendID != conf.BackendLocal.String() {
-			continue
-		}
-		if filepath.Clean(session.RepoPath) != cleanRepoPath {
-			continue
-		}
-		oldWorktreePath := filepath.Clean(session.WorktreePath)
-		if oldWorktreePath == "" || oldWorktreePath == cleanTarget {
-			continue
-		}
-		rel, relErr := filepath.Rel(cleanRoot, oldWorktreePath)
-		if relErr != nil || rel == "." || strings.HasPrefix(rel, "..") {
-			continue
-		}
-		info, statErr := os.Stat(oldWorktreePath)
-		if statErr != nil || !info.IsDir() {
-			continue
-		}
-
-		_ = l.killTmuxSession(session.SimpleID)
-		if err := l.resetAndCleanWorktree(oldWorktreePath); err != nil {
-			continue
-		}
-		if err := l.moveGitWorktree(cleanRepoPath, oldWorktreePath, cleanTarget); err != nil {
-			continue
-		}
-		baseRef, err := l.resolveBaseRef(cleanRepoPath)
-		if err != nil {
-			return false, err
-		}
-		if err := l.checkoutNewBranch(cleanTarget, sessionID, baseRef); err != nil {
-			return false, err
-		}
-
-		commonGitDir, err := l.gitCommonDirFromWorktree(cleanTarget)
-		if err != nil {
-			return false, err
-		}
-		if err := l.deleteGitBranch(commonGitDir, session.SimpleID); err != nil {
-			return false, err
-		}
-		_, _ = l.db.UpdateSessionStatusBySimpleID(ctx, db.UpdateSessionStatusBySimpleIDParams{
-			SimpleID: session.SimpleID,
-			Status:   db.SessionStatusDeleted,
-			Error:    sql.NullString{},
-		})
-		return true, nil
-	}
-
-	return false, nil
 }
 
 func (l LocalBackend) moveGitWorktree(repoPath string, fromPath string, toPath string) error {

@@ -6,14 +6,11 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
-	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
@@ -22,18 +19,12 @@ type Server struct {
 	Base         *core.BaseServer
 	httpServer   *http.Server
 	canceler     context.CancelFunc
-	consumer     *tasky.Consumer[core.Jobs]
 	events       *sessionevents.System
 	shutdownOnce sync.Once
 }
 
 func New() *Server {
 	base := core.New()
-
-	storePath := filepath.Join(base.Config.Server.DataDir, "tasks", "tasks.db")
-	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		assert.AssertNil(err, "[SERVER] Failed to create data directory")
-	}
 
 	return &Server{
 		Base:     base,
@@ -79,15 +70,9 @@ func (s *Server) Start() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.canceler = cancel
-	consumer := tasky.NewConsumer(s.Base.TaskQueue, tasky.ConsumerOptions{Workers: 1})
-	s.consumer = consumer
-	consumer.Start(ctx)
 	s.events.Start(ctx)
 
-	errCh := make(chan error, 2)
-	go func() {
-		errCh <- <-consumer.Err()
-	}()
+	errCh := make(chan error, 1)
 	go func() {
 		err := server.Serve(listener)
 		if errors.Is(err, http.ErrServerClosed) {
@@ -106,11 +91,6 @@ func (s *Server) Shutdown() {
 		s.canceler()
 		ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 		defer cancel()
-		if s.consumer != nil {
-			if err := s.consumer.Shutdown(ctx); err != nil {
-				s.Base.Logger.Error("[shutdown] Consumer shutdown failed", "error", err)
-			}
-		}
 
 		if s.httpServer != nil {
 			if err := s.httpServer.Shutdown(ctx); err != nil {

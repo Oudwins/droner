@@ -116,6 +116,7 @@ func TestLiveGitHubSDKAuthState(t *testing.T) {
 func TestEnsureAuthUsesStoredToken(t *testing.T) {
 	t.Cleanup(ResetRegistryForTests)
 	t.Setenv("GITHUB_TOKEN", "env-token")
+	t.Setenv("PATH", "")
 
 	ResetRegistryForTests()
 	if err := EnsureAuth(context.Background(), "git@github.com:owner/repo.git"); err != nil {

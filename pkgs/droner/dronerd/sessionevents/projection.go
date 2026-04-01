@@ -6,7 +6,6 @@ import (
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
 
 type sessionProjection struct {
@@ -36,53 +35,6 @@ type projectionMutation struct {
 	PublicState    string
 	LastError      string
 	OccurredAt     time.Time
-}
-
-func (p sessionProjection) taskTimes(taskType string) (schemas.TaskStatus, time.Time, time.Time) {
-	status := schemas.TaskStatusPending
-	startedAt := p.CreatedAt
-	finishedAt := time.Time{}
-
-	switch taskType {
-	case "session_create":
-		switch p.LifecycleState {
-		case string(eventTypeSessionReady):
-			status = schemas.TaskStatusSucceeded
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionEnvironmentProvisioningFailed):
-			status = schemas.TaskStatusFailed
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess):
-			status = schemas.TaskStatusRunning
-			startedAt = p.UpdatedAt
-		}
-	case "session_complete":
-		switch p.LifecycleState {
-		case string(eventTypeSessionCompletionSuccess):
-			status = schemas.TaskStatusSucceeded
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionCompletionFailed):
-			status = schemas.TaskStatusFailed
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted):
-			status = schemas.TaskStatusRunning
-			startedAt = p.UpdatedAt
-		}
-	case "session_delete":
-		switch p.LifecycleState {
-		case string(eventTypeSessionDeletionSuccess):
-			status = schemas.TaskStatusSucceeded
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionDeletionFailed):
-			status = schemas.TaskStatusFailed
-			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted):
-			status = schemas.TaskStatusRunning
-			startedAt = p.UpdatedAt
-		}
-	}
-
-	return status, startedAt, finishedAt
 }
 
 func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope) error {

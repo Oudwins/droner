@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
@@ -184,15 +183,7 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 		},
 	}
 
-	legacyConn, err := core.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.db"))
-	if err != nil {
-		t.Fatalf("OpenSQLiteDB: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = legacyConn.Close()
-	})
-
-	store := backends.NewStore(config, coredb.New(legacyConn))
+	store := backends.NewStore(config)
 	backend := &remoteTestBackend{worktreeRoot: worktreeDir}
 	store.Register(backend)
 
@@ -369,15 +360,29 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 		t.Fatalf("expected no additional create provisioning for ready session, create calls before=%d after=%d", beforeCreateCalls, backend.CreateCalls())
 	}
 
-	eventTypes := loadEventTypes(t, dataDir, streamID)
-	assertEventOrder(t, eventTypes,
-		eventTypeSessionQueued,
-		eventTypeSessionReady,
-		eventTypeSessionHydrationRequested,
-		eventTypeSessionEnvironmentProvisioningStarted,
-		eventTypeSessionEnvironmentProvisioningSuccess,
-		eventTypeSessionReady,
-	)
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		eventTypes := loadEventTypes(t, dataDir, streamID)
+		pos := 0
+		want := []eventlog.EventType{
+			eventTypeSessionQueued,
+			eventTypeSessionReady,
+			eventTypeSessionHydrationRequested,
+			eventTypeSessionEnvironmentProvisioningStarted,
+			eventTypeSessionEnvironmentProvisioningSuccess,
+			eventTypeSessionReady,
+		}
+		for _, eventType := range eventTypes {
+			if pos < len(want) && eventType == want[pos] {
+				pos++
+			}
+		}
+		if pos == len(want) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected hydration restart event sequence for %s", streamID)
 }
 
 func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) {

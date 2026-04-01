@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,22 +8,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/repo"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/internals/sessionIds"
-	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
-	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/zog/zhttp"
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	z "github.com/Oudwins/zog"
@@ -150,81 +142,27 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		}
 		agentConfigValue = sql.NullString{String: string(agentConfigBytes), Valid: true}
 	}
-	remoteURLValue := sql.NullString{}
-	if remoteURL != "" {
-		remoteURLValue = sql.NullString{String: remoteURL, Valid: true}
-	}
-	if s.events != nil {
-		result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
-			StreamID:        sessionID.String(),
-			SimpleID:        request.SessionID.String(),
-			BackendID:       request.BackendID,
-			RepoPath:        request.Path,
-			WorktreePath:    worktreePath,
-			RemoteURL:       remoteURL,
-			AgentConfigJSON: agentConfigValue.String,
-		})
-		if err != nil {
-			logger.Error("Failed to append session event", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		res := schemas.SessionCreateResponse{
-			SessionID:    request.SessionID,
-			SimpleID:     request.SessionID.String(),
-			BackendID:    request.BackendID,
-			WorktreePath: worktreePath,
-			TaskID:       result.TaskID,
-		}
-		RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
-		return
-	}
-	sessionData := db.CreateSessionParams{
-		ID:           sessionID.String(),
-		SimpleID:     request.SessionID.String(),
-		Status:       db.SessionStatusQueued,
-		BackendID:    request.BackendID.String(),
-		RepoPath:     request.Path,
-		RemoteUrl:    remoteURLValue,
-		WorktreePath: worktreePath,
-		AgentConfig:  agentConfigValue,
-		Error:        sql.NullString{},
-	}
-	_, err = s.Base.DB.CreateSession(r.Context(), sessionData)
+	result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
+		StreamID:        sessionID.String(),
+		SimpleID:        request.SessionID.String(),
+		BackendID:       request.BackendID,
+		RepoPath:        request.Path,
+		WorktreePath:    worktreePath,
+		RemoteURL:       remoteURL,
+		AgentConfigJSON: agentConfigValue.String,
+	})
 	if err != nil {
-		logger.Error("Failed to create session record", slog.String("error", err.Error()))
+		logger.Error("Failed to append session event", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
-	// Enqueue task
-	bytes, _ := json.Marshal(request)
-	enqueueCtx, enqueueCancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
-	defer enqueueCancel()
-	taskId, err := s.Base.TaskQueue.Enqueue(enqueueCtx, tasky.NewTask(core.JobCreateSession, bytes))
-	logger.Debug("Enqued create job session", slog.Bool("success", err == nil))
-	if err != nil {
-		logger.Error("Failed to enque task", slog.String("error", err.Error()))
-		_, updateErr := s.Base.DB.UpdateSessionStatusBySimpleID(context.Background(), db.UpdateSessionStatusBySimpleIDParams{
-			SimpleID: request.SessionID.String(),
-			Status:   db.SessionStatusFailed,
-			Error:    sql.NullString{String: err.Error(), Valid: true},
-		})
-		if updateErr != nil {
-			logger.Error("Failed to update session status", slog.String("error", updateErr.Error()))
-		}
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	// Response
 	res := schemas.SessionCreateResponse{
 		SessionID:    request.SessionID,
-		SimpleID:     sessionData.SimpleID,
+		SimpleID:     request.SessionID.String(),
 		BackendID:    request.BackendID,
 		WorktreePath: worktreePath,
-		TaskID:       taskId,
+		TaskID:       result.TaskID,
 	}
 	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
 }
@@ -256,38 +194,19 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 		return
 	}
 
-	if s.events != nil {
-		result, err := s.events.RequestDeletion(r.Context(), payload.SessionID.String())
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
-				return
-			}
-			logger.Error("Failed to append deletion request", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session deletion", nil), Render.Status(http.StatusInternalServerError))
+	result, err := s.events.RequestDeletion(r.Context(), payload.SessionID.String())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
 			return
 		}
-
-		RenderJSON(w, r, schemas.TaskResponse{
-			TaskID: taskIDOrPlaceholder(result.TaskID, "session_delete"),
-			Type:   "session_delete",
-			Status: schemas.TaskStatusPending,
-			Result: &schemas.TaskResult{SessionID: payload.SessionID.String()},
-		}, Render.Status(http.StatusAccepted))
-		return
-	}
-
-	bytes, _ := json.Marshal(payload)
-	logger.Debug("Enqueueing task", slog.Any("payload", payload))
-	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
-	if err != nil {
-		logger.Error("Failed to enque job", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		logger.Error("Failed to append deletion request", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session deletion", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	RenderJSON(w, r, schemas.TaskResponse{
-		TaskID: taskId,
+		TaskID: result.TaskID,
 		Type:   "session_delete",
 		Status: schemas.TaskStatusPending,
 		Result: &schemas.TaskResult{SessionID: payload.SessionID.String()},
@@ -311,40 +230,7 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		return
 	}
 
-	if s.events != nil {
-		ref, err := s.events.LookupSessionBySimpleID(r.Context(), payload.SessionID.String())
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
-				return
-			}
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to load session", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		if ref.PublicState != "running" && ref.PublicState != "completed" && ref.PublicState != "deleted" {
-			logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("sessionId", payload.SessionID.String()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
-			return
-		}
-
-		result, err := s.events.RequestCompletion(r.Context(), payload.SessionID.String())
-		if err != nil {
-			logger.Error("Failed to append completion request", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session completion", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		RenderJSON(w, r, schemas.TaskResponse{
-			TaskID: taskIDOrPlaceholder(result.TaskID, "session_complete"),
-			Type:   "session_complete",
-			Status: schemas.TaskStatusPending,
-			Result: &schemas.TaskResult{SessionID: payload.SessionID.String(), WorktreePath: ref.WorktreePath},
-		}, Render.Status(http.StatusAccepted))
-		return
-	}
-
-	session, err := s.Base.DB.GetSessionBySimpleIDAnyStatus(context.Background(), payload.SessionID.String())
+	ref, err := s.events.LookupSessionBySimpleID(r.Context(), payload.SessionID.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
@@ -354,202 +240,43 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		return
 	}
 
-	if session.Status != db.SessionStatusRunning && session.Status != db.SessionStatusCompleted && session.Status != db.SessionStatusDeleted {
-		logger.Error("Complete requested for non-running session", slog.String("status", string(session.Status)), slog.String("sessionId", payload.SessionID.String()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", session.Status), nil), Render.Status(http.StatusConflict))
+	if ref.PublicState != "running" && ref.PublicState != "completed" && ref.PublicState != "deleted" {
+		logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("sessionId", payload.SessionID.String()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
 		return
 	}
 
-	bytes, _ := json.Marshal(payload)
-	logger.Debug("Enqueueing task", slog.Any("payload", payload))
-	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobCompleteSession, bytes))
+	result, err := s.events.RequestCompletion(r.Context(), payload.SessionID.String())
 	if err != nil {
-		logger.Error("Failed to enque job", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		logger.Error("Failed to append completion request", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session completion", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
 
 	RenderJSON(w, r, schemas.TaskResponse{
-		TaskID: taskId,
+		TaskID: result.TaskID,
 		Type:   "session_complete",
 		Status: schemas.TaskStatusPending,
-		Result: &schemas.TaskResult{SessionID: payload.SessionID.String(), WorktreePath: session.WorktreePath},
+		Result: &schemas.TaskResult{SessionID: payload.SessionID.String(), WorktreePath: ref.WorktreePath},
 	}, Render.Status(http.StatusAccepted))
 }
 
-func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	taskID := chi.URLParam(r, "id")
-	if taskID == "" {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Task id is required", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-	if s.events != nil && (strings.HasPrefix(taskID, "session-create:") || strings.HasPrefix(taskID, "session-complete:") || strings.HasPrefix(taskID, "session-delete:")) {
-		snapshot, err := s.events.TaskStatus(r.Context(), taskID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Task not found", nil), Render.Status(http.StatusNotFound))
-				return
-			}
-			logger.Error("Failed to load synthetic task", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to load task", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		taskType := "session_create"
-		switch {
-		case strings.HasPrefix(taskID, "session-complete:"):
-			taskType = "session_complete"
-		case strings.HasPrefix(taskID, "session-delete:"):
-			taskType = "session_delete"
-		}
-
-		res := schemas.TaskResponse{
-			TaskID:    snapshot.TaskID,
-			Type:      taskType,
-			Status:    snapshot.Status,
-			CreatedAt: snapshot.CreatedAt.UTC().Format(time.RFC3339Nano),
-			Result: &schemas.TaskResult{
-				SessionID:    snapshot.SimpleID,
-				WorktreePath: snapshot.WorktreePath,
-			},
-			Error: snapshot.Error,
-		}
-		if !snapshot.StartedAt.IsZero() {
-			res.StartedAt = snapshot.StartedAt.UTC().Format(time.RFC3339Nano)
-		}
-		if !snapshot.FinishedAt.IsZero() {
-			res.FinishedAt = snapshot.FinishedAt.UTC().Format(time.RFC3339Nano)
-		}
-		RenderJSON(w, r, res)
-		return
-	}
-
-	queueDBPath := filepath.Join(s.Base.Config.Server.DataDir, "queue", "queue.db")
-	conn, err := sql.Open("sqlite", queueDBPath)
-	if err != nil {
-		logger.Error("Failed to open queue db", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to open task store", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(r.Context(), timeouts.SecondShort)
-	defer cancel()
-
-	var jobID string
-	var rawStatus string
-	var rawPayload []byte
-	var createdAt int64
-	var updatedAt int64
-	var completedAt sql.NullInt64
-	row := conn.QueryRowContext(ctx, `SELECT job_id, status, payload, created_at, updated_at, completed_at FROM droner_queue WHERE id = ?`, taskID)
-	if err := row.Scan(&jobID, &rawStatus, &rawPayload, &createdAt, &updatedAt, &completedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Task not found", nil), Render.Status(http.StatusNotFound))
-			return
-		}
-		logger.Error("Failed to query queue db", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to load task", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
-
-	status := schemas.TaskStatusPending
-	switch rawStatus {
-	case "pending":
-		status = schemas.TaskStatusPending
-	case "in_flight":
-		status = schemas.TaskStatusRunning
-	case "completed":
-		status = schemas.TaskStatusSucceeded
-	case "failed":
-		status = schemas.TaskStatusFailed
-	default:
-		status = schemas.TaskStatusPending
-	}
-
-	res := schemas.TaskResponse{
-		TaskID:    taskID,
-		Type:      jobID,
-		Status:    status,
-		CreatedAt: time.Unix(0, createdAt).UTC().Format(time.RFC3339Nano),
-	}
-	if updatedAt > 0 && (status == schemas.TaskStatusRunning || status == schemas.TaskStatusSucceeded || status == schemas.TaskStatusFailed) {
-		res.StartedAt = time.Unix(0, updatedAt).UTC().Format(time.RFC3339Nano)
-	}
-	if completedAt.Valid {
-		res.FinishedAt = time.Unix(0, completedAt.Int64).UTC().Format(time.RFC3339Nano)
-	} else if updatedAt > 0 && (status == schemas.TaskStatusSucceeded || status == schemas.TaskStatusFailed) {
-		res.FinishedAt = time.Unix(0, updatedAt).UTC().Format(time.RFC3339Nano)
-	}
-
-	result := &schemas.TaskResult{}
-	switch core.Jobs(jobID) {
-	case core.JobCreateSession:
-		var payload schemas.SessionCreateRequest
-		if err := json.Unmarshal(rawPayload, &payload); err == nil {
-			result.SessionID = payload.SessionID.String()
-			backend, err := s.Base.BackendStore.Get(payload.BackendID)
-			if err == nil {
-				if wt, err := backend.WorktreePath(payload.Path, payload.SessionID.String()); err == nil {
-					result.WorktreePath = wt
-				}
-			}
-		}
-	case core.JobDeleteSession:
-		var payload schemas.SessionDeleteRequest
-		if err := json.Unmarshal(rawPayload, &payload); err == nil {
-			result.SessionID = payload.SessionID.String()
-			if session, err := s.Base.DB.GetSessionBySimpleIDAnyStatus(context.Background(), payload.SessionID.String()); err == nil {
-				result.WorktreePath = session.WorktreePath
-			}
-		}
-	case core.JobCompleteSession:
-		var payload schemas.SessionCompleteRequest
-		if err := json.Unmarshal(rawPayload, &payload); err == nil {
-			result.SessionID = payload.SessionID.String()
-			if session, err := s.Base.DB.GetSessionBySimpleIDAnyStatus(context.Background(), payload.SessionID.String()); err == nil {
-				result.WorktreePath = session.WorktreePath
-			}
-		}
-	}
-	if result.SessionID != "" || result.WorktreePath != "" {
-		res.Result = result
-	}
-
-	RenderJSON(w, r, res)
-}
-
 func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	if s.events != nil {
-		result, err := s.events.NukeSessions(r.Context())
-		if err != nil {
-			logger.Error("Failed to request session nuke", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to nuke sessions", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		RenderJSON(w, r, schemas.TaskResponse{
-			TaskID:     "",
-			Type:       "session_nuke",
-			Status:     schemas.TaskStatusSucceeded,
-			CreatedAt:  now,
-			FinishedAt: now,
-			Result:     &schemas.TaskResult{SessionID: fmt.Sprintf("%d", result.Requested)},
-		}, Render.Status(http.StatusAccepted))
-		return
-	}
-
-	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteAllSessions, []byte("{}")))
+	result, err := s.events.NukeSessions(r.Context())
 	if err != nil {
-		logger.Error("Failed to enque job", slog.String("error", err.Error()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to enque job"+err.Error(), nil), Render.Status(http.StatusInternalServerError))
+		logger.Error("Failed to request session nuke", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to nuke sessions", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	RenderJSON(w, r, schemas.TaskResponse{
-		TaskID: taskId,
-		Type:   "session_nuke",
-		Status: schemas.TaskStatusPending,
+		TaskID:     "",
+		Type:       "session_nuke",
+		Status:     schemas.TaskStatusSucceeded,
+		CreatedAt:  now,
+		FinishedAt: now,
+		Result:     &schemas.TaskResult{SessionID: fmt.Sprintf("%d", result.Requested)},
 	}, Render.Status(http.StatusAccepted))
 }
 
@@ -559,71 +286,19 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 	if rawAll == "1" || rawAll == "true" || rawAll == "yes" {
 		all = true
 	}
-	if s.events != nil {
-		items, err := s.events.ListSessions(r.Context(), all)
-		if err != nil {
-			logger.Error("Failed to list event-sourced sessions", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-		responseItems := make([]schemas.SessionListItem, 0, len(items))
-		for _, item := range items {
-			responseItems = append(responseItems, schemas.SessionListItem{
-				SimpleID: schemas.NewSSessionID(item.SimpleID),
-				State:    item.State,
-			})
-		}
-		RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
+	items, err := s.events.ListSessions(r.Context(), all)
+	if err != nil {
+		logger.Error("Failed to list event-sourced sessions", slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
-
-	var sessions []db.Session
-	if all {
-		rows, err := s.Base.DB.ListSessions(r.Context())
-		if err != nil {
-			logger.Error("Failed to list sessions", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-		if len(rows) > 100 {
-			rows = rows[:100]
-		}
-		sessions = rows
-	} else {
-		queued, err := s.Base.DB.ListSessionsByStatus(r.Context(), db.SessionStatusQueued)
-		if err != nil {
-			logger.Error("Failed to list queued sessions", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list queued sessions", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		running, err := s.Base.DB.ListSessionsByStatus(r.Context(), db.SessionStatusRunning)
-		if err != nil {
-			logger.Error("Failed to list running sessions", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list running sessions", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-
-		sessions = append(queued, running...)
-		sort.Slice(sessions, func(i, j int) bool {
-			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+	responseItems := make([]schemas.SessionListItem, 0, len(items))
+	for _, item := range items {
+		responseItems = append(responseItems, schemas.SessionListItem{
+			SimpleID: schemas.NewSSessionID(item.SimpleID),
+			State:    item.State,
 		})
 	}
 
-	items := make([]schemas.SessionListItem, 0, len(sessions))
-	for _, session := range sessions {
-		items = append(items, schemas.SessionListItem{
-			SimpleID: schemas.NewSSessionID(session.SimpleID),
-			State:    string(session.Status),
-		})
-	}
-
-	RenderJSON(w, r, schemas.SessionListResponse{Sessions: items})
-}
-
-func taskIDOrPlaceholder(taskID string, fallback string) string {
-	if taskID != "" {
-		return taskID
-	}
-	return fallback
+	RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
 }

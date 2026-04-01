@@ -53,7 +53,8 @@
 ## HTTP service notes
 - Server listens on `env.PORT` / `env.LISTEN_ADDR` (default port 57876).
 - Health check: `GET /version`.
-- Other endpoints: `POST /sessions`, `DELETE /sessions`.
+- Other endpoints: `POST /sessions`, `DELETE /sessions`, `POST /sessions/complete`, `POST /sessions/nuke`, `GET /sessions`.
+- The server is event-only now; legacy `GET /tasks/{id}` polling is removed.
 - See `README.md` for curl examples.
 
 ## Cursor/Copilot rules

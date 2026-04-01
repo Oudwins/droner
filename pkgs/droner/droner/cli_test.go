@@ -61,33 +61,7 @@ func setupCLIEnv(t *testing.T, baseURL string) {
 	})
 }
 
-func TestCLITaskFlow(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/version":
-			_, _ = w.Write([]byte("test-version"))
-		case "/tasks/abc":
-			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "abc", Status: schemas.TaskStatusSucceeded})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	setupCLIEnv(t, server.URL)
-
-	output, err := captureOutput(t, func() error {
-		return executeCLI([]string{"task", "abc"})
-	})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if !strings.Contains(output, "task: abc") || !strings.Contains(output, "status: succeeded") {
-		t.Fatalf("unexpected output: %s", output)
-	}
-}
-
-func TestCLINewAndDeleteWait(t *testing.T) {
+func TestCLINewDeleteAndComplete(t *testing.T) {
 	var createRequest schemas.SessionCreateRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -104,21 +78,15 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 			}
 			if r.Method == http.MethodDelete {
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusPending})
+				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{SessionID: "abc"}})
 				return
 			}
 		case "/sessions/complete":
 			if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusPending})
+				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{SessionID: "abc", WorktreePath: "/tmp/worktree"}})
 				return
 			}
-		case "/tasks/task-new":
-			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-new", Status: schemas.TaskStatusSucceeded})
-		case "/tasks/task-del":
-			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusSucceeded})
-		case "/tasks/task-complete":
-			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusSucceeded})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -128,12 +96,12 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	setupCLIEnv(t, server.URL)
 
 	output, err := captureOutput(t, func() error {
-		return executeCLI([]string{"new", "--path", "/repo", "--agent", "plan", "--prompt", "hello", "--wait"})
+		return executeCLI([]string{"new", "--path", "/repo", "--agent", "plan", "--prompt", "hello"})
 	})
 	if err != nil {
 		t.Fatalf("run new: %v", err)
 	}
-	if !strings.Contains(output, "session: simple-new") || !strings.Contains(output, "status: succeeded") {
+	if !strings.Contains(output, "session: simple-new") {
 		t.Fatalf("unexpected new output: %s", output)
 	}
 	if createRequest.AgentConfig == nil {
@@ -147,22 +115,22 @@ func TestCLINewAndDeleteWait(t *testing.T) {
 	}
 
 	output, err = captureOutput(t, func() error {
-		return executeCLI([]string{"del", "abc", "--wait"})
+		return executeCLI([]string{"del", "abc"})
 	})
 	if err != nil {
 		t.Fatalf("run del: %v", err)
 	}
-	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
+	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "session: abc") {
 		t.Fatalf("unexpected del output: %s", output)
 	}
 
 	output, err = captureOutput(t, func() error {
-		return executeCLI([]string{"complete", "abc", "--wait"})
+		return executeCLI([]string{"complete", "abc"})
 	})
 	if err != nil {
 		t.Fatalf("run complete: %v", err)
 	}
-	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "status: succeeded") {
+	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "worktree: /tmp/worktree") {
 		t.Fatalf("unexpected complete output: %s", output)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -237,26 +236,6 @@ func (c *Client) ListSessionsAll(ctx context.Context) (*schemas.SessionListRespo
 	}
 
 	var payload schemas.SessionListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	return &payload, nil
-}
-
-func (c *Client) TaskStatus(ctx context.Context, taskID string) (*schemas.TaskResponse, error) {
-	path := "/tasks/" + url.PathEscape(taskID)
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, responseError(resp)
-	}
-
-	var payload schemas.TaskResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
