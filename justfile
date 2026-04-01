@@ -14,20 +14,20 @@ kill:
     fi
 
 dev: kill
-    cd ./pkgs/droner && go run ./dronerd
+    cd ./pkgs/droner && go run ./dronerd/cmd/dronerd
 
 serve:
-    cd ./pkgs/droner && go run ./dronerd serve
+    cd ./pkgs/droner && go run ./dronerd/cmd/dronerd
 
 eventdebug:
-    cd ./pkgs/droner && go run ./droner-eventdebug
+    cd ./pkgs/droner && go run ./dronerd/cmd/eventdebug
 
 build:
     mkdir -p {{bin_dir}}
     cd ./pkgs/droner && go build -o ../../{{droner_bin}} ./droner
 
 build-all: build
-    cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd
+    cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd/cmd/dronerd
 
 test *args:
     cd ./pkgs/droner && go test ./... {{args}}

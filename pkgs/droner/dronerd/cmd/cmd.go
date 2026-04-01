@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"context"
@@ -9,11 +9,19 @@ import (
 	"syscall"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/eventdebug"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
-func main() {
+func RunServer() {
+	serverInstance := server.New()
+	if err := serverInstance.Start(); err != nil {
+		log.Fatal("[Droner] Failed to start server: ", err)
+	}
+}
+
+func RunEventDebug() {
 	defaultDBPath := sessionslog.DBPath(conf.GetConfig().Server.DataDir)
 
 	addr := flag.String("addr", "localhost:57877", "listen address")

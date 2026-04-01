@@ -8,7 +8,7 @@
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
-- Server entry point: `pkgs/droner/dronerd/main.go`.
+- Server entry point lives under `pkgs/droner/dronerd/cmd`: shared startup code is in `cmd/cmd.go`, with binaries in `cmd/dronerd` and `cmd/eventdebug`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Core packages live under `pkgs/droner/internals/...`.
 - Shared event log abstraction lives in `pkgs/droner/internals/eventlog` with the first backend in `internals/eventlog/backends/sqlite`.
@@ -28,10 +28,10 @@
 
 ## Build and run
 - Run server (kills port 57876 first): `just dev`.
-- Manual server run: `go run ./pkgs/droner/dronerd`.
+- Manual server run: `go run ./pkgs/droner/dronerd/cmd/dronerd`.
 - Run event debug UI: `just eventdebug`.
 - Build binaries into `./bin`: `just build`.
-- Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd`.
+- Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd/cmd/dronerd`.
 - Build CLI only: `go build -o ./bin/droner ./pkgs/droner/droner`.
 - Run CLI (builds first): `just cli <args>`.
 
