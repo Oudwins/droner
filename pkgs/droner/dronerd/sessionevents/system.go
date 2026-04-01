@@ -275,7 +275,7 @@ func (s *System) RequestDeletion(ctx context.Context, simpleID string) (Operatio
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
 	}
 	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
@@ -291,7 +291,7 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 	}
 	requested := 0
 	for _, ref := range refs {
-		if ref.LifecycleState == string(eventTypeSessionDeletionRequested) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		if ref.LifecycleState == string(eventTypeSessionDeletionRequested) || ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 			continue
 		}
 		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {

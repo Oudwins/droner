@@ -64,7 +64,7 @@ func TestTopicSequencesAreIndependent(t *testing.T) {
 	}
 	githubEvent, err := github.Append(context.Background(), eventlog.PendingEvent{
 		StreamID: "pr/123",
-		Type:     "github.pr_merged_observed",
+		Type:     "github.pr.merged.observed",
 		Payload:  []byte(`{}`),
 	})
 	if err != nil {

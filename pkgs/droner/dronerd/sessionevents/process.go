@@ -17,7 +17,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 	}
 	if err == nil {
 		switch projection.LifecycleState {
-		case string(eventTypeSessionReady), string(eventTypeSessionFailed):
+		case string(eventTypeSessionReady), string(eventTypeSessionEnvironmentProvisioningFailed):
 			return nil
 		}
 	}
@@ -45,7 +45,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 		return s.appendFailure(ctx, evt, err)
 	}
 
-	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioned, eventTypeSessionRuntimeStarted, eventTypeSessionReady} {
+	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionRuntimeStarted, eventTypeSessionReady} {
 		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, readyStepPayload(queued), string(evt.ID), string(evt.StreamID)); err != nil {
 			return err
 		}
@@ -54,7 +54,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 }
 
 func (s *System) appendFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionEnvironmentProvisioningFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
 
@@ -75,10 +75,10 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 	}
 	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
 	if err != nil {
-		return s.appendCleanupFailure(ctx, evt, err)
+		return s.appendCompletionFailure(ctx, evt, err)
 	}
 	if err := backend.CompleteSession(ctx, projection.WorktreePath, projection.SimpleID); err != nil {
-		return s.appendCleanupFailure(ctx, evt, err)
+		return s.appendCompletionFailure(ctx, evt, err)
 	}
 	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionSuccess, requestStepPayload(projection.SimpleID), string(evt.ID), string(evt.StreamID))
 	return err
@@ -92,18 +92,30 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 	if projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
+	payload, err := decodeSessionIDPayload(evt)
+	if err != nil {
+		return err
+	}
+	if _, err := s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionStarted, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID)); err != nil {
+		return err
+	}
 	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
 	if err != nil {
-		return s.appendCleanupFailure(ctx, evt, err)
+		return s.appendDeletionFailure(ctx, evt, err)
 	}
 	if err := backend.DeleteSession(ctx, projection.WorktreePath, projection.SimpleID); err != nil {
-		return s.appendCleanupFailure(ctx, evt, err)
+		return s.appendDeletionFailure(ctx, evt, err)
 	}
 	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(projection.SimpleID), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
-func (s *System) appendCleanupFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionCleanupFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+func (s *System) appendCompletionFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionCompletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	return err
+}
+
+func (s *System) appendDeletionFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionDeletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }

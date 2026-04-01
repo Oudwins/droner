@@ -186,7 +186,7 @@ func TestBuildEventGroupsLeavesTwoPartEventsStandalone(t *testing.T) {
 	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
 	events := []Event{
 		{EventType: "session.queued", OccurredAt: now},
-		{EventType: "session.runtime_started", OccurredAt: now.Add(1200 * time.Millisecond)},
+		{EventType: "session.ready", OccurredAt: now.Add(1200 * time.Millisecond)},
 	}
 
 	groups := buildEventGroups(events)
@@ -196,7 +196,7 @@ func TestBuildEventGroupsLeavesTwoPartEventsStandalone(t *testing.T) {
 	if groups[0].Action != "session.queued" {
 		t.Fatalf("first group action = %q, want %q", groups[0].Action, "session.queued")
 	}
-	if groups[1].Action != "session.runtime_started" {
-		t.Fatalf("second group action = %q, want %q", groups[1].Action, "session.runtime_started")
+	if groups[1].Action != "session.ready" {
+		t.Fatalf("second group action = %q, want %q", groups[1].Action, "session.ready")
 	}
 }

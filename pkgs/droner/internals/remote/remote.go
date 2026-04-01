@@ -11,12 +11,12 @@ import (
 type BranchEventType string
 
 const (
-	PRCreated     BranchEventType = "pr_created"
-	PRClosed      BranchEventType = "pr_closed"
-	PRMerged      BranchEventType = "pr_merged"
-	PRDeleted     BranchEventType = "pr_deleted"
-	BranchCreated BranchEventType = "branch_created"
-	BranchDeleted BranchEventType = "branch_deleted"
+	PRCreated     BranchEventType = "pr.created"
+	PRClosed      BranchEventType = "pr.closed"
+	PRMerged      BranchEventType = "pr.merged"
+	PRDeleted     BranchEventType = "pr.deleted"
+	BranchCreated BranchEventType = "branch.created"
+	BranchDeleted BranchEventType = "branch.deleted"
 )
 
 var ErrUnsupportedRemote = errors.New("unsupported remote provider")

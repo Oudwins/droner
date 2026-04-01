@@ -48,10 +48,10 @@ func (p sessionProjection) taskTimes(taskType string) (schemas.TaskStatus, time.
 		case string(eventTypeSessionReady):
 			status = schemas.TaskStatusSucceeded
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionFailed):
+		case string(eventTypeSessionEnvironmentProvisioningFailed):
 			status = schemas.TaskStatusFailed
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioned), string(eventTypeSessionRuntimeStarted):
+		case string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess), string(eventTypeSessionRuntimeStarted):
 			status = schemas.TaskStatusRunning
 			startedAt = p.UpdatedAt
 		}
@@ -60,7 +60,7 @@ func (p sessionProjection) taskTimes(taskType string) (schemas.TaskStatus, time.
 		case string(eventTypeSessionCompletionSuccess):
 			status = schemas.TaskStatusSucceeded
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionCleanupFailed), string(eventTypeSessionFailed):
+		case string(eventTypeSessionCompletionFailed):
 			status = schemas.TaskStatusFailed
 			finishedAt = p.UpdatedAt
 		case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted):
@@ -72,10 +72,10 @@ func (p sessionProjection) taskTimes(taskType string) (schemas.TaskStatus, time.
 		case string(eventTypeSessionDeletionSuccess):
 			status = schemas.TaskStatusSucceeded
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionCleanupFailed), string(eventTypeSessionFailed):
+		case string(eventTypeSessionDeletionFailed):
 			status = schemas.TaskStatusFailed
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionDeletionRequested):
+		case string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted):
 			status = schemas.TaskStatusRunning
 			startedAt = p.UpdatedAt
 		}
@@ -105,34 +105,42 @@ func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope
 		})
 	case eventTypeSessionEnvironmentProvisioningStarted:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningStarted), "queued", "", evt.OccurredAt)
-	case eventTypeSessionEnvironmentProvisioned:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioned), "queued", "", evt.OccurredAt)
+	case eventTypeSessionEnvironmentProvisioningSuccess:
+		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningSuccess), "queued", "", evt.OccurredAt)
 	case eventTypeSessionRuntimeStarted:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionRuntimeStarted), "queued", "", evt.OccurredAt)
 	case eventTypeSessionReady:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionReady), "running", "", evt.OccurredAt)
+	case eventTypeSessionEnvironmentProvisioningFailed:
+		payload, err := decodeFailedPayload(evt)
+		if err != nil {
+			return err
+		}
+		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningFailed), "failed", payload.Error, evt.OccurredAt)
 	case eventTypeSessionCompletionRequested:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionRequested), "running", "", evt.OccurredAt)
 	case eventTypeSessionCompletionStarted:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionStarted), "completing", "", evt.OccurredAt)
 	case eventTypeSessionCompletionSuccess:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionSuccess), "completed", "", evt.OccurredAt)
+	case eventTypeSessionCompletionFailed:
+		payload, err := decodeFailedPayload(evt)
+		if err != nil {
+			return err
+		}
+		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionFailed), "failed", payload.Error, evt.OccurredAt)
 	case eventTypeSessionDeletionRequested:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionRequested), "deleting", "", evt.OccurredAt)
+	case eventTypeSessionDeletionStarted:
+		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionStarted), "deleting", "", evt.OccurredAt)
 	case eventTypeSessionDeletionSuccess:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionSuccess), "deleted", "", evt.OccurredAt)
-	case eventTypeSessionCleanupFailed:
+	case eventTypeSessionDeletionFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return err
 		}
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCleanupFailed), "failed", payload.Error, evt.OccurredAt)
-	case eventTypeSessionFailed:
-		payload, err := decodeFailedPayload(evt)
-		if err != nil {
-			return err
-		}
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionFailed), "failed", payload.Error, evt.OccurredAt)
+		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionFailed), "failed", payload.Error, evt.OccurredAt)
 	default:
 		return nil
 	}
