@@ -51,7 +51,7 @@ func (p sessionProjection) taskTimes(taskType string) (schemas.TaskStatus, time.
 		case string(eventTypeSessionEnvironmentProvisioningFailed):
 			status = schemas.TaskStatusFailed
 			finishedAt = p.UpdatedAt
-		case string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess), string(eventTypeSessionRuntimeStarted):
+		case string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess):
 			status = schemas.TaskStatusRunning
 			startedAt = p.UpdatedAt
 		}
@@ -107,8 +107,6 @@ func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningStarted), "queued", "", evt.OccurredAt)
 	case eventTypeSessionEnvironmentProvisioningSuccess:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningSuccess), "queued", "", evt.OccurredAt)
-	case eventTypeSessionRuntimeStarted:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionRuntimeStarted), "queued", "", evt.OccurredAt)
 	case eventTypeSessionReady:
 		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionReady), "running", "", evt.OccurredAt)
 	case eventTypeSessionEnvironmentProvisioningFailed:

@@ -20,7 +20,6 @@ const (
 	eventTypeSessionEnvironmentProvisioningStarted = eventlog.EventType("session.environment_provisioning.started")
 	eventTypeSessionEnvironmentProvisioningSuccess = eventlog.EventType("session.environment_provisioning.success")
 	eventTypeSessionEnvironmentProvisioningFailed  = eventlog.EventType("session.environment_provisioning.failed")
-	eventTypeSessionRuntimeStarted                 = eventlog.EventType("session.runtime.started")
 	eventTypeSessionReady                          = eventlog.EventType("session.ready")
 	eventTypeSessionCompletionRequested            = eventlog.EventType("session.completion.requested")
 	eventTypeSessionCompletionStarted              = eventlog.EventType("session.completion.started")

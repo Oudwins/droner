@@ -45,7 +45,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 		return s.appendFailure(ctx, evt, err)
 	}
 
-	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionRuntimeStarted, eventTypeSessionReady} {
+	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionReady} {
 		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, readyStepPayload(queued), string(evt.ID), string(evt.StreamID)); err != nil {
 			return err
 		}
