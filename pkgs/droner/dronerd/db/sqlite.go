@@ -1,4 +1,4 @@
-package core
+package db
 
 import (
 	"database/sql"
@@ -10,23 +10,22 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 
 	_ "modernc.org/sqlite"
 )
 
-//go:embed db/schemas/*.sql
+//go:embed schemas/*.sql
 var schemaFS embed.FS
 
-func InitDB(config *conf.Config) (*db.Queries, error) {
+func InitDB(config *conf.Config) (*Queries, error) {
 	dbPath := filepath.Join(config.Server.DataDir, "db", "droner.db")
 	conn, err := OpenSQLiteDB(dbPath)
 	if err != nil {
 		return nil, err
 	}
 
-	return db.New(conn), nil
+	return New(conn), nil
 }
 
 func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
@@ -108,7 +107,7 @@ func ensureSessionsRemoteURLColumn(conn *sql.DB) error {
 }
 
 func loadSchemas() ([]string, error) {
-	paths, err := fs.Glob(schemaFS, "db/schemas/*.sql")
+	paths, err := fs.Glob(schemaFS, "schemas/*.sql")
 	if err != nil {
 		return nil, err
 	}

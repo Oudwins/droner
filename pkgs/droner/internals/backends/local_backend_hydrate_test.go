@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )

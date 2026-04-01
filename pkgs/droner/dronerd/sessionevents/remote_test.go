@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"

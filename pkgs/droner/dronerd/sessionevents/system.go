@@ -10,8 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
-	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -120,7 +119,7 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = log.Close()
 		}
 	}()
-	if err := core.ApplySchemas(conn); err != nil {
+	if err := coredb.ApplySchemas(conn); err != nil {
 		return nil, err
 	}
 

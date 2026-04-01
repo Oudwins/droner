@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -87,12 +87,12 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 		},
 	}
 
-	legacyQueries, err := core.InitDB(config)
+	legacyQueries, err := db.InitDB(config)
 	if err != nil {
 		t.Fatalf("InitDB: %v", err)
 	}
 
-	projectionConn, err := core.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.new.db"))
+	projectionConn, err := db.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.new.db"))
 	if err != nil {
 		t.Fatalf("OpenSQLiteDB projection db: %v", err)
 	}

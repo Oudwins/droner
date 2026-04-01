@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
 

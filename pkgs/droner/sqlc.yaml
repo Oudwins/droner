@@ -1,12 +1,12 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    queries: "dronerd/core/db/queries"
-    schema: "dronerd/core/db/schemas"
+    queries: "dronerd/db/queries"
+    schema: "dronerd/db/schemas"
     gen:
       go:
         package: "db"
-        out: "dronerd/core/db"
+        out: "dronerd/db"
         overrides:
           - column: "sessions.status"
             go_type:
