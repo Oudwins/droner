@@ -98,8 +98,12 @@ func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, ag
 	return HydrationResult{Status: db.SessionStatusRunning}, nil
 }
 
-func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig) (retErr error) {
+func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig, opts ...CreateSessionOptions) (retErr error) {
 	sessionName := tmuxSessionName(repoPath, sessionID)
+	createOpts := CreateSessionOptions{}
+	if len(opts) > 0 {
+		createOpts = opts[0]
+	}
 
 	defer func() {
 		if retErr == nil {
@@ -126,7 +130,30 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
-	if l.db != nil && !l.disableCompletedWorktreeReuse {
+	reused := false
+	if createOpts.NextReusableWorktree != nil {
+		for {
+			candidate, err := createOpts.NextReusableWorktree(ctx)
+			if err != nil {
+				return err
+			}
+			if candidate == nil {
+				break
+			}
+			reuseCandidate, ok, err := l.tryReuseProvidedWorktree(repoPath, worktreePath, sessionID, *candidate)
+			if err != nil {
+				return err
+			}
+			if createOpts.MarkReusableWorktreeDeletion != nil {
+				createOpts.MarkReusableWorktreeDeletion(reuseCandidate)
+			}
+			if ok {
+				reused = true
+				break
+			}
+		}
+	}
+	if !reused && l.db != nil && !l.disableCompletedWorktreeReuse {
 		reused, err := l.tryReuseCompletedWorktree(ctx, repoPath, worktreePath, sessionID)
 		if err != nil {
 			return err
@@ -136,7 +163,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 				return err
 			}
 		}
-	} else {
+	} else if !reused {
 		if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
 			return err
 		}
@@ -189,6 +216,52 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	return nil
 }
 
+func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath string, sessionID string, candidate ReusableWorktreeCandidate) (ReusableWorktreeCandidate, bool, error) {
+	cleanRepoPath := filepath.Clean(repoPath)
+	cleanTarget := filepath.Clean(worktreePath)
+	cleanRoot := filepath.Clean(l.config.WorktreeDir)
+	oldWorktreePath := filepath.Clean(candidate.WorktreePath)
+
+	if filepath.Clean(candidate.RepoPath) != cleanRepoPath {
+		return candidate, false, nil
+	}
+	if oldWorktreePath == "" || oldWorktreePath == cleanTarget {
+		return candidate, false, nil
+	}
+	rel, relErr := filepath.Rel(cleanRoot, oldWorktreePath)
+	if relErr != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return candidate, false, nil
+	}
+	info, statErr := os.Stat(oldWorktreePath)
+	if statErr != nil || !info.IsDir() {
+		return candidate, false, nil
+	}
+
+	_ = l.killTmuxSession(candidate.SimpleID)
+	if err := l.resetAndCleanWorktree(oldWorktreePath); err != nil {
+		return candidate, false, nil
+	}
+	if err := l.moveGitWorktree(cleanRepoPath, oldWorktreePath, cleanTarget); err != nil {
+		return candidate, false, nil
+	}
+	baseRef, err := l.resolveBaseRef(cleanRepoPath)
+	if err != nil {
+		return candidate, false, err
+	}
+	if err := l.checkoutNewBranch(cleanTarget, sessionID, baseRef); err != nil {
+		return candidate, false, err
+	}
+
+	commonGitDir, err := l.gitCommonDirFromWorktree(cleanTarget)
+	if err != nil {
+		return candidate, false, err
+	}
+	if err := l.deleteGitBranch(commonGitDir, candidate.SimpleID); err != nil {
+		return candidate, false, err
+	}
+	return candidate, true, nil
+}
+
 func (l LocalBackend) gitCommonDirFromRepo(repoPath string) (string, error) {
 	cmd := execCommand("git", "-C", repoPath, "rev-parse", "--git-common-dir")
 	output, err := cmd.CombinedOutput()
@@ -215,11 +288,20 @@ func (l LocalBackend) removeGitWorktreeFromRepo(repoPath string, worktreePath st
 
 func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
 	sessionName := tmuxSessionNameFromWorktreePath(worktreePath)
-	commonGitDir, err := l.gitCommonDirFromWorktree(worktreePath)
-	if err != nil {
+	if err := l.killTmuxSession(sessionName); err != nil {
 		return err
 	}
-	if err := l.killTmuxSession(sessionName); err != nil {
+	if strings.TrimSpace(worktreePath) == "" {
+		return nil
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	commonGitDir, err := l.gitCommonDirFromWorktree(worktreePath)
+	if err != nil {
 		return err
 	}
 	if err := l.removeGitWorktree(worktreePath); err != nil {

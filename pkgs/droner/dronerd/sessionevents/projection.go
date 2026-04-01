@@ -212,6 +212,21 @@ func (s *System) listHydratableProjectionRefs(ctx context.Context) ([]SessionRef
 	return refs, nil
 }
 
+func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string, backendID string) ([]SessionRef, error) {
+	rows, err := s.queries.ListReusableSessionProjectionRefs(ctx, coredb.ListReusableSessionProjectionRefsParams{
+		RepoPath:  repoPath,
+		BackendID: backendID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	refs := []SessionRef{}
+	for _, row := range rows {
+		refs = append(refs, sessionRefFromRow(row))
+	}
+	return refs, nil
+}
+
 func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 	return sessionProjection{
 		StreamID:       row.StreamID,

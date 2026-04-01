@@ -42,10 +42,19 @@ func (b *remoteTestBackend) ValidateSessionID(repoPath string, sessionID string)
 	return nil
 }
 
-func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
+func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	b.mu.Lock()
 	b.createCalls++
 	b.mu.Unlock()
+	if len(opts) > 0 && opts[0].NextReusableWorktree != nil {
+		candidate, err := opts[0].NextReusableWorktree(ctx)
+		if err != nil {
+			return err
+		}
+		if candidate != nil && opts[0].MarkReusableWorktreeDeletion != nil {
+			opts[0].MarkReusableWorktreeDeletion(*candidate)
+		}
+	}
 	return nil
 }
 
@@ -368,5 +377,50 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 		eventTypeSessionEnvironmentProvisioningStarted,
 		eventTypeSessionEnvironmentProvisioningSuccess,
 		eventTypeSessionReady,
+	)
+}
+
+func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) {
+	system, backend, _, _ := newRemoteTestSystem(t)
+
+	oldCreatedAt := time.Now().UTC().Add(-time.Hour)
+	if err := system.queries.UpsertSessionProjection(context.Background(), coredb.UpsertSessionProjectionParams{
+		StreamID:       "old-stream",
+		SimpleID:       "old-branch",
+		BackendID:      conf.BackendLocal.String(),
+		RepoPath:       "/tmp/repo",
+		WorktreePath:   filepath.Join(backend.worktreeRoot, "repo..old-branch"),
+		RemoteUrl:      "",
+		AgentConfig:    "",
+		LifecycleState: string(eventTypeSessionCompletionSuccess),
+		PublicState:    "completed",
+		LastError:      "",
+		CreatedAt:      oldCreatedAt,
+		UpdatedAt:      oldCreatedAt,
+	}); err != nil {
+		t.Fatalf("UpsertSessionProjection old: %v", err)
+	}
+
+	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
+		StreamID:     "new-stream",
+		SimpleID:     "new-branch",
+		BackendID:    conf.BackendLocal,
+		RepoPath:     "/tmp/repo",
+		WorktreePath: filepath.Join(backend.worktreeRoot, "repo..new-branch"),
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	waitForPublicState(t, system, "new-branch", "running")
+	waitForPublicState(t, system, "old-branch", "deleted")
+	if backend.deleteCalls != 1 {
+		t.Fatalf("expected old reused session delete to run once, got %d", backend.deleteCalls)
+	}
+
+	eventTypes := loadEventTypes(t, system.config.Server.DataDir, "old-stream")
+	assertEventOrder(t, eventTypes,
+		eventTypeSessionDeletionRequested,
+		eventTypeSessionDeletionStarted,
+		eventTypeSessionDeletionSuccess,
 	)
 }

@@ -44,7 +44,7 @@ func (b *createSessionBackend) ValidateSessionID(repoPath string, sessionID stri
 	return nil
 }
 
-func (b *createSessionBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
+func (b *createSessionBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	return nil
 }
 

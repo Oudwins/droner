@@ -36,7 +36,7 @@ func (h *hydrationBackend) ValidateSessionID(repoPath string, sessionID string) 
 	return nil
 }
 
-func (h *hydrationBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
+func (h *hydrationBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	return nil
 }
 

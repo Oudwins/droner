@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -106,8 +107,39 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 			return s.appendProvisioningFailure(ctx, evt, errors.New(message))
 		}
 	} else {
-		if err := backend.CreateSession(ctx, projection.RepoPath, projection.WorktreePath, projection.SimpleID, agentConfig); err != nil {
+		reusableRefs, err := s.listReusableProjectionRefs(ctx, projection.RepoPath, projection.BackendID)
+		if err != nil {
 			return s.appendProvisioningFailure(ctx, evt, err)
+		}
+		cleanupCandidates := make([]backends.ReusableWorktreeCandidate, 0)
+		nextIndex := 0
+		if createErr := backend.CreateSession(ctx, projection.RepoPath, projection.WorktreePath, projection.SimpleID, agentConfig, backends.CreateSessionOptions{
+			NextReusableWorktree: func(context.Context) (*backends.ReusableWorktreeCandidate, error) {
+				if nextIndex >= len(reusableRefs) {
+					return nil, nil
+				}
+				ref := reusableRefs[nextIndex]
+				nextIndex++
+				return &backends.ReusableWorktreeCandidate{
+					StreamID:     ref.StreamID,
+					SimpleID:     ref.SimpleID,
+					RepoPath:     ref.RepoPath,
+					WorktreePath: ref.WorktreePath,
+				}, nil
+			},
+			MarkReusableWorktreeDeletion: func(candidate backends.ReusableWorktreeCandidate) {
+				cleanupCandidates = append(cleanupCandidates, candidate)
+			},
+		}); createErr != nil {
+			return s.appendProvisioningFailure(ctx, evt, createErr)
+		}
+		for _, candidate := range cleanupCandidates {
+			if candidate.StreamID == "" || candidate.SimpleID == "" {
+				continue
+			}
+			if _, err := s.appendEvent(ctx, candidate.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(candidate.SimpleID), string(evt.ID), string(evt.StreamID)); err != nil {
+				return err
+			}
 		}
 	}
 

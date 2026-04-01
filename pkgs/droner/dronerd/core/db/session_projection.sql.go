@@ -183,6 +183,56 @@ func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]Se
 	return items, nil
 }
 
+const listReusableSessionProjectionRefs = `-- name: ListReusableSessionProjectionRefs :many
+SELECT stream_id, simple_id, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+FROM session_projection
+WHERE public_state = 'completed'
+  AND repo_path = ?
+  AND backend_id = ?
+ORDER BY updated_at DESC
+`
+
+type ListReusableSessionProjectionRefsParams struct {
+	RepoPath  string
+	BackendID string
+}
+
+func (q *Queries) ListReusableSessionProjectionRefs(ctx context.Context, arg ListReusableSessionProjectionRefsParams) ([]SessionProjection, error) {
+	rows, err := q.db.QueryContext(ctx, listReusableSessionProjectionRefs, arg.RepoPath, arg.BackendID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SessionProjection
+	for rows.Next() {
+		var i SessionProjection
+		if err := rows.Scan(
+			&i.StreamID,
+			&i.SimpleID,
+			&i.BackendID,
+			&i.RepoPath,
+			&i.WorktreePath,
+			&i.RemoteUrl,
+			&i.AgentConfig,
+			&i.LifecycleState,
+			&i.PublicState,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisibleSessionProjectionItems = `-- name: ListVisibleSessionProjectionItems :many
 SELECT simple_id, public_state
 FROM session_projection

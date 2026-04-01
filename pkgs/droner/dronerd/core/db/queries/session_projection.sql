@@ -80,3 +80,11 @@ SELECT *
 FROM session_projection
 WHERE public_state IN ('queued', 'running', 'completing', 'deleting')
 ORDER BY updated_at DESC;
+
+-- name: ListReusableSessionProjectionRefs :many
+SELECT *
+FROM session_projection
+WHERE public_state = 'completed'
+  AND repo_path = ?
+  AND backend_id = ?
+ORDER BY updated_at DESC;
