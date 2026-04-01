@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/internals/eventlog/backends/sqlite"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 
 	_ "modernc.org/sqlite"
@@ -81,21 +81,27 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = conn.Close()
 		}
 	}()
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
 	if _, err := conn.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		return nil, err
+	}
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
 		return nil, err
 	}
 	if _, err := conn.Exec("PRAGMA synchronous = NORMAL;"); err != nil {
 		return nil, err
 	}
 
-	backend, err := sqliteeventlog.New(sqliteeventlog.Config{DB: conn})
+	log, err := sessionslog.Open(cleanDataDir)
 	if err != nil {
 		return nil, err
 	}
-	log, err := eventlog.New(eventlog.Config{Topic: eventTopicSessions}, backend)
-	if err != nil {
-		return nil, err
-	}
+	defer func() {
+		if err != nil && log != nil {
+			_ = log.Close()
+		}
+	}()
 	for _, stmt := range schemaStatements {
 		if _, err := conn.Exec(stmt); err != nil {
 			return nil, err

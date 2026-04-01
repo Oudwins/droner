@@ -64,7 +64,19 @@ func New(cfg Config) (*Backend, error) {
 		ownsDB = true
 	}
 
+	// This backend is write-heavy and often has multiple goroutines sharing one
+	// sqlite handle (process manager, projections, checkpoints). Serializing the
+	// pool and waiting briefly on file locks avoids noisy SQLITE_BUSY failures.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
+		if ownsDB {
+			_ = db.Close()
+		}
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
 		if ownsDB {
 			_ = db.Close()
 		}

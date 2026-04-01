@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"log"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/eventdebug"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
 func main() {
-	defaultDBPath := filepath.Join(conf.GetConfig().Server.DataDir, "db", "droner.new.db")
+	defaultDBPath := sessionslog.DBPath(conf.GetConfig().Server.DataDir)
 
 	addr := flag.String("addr", "localhost:57877", "listen address")
 	dbPath := flag.String("db", defaultDBPath, "path to sqlite database")

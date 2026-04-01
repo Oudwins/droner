@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	taskIDPrefix       = "session-create:"
-	eventTopicSessions = eventlog.Topic("sessions")
+	taskIDPrefix = "session-create:"
 )
 
 const (
