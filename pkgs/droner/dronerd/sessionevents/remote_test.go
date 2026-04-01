@@ -11,11 +11,11 @@ import (
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 )
 
 type remoteTestBackend struct {

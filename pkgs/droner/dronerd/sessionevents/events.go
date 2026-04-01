@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 )
 
 const (

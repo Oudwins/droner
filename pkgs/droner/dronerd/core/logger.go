@@ -9,7 +9,7 @@ import (
 
 	"github.com/lmittmann/tint"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 

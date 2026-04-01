@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/naming"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
-	"github.com/Oudwins/droner/pkgs/droner/internals/naming"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 

@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
-	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )

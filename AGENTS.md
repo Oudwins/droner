@@ -11,10 +11,11 @@
 - Server entry points live under `pkgs/droner/dronerd/cmd`: dronerd startup code is shared in `cmd/cmd.go`, the dronerd binary is in `cmd/dronerd`, and the event debug command plus its helpers live in `cmd/eventdebug`.
 - Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and schemas in `db/schemas`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
-- Core packages live under `pkgs/droner/internals/...`.
+- Shared cross-package helpers live under `pkgs/droner/internals/...`; dronerd-only helpers now live under `pkgs/droner/dronerd/internals/...`.
 - Shared event log abstraction lives in `pkgs/droner/internals/eventlog` with the first backend in `internals/eventlog/backends/sqlite`.
 - SDK package lives under `pkgs/droner/sdk`.
 - HTTP server code lives in `pkgs/droner/dronerd/server`.
+- Dronerd-owned helper packages such as backends, remote integration, repo/session id helpers, and assertions live under `pkgs/droner/dronerd/internals`.
 - JSON schemas/validation live in `pkgs/droner/internals/schemas`.
 
 ## Environment setup

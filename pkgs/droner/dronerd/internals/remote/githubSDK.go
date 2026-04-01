@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/internals/auth"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/auth"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
