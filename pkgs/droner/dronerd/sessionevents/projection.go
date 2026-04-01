@@ -15,6 +15,7 @@ type sessionProjection struct {
 	BackendID      string
 	RepoPath       string
 	WorktreePath   string
+	RemoteURL      string
 	LifecycleState string
 	PublicState    string
 	LastError      string
@@ -199,6 +200,7 @@ func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,
 		WorktreePath:   row.WorktreePath,
+		RemoteURL:      row.RemoteUrl,
 		LifecycleState: row.LifecycleState,
 		PublicState:    row.PublicState,
 		LastError:      row.LastError,
@@ -214,6 +216,7 @@ func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,
 		WorktreePath:   row.WorktreePath,
+		RemoteURL:      row.RemoteUrl,
 		LifecycleState: row.LifecycleState,
 		PublicState:    row.PublicState,
 		LastError:      row.LastError,

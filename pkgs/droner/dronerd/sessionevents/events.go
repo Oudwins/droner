@@ -2,9 +2,11 @@ package sessionevents
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
+	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
 )
 
 const (
@@ -26,6 +28,9 @@ const (
 	eventTypeSessionDeletionSuccess                = eventlog.EventType("session.deletion.success")
 	eventTypeSessionCleanupFailed                  = eventlog.EventType("session.cleanup.failed")
 	eventTypeSessionFailed                         = eventlog.EventType("session.failed")
+	eventTypeRemotePRClosed                        = eventlog.EventType("remote.pr.closed")
+	eventTypeRemotePRMerged                        = eventlog.EventType("remote.pr.merged")
+	eventTypeRemoteBranchDeleted                   = eventlog.EventType("remote.branch.deleted")
 )
 
 type queuedPayload struct {
@@ -45,6 +50,15 @@ type failedPayload struct {
 
 type sessionIDPayload struct {
 	SimpleID string `json:"simpleId"`
+}
+
+type remoteObservationPayload struct {
+	SimpleID   string    `json:"simpleId"`
+	RemoteURL  string    `json:"remoteUrl"`
+	Branch     string    `json:"branch"`
+	PRNumber   *int      `json:"prNumber,omitempty"`
+	PRState    string    `json:"prState,omitempty"`
+	ObservedAt time.Time `json:"observedAt"`
 }
 
 func newQueuedPayload(input CreateSessionInput) queuedPayload {
@@ -86,6 +100,12 @@ func decodeSessionIDPayload(evt eventlog.Envelope) (sessionIDPayload, error) {
 	return payload, err
 }
 
+func decodeRemoteObservationPayload(evt eventlog.Envelope) (remoteObservationPayload, error) {
+	var payload remoteObservationPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
 func newPendingEvent(streamID string, eventType eventlog.EventType, payload any, causationID, correlationID string) (eventlog.PendingEvent, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -115,4 +135,42 @@ func requestStepPayload(simpleID string) sessionIDPayload {
 
 func queuedBackendID(payload queuedPayload) conf.BackendID {
 	return conf.BackendID(payload.BackendID)
+}
+
+func newRemoteObservationPayload(simpleID string, event remote.BranchEvent) remoteObservationPayload {
+	payload := remoteObservationPayload{
+		SimpleID:   simpleID,
+		RemoteURL:  event.RemoteURL,
+		Branch:     event.Branch,
+		ObservedAt: event.Timestamp,
+	}
+	if event.PRNumber != nil {
+		payload.PRNumber = event.PRNumber
+	}
+	if event.PRState != nil {
+		payload.PRState = *event.PRState
+	}
+	return payload
+}
+
+func remoteObservedEventType(eventType remote.BranchEventType) (eventlog.EventType, bool) {
+	switch eventType {
+	case remote.PRClosed:
+		return eventTypeRemotePRClosed, true
+	case remote.PRMerged:
+		return eventTypeRemotePRMerged, true
+	case remote.BranchDeleted:
+		return eventTypeRemoteBranchDeleted, true
+	default:
+		return "", false
+	}
+}
+
+func isRemoteObservedEventType(eventType eventlog.EventType) bool {
+	switch eventType {
+	case eventTypeRemotePRClosed, eventTypeRemotePRMerged, eventTypeRemoteBranchDeleted:
+		return true
+	default:
+		return false
+	}
 }

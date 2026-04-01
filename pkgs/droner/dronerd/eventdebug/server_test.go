@@ -116,7 +116,7 @@ func TestServerRendersHTMLPage(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "session/a") || !strings.Contains(body, "session.environment_provisioning") {
+	if !strings.Contains(body, "session/a") || !strings.Contains(body, "environment_provisioning") {
 		t.Fatalf("expected rendered stream details, body=%s", body)
 	}
 	if !strings.Contains(body, "3 total events. 1800ms total. Showing up to 500.") {
@@ -124,6 +124,9 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	}
 	if !strings.Contains(body, "started / success / failed") {
 		t.Fatalf("expected grouped status summary in HTML, body=%s", body)
+	}
+	if !strings.Contains(body, "exec 1800ms") {
+		t.Fatalf("expected group exec time in HTML, body=%s", body)
 	}
 	if !strings.Contains(body, `<details class="event-group">`) {
 		t.Fatalf("expected collapsible event group, body=%s", body)
@@ -162,16 +165,38 @@ func TestBuildEventGroups(t *testing.T) {
 	if len(groups) != 2 {
 		t.Fatalf("group count = %d, want 2", len(groups))
 	}
-	if groups[0].Action != "session.environment_provisioning" {
-		t.Fatalf("first group action = %q, want %q", groups[0].Action, "session.environment_provisioning")
+	if groups[0].Action != "environment_provisioning" {
+		t.Fatalf("first group action = %q, want %q", groups[0].Action, "environment_provisioning")
 	}
 	if got := strings.Join(groups[0].Statuses, "/"); got != "started/success" {
 		t.Fatalf("first group statuses = %q, want %q", got, "started/success")
 	}
-	if groups[0].Duration != "1200ms" {
-		t.Fatalf("first group duration = %q, want %q", groups[0].Duration, "1200ms")
+	if groups[0].ExecTime != "1200ms" {
+		t.Fatalf("first group exec time = %q, want %q", groups[0].ExecTime, "1200ms")
 	}
-	if groups[1].Action != "session.execution" {
-		t.Fatalf("second group action = %q, want %q", groups[1].Action, "session.execution")
+	if groups[1].Action != "execution" {
+		t.Fatalf("second group action = %q, want %q", groups[1].Action, "execution")
+	}
+	if groups[1].IdleTime != "800ms" {
+		t.Fatalf("second group idle time = %q, want %q", groups[1].IdleTime, "800ms")
+	}
+}
+
+func TestBuildEventGroupsLeavesTwoPartEventsStandalone(t *testing.T) {
+	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		{EventType: "session.queued", OccurredAt: now},
+		{EventType: "session.runtime_started", OccurredAt: now.Add(1200 * time.Millisecond)},
+	}
+
+	groups := buildEventGroups(events)
+	if len(groups) != 2 {
+		t.Fatalf("group count = %d, want 2", len(groups))
+	}
+	if groups[0].Action != "session.queued" {
+		t.Fatalf("first group action = %q, want %q", groups[0].Action, "session.queued")
+	}
+	if groups[1].Action != "session.runtime_started" {
+		t.Fatalf("second group action = %q, want %q", groups[1].Action, "session.runtime_started")
 	}
 }

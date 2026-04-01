@@ -1,0 +1,294 @@
+package sessionevents
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
+	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
+	"github.com/Oudwins/droner/pkgs/droner/internals/remote"
+)
+
+type remoteTestBackend struct {
+	worktreeRoot string
+
+	mu            sync.Mutex
+	completeCalls int
+	deleteCalls   int
+}
+
+func (b *remoteTestBackend) ID() conf.BackendID {
+	return conf.BackendLocal
+}
+
+func (b *remoteTestBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
+	return filepath.Join(b.worktreeRoot, filepath.Base(repoPath)+".."+sessionID), nil
+}
+
+func (b *remoteTestBackend) ValidateSessionID(repoPath string, sessionID string) error {
+	return nil
+}
+
+func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig) error {
+	return nil
+}
+
+func (b *remoteTestBackend) HydrateSession(ctx context.Context, session coredb.Session, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
+	return backends.HydrationResult{}, nil
+}
+
+func (b *remoteTestBackend) CompleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.completeCalls++
+	return nil
+}
+
+func (b *remoteTestBackend) DeleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.deleteCalls++
+	return nil
+}
+
+func (b *remoteTestBackend) CompleteCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.completeCalls
+}
+
+type remoteSubscriptionStub struct {
+	mu               sync.Mutex
+	handlers         map[string]remote.BranchEventHandler
+	subscribeCalls   int
+	unsubscribeCalls int
+}
+
+func newRemoteSubscriptionStub() *remoteSubscriptionStub {
+	return &remoteSubscriptionStub{handlers: map[string]remote.BranchEventHandler{}}
+}
+
+func (s *remoteSubscriptionStub) subscribe(ctx context.Context, remoteURL string, branch string, handler remote.BranchEventHandler) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subscribeCalls++
+	s.handlers[remoteSubscriptionKey(remoteURL, branch)] = handler
+	return nil
+}
+
+func (s *remoteSubscriptionStub) unsubscribe(ctx context.Context, remoteURL string, branch string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unsubscribeCalls++
+	delete(s.handlers, remoteSubscriptionKey(remoteURL, branch))
+	return nil
+}
+
+func (s *remoteSubscriptionStub) emit(event remote.BranchEvent) bool {
+	s.mu.Lock()
+	handler := s.handlers[remoteSubscriptionKey(event.RemoteURL, event.Branch)]
+	s.mu.Unlock()
+	if handler == nil {
+		return false
+	}
+	handler(event)
+	return true
+}
+
+func (s *remoteSubscriptionStub) hasSubscription(remoteURL string, branch string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.handlers[remoteSubscriptionKey(remoteURL, branch)]
+	return ok
+}
+
+func (s *remoteSubscriptionStub) waitForSubscription(t *testing.T, remoteURL string, branch string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.hasSubscription(remoteURL, branch) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("subscription not registered for %s %s", remoteURL, branch)
+}
+
+func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, context.CancelFunc) {
+	t.Helper()
+
+	dataDir := t.TempDir()
+	worktreeDir := filepath.Join(dataDir, "worktrees")
+	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktrees: %v", err)
+	}
+
+	config := &conf.Config{
+		Server: conf.ServerConfig{DataDir: dataDir},
+		Sessions: conf.SessionsConfig{
+			Agent: conf.AgentConfig{
+				DefaultModel:    "default-model",
+				DefaultProvider: conf.AgentProviderOpenCode,
+				Providers: conf.AgentProvidersConfig{
+					OpenCode: conf.OpenCodeConfig{Hostname: "127.0.0.1", Port: 4096},
+				},
+			},
+			Backends: conf.BackendsConfig{
+				Default: conf.BackendLocal,
+				Local:   conf.LocalBackendConfig{WorktreeDir: worktreeDir},
+			},
+		},
+	}
+
+	legacyConn, err := core.OpenSQLiteDB(filepath.Join(dataDir, "db", "droner.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLiteDB: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = legacyConn.Close()
+	})
+
+	store := backends.NewStore(config, coredb.New(legacyConn))
+	backend := &remoteTestBackend{worktreeRoot: worktreeDir}
+	store.Register(backend)
+
+	system, err := Open(dataDir, slog.New(slog.NewJSONHandler(io.Discard, nil)), config, store)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	system.Start(ctx)
+	t.Cleanup(func() {
+		cancel()
+		_ = system.Close()
+	})
+
+	return system, backend, dataDir, cancel
+}
+
+func waitForPublicState(t *testing.T, system *System, simpleID string, want string) SessionRef {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		ref, err := system.LookupSessionBySimpleID(context.Background(), simpleID)
+		if err == nil && ref.PublicState == want {
+			return ref
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("session %s did not reach state %s", simpleID, want)
+	return SessionRef{}
+}
+
+func loadEventTypes(t *testing.T, dataDir string, streamID string) []eventlog.EventType {
+	t.Helper()
+	log, err := sessionslog.Open(dataDir)
+	if err != nil {
+		t.Fatalf("sessionslog.Open: %v", err)
+	}
+	defer func() { _ = log.Close() }()
+
+	events, err := log.LoadStream(context.Background(), eventlog.StreamID(streamID), eventlog.LoadStreamOptions{})
+	if err != nil {
+		t.Fatalf("LoadStream: %v", err)
+	}
+	types := make([]eventlog.EventType, 0, len(events))
+	for _, evt := range events {
+		types = append(types, evt.Type)
+	}
+	return types
+}
+
+func assertEventOrder(t *testing.T, got []eventlog.EventType, want ...eventlog.EventType) {
+	t.Helper()
+	pos := 0
+	for _, eventType := range got {
+		if pos < len(want) && eventType == want[pos] {
+			pos++
+		}
+	}
+	if pos != len(want) {
+		t.Fatalf("expected ordered subsequence %v in %v", want, got)
+	}
+}
+
+func TestRemoteMergedObservationCompletesSession(t *testing.T) {
+	stub := newRemoteSubscriptionStub()
+	originalSubscribe := subscribeRemoteBranchEvents
+	originalUnsubscribe := unsubscribeRemoteBranchEvents
+	subscribeRemoteBranchEvents = stub.subscribe
+	unsubscribeRemoteBranchEvents = stub.unsubscribe
+	t.Cleanup(func() {
+		subscribeRemoteBranchEvents = originalSubscribe
+		unsubscribeRemoteBranchEvents = originalUnsubscribe
+	})
+
+	system, backend, dataDir, _ := newRemoteTestSystem(t)
+
+	const (
+		streamID  = "stream-remote-1"
+		simpleID  = "watch-branch"
+		repoPath  = "/tmp/repo"
+		remoteURL = "git@github.com:org/repo.git"
+	)
+
+	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
+		StreamID:     streamID,
+		SimpleID:     simpleID,
+		BackendID:    conf.BackendLocal,
+		RepoPath:     repoPath,
+		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..watch-branch"),
+		RemoteURL:    remoteURL,
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	waitForPublicState(t, system, simpleID, "running")
+	stub.waitForSubscription(t, remoteURL, simpleID)
+
+	if !stub.emit(remote.BranchEvent{
+		Type:      remote.PRMerged,
+		RemoteURL: remoteURL,
+		Branch:    simpleID,
+		Timestamp: time.Now().UTC(),
+	}) {
+		t.Fatal("expected remote event handler to be registered")
+	}
+
+	waitForPublicState(t, system, simpleID, "completed")
+	if backend.CompleteCalls() != 1 {
+		t.Fatalf("expected 1 completion call, got %d", backend.CompleteCalls())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !stub.hasSubscription(remoteURL, simpleID) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if stub.hasSubscription(remoteURL, simpleID) {
+		t.Fatal("expected remote subscription to be removed after completion")
+	}
+
+	eventTypes := loadEventTypes(t, dataDir, streamID)
+	assertEventOrder(t, eventTypes,
+		eventTypeSessionQueued,
+		eventTypeSessionReady,
+		eventTypeRemotePRMerged,
+		eventTypeSessionCompletionRequested,
+		eventTypeSessionCompletionStarted,
+		eventTypeSessionCompletionSuccess,
+	)
+}

@@ -301,10 +301,16 @@ func buildEventGroups(events []Event) []eventGroupView {
 		group := &groups[len(groups)-1]
 		group.Events = append(group.Events, view)
 		group.EventCount = len(group.Events)
-		group.Duration = fmtElapsedBetween(group.Events[0].Event.OccurredAt, event.OccurredAt)
+		group.ExecTime = fmtElapsedBetween(group.Events[0].Event.OccurredAt, event.OccurredAt)
 		if status != "" {
 			group.Statuses = append(group.Statuses, status)
 		}
+	}
+
+	for i := 1; i < len(groups); i++ {
+		previous := groups[i-1]
+		current := &groups[i]
+		current.IdleTime = fmtElapsedBetween(previous.Events[len(previous.Events)-1].Event.OccurredAt, current.Events[0].Event.OccurredAt)
 	}
 
 	return groups
@@ -315,11 +321,11 @@ func eventActionParts(eventType string) (string, string) {
 	if trimmed == "" {
 		return "unknown", ""
 	}
-	lastDot := strings.LastIndex(trimmed, ".")
-	if lastDot <= 0 || lastDot == len(trimmed)-1 {
+	parts := strings.Split(trimmed, ".")
+	if len(parts) < 3 {
 		return trimmed, ""
 	}
-	return trimmed[:lastDot], trimmed[lastDot+1:]
+	return strings.Join(parts[1:len(parts)-1], "."), parts[len(parts)-1]
 }
 
 type pageData struct {
@@ -343,7 +349,8 @@ type eventGroupView struct {
 	Statuses   []string
 	Events     []eventView
 	EventCount int
-	Duration   string
+	ExecTime   string
+	IdleTime   string
 }
 
 const pageTemplate = `<!doctype html>
@@ -595,7 +602,8 @@ const pageTemplate = `<!doctype html>
                 </div>
                 <div class="event-head-side">
                   <div class="muted">{{.EventCount}} events</div>
-                  <div class="muted">{{.Duration}} total</div>
+                  <div class="muted">exec {{.ExecTime}}</div>
+                  {{with .IdleTime}}<div class="muted">idle {{.}}</div>{{end}}
                 </div>
               </summary>
               <div class="event-group-body">

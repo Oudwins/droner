@@ -23,19 +23,22 @@ import (
 )
 
 const (
-	consumerProjection      = "session_projection"
-	consumerCreateProcess   = "session_create_process"
-	consumerCompleteProcess = "session_complete_process"
-	consumerDeleteProcess   = "session_delete_process"
+	consumerProjection         = "session_projection"
+	consumerCreateProcess      = "session_create_process"
+	consumerCompleteProcess    = "session_complete_process"
+	consumerDeleteProcess      = "session_delete_process"
+	consumerRemoteSubscription = "session_remote_subscription"
+	consumerRemoteObservation  = "session_remote_observation"
 )
 
 type System struct {
-	db       *sql.DB
-	queries  *coredb.Queries
-	log      eventlog.EventLog
-	logger   *slog.Logger
-	config   *conf.Config
-	backends *backends.Store
+	db         *sql.DB
+	queries    *coredb.Queries
+	log        eventlog.EventLog
+	logger     *slog.Logger
+	config     *conf.Config
+	backends   *backends.Store
+	remoteSubs *remoteSubscriptionState
 
 	startOnce sync.Once
 }
@@ -73,6 +76,7 @@ type SessionRef struct {
 	BackendID      string
 	RepoPath       string
 	WorktreePath   string
+	RemoteURL      string
 	LifecycleState string
 	PublicState    string
 	LastError      string
@@ -132,13 +136,14 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 		return nil, err
 	}
 
-	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore}, nil
+	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState()}, nil
 }
 
 func (s *System) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.closeRemoteSubscriptions(context.Background())
 	if s.log != nil {
 		if err := s.log.Close(); err != nil {
 			return err
@@ -186,6 +191,29 @@ func (s *System) Start(ctx context.Context) {
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
 				return s.handleDeletionRequested(ctx, evt)
+			},
+		})
+		go s.runSubscription(ctx, consumerRemoteSubscription, eventlog.Subscription{
+			ID: eventlog.SubscriberID(consumerRemoteSubscription),
+			Filter: func(evt eventlog.Envelope) bool {
+				switch evt.Type {
+				case eventTypeSessionReady, eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
+					return true
+				default:
+					return false
+				}
+			},
+			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
+				return s.handleRemoteSubscriptionEvent(ctx, evt)
+			},
+		})
+		go s.runSubscription(ctx, consumerRemoteObservation, eventlog.Subscription{
+			ID: eventlog.SubscriberID(consumerRemoteObservation),
+			Filter: func(evt eventlog.Envelope) bool {
+				return isRemoteObservedEventType(evt.Type)
+			},
+			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
+				return s.handleRemoteObservationEvent(ctx, evt)
 			},
 		})
 	})
