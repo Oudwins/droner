@@ -48,8 +48,13 @@ func NewServer(store Store, opts ServerOptions) *Server {
 		title:              title,
 		defaultListLimit:   listLimit,
 		defaultStreamLimit: streamLimit,
-		tmpl:               template.Must(template.New("page").Funcs(template.FuncMap{"pathEscape": url.PathEscape, "prettyJSON": prettyJSON, "fmtTime": fmtTime}).Parse(pageTemplate)),
-		mux:                http.NewServeMux(),
+		tmpl: template.Must(template.New("page").Funcs(template.FuncMap{
+			"pathEscape":              url.PathEscape,
+			"prettyJSON":              prettyJSON,
+			"fmtTime":                 fmtTime,
+			"fmtElapsedSincePrevious": fmtElapsedSincePrevious,
+		}).Parse(pageTemplate)),
+		mux: http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -246,6 +251,21 @@ func fmtTime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339Nano)
 }
 
+func fmtElapsedSincePrevious(index int, events []Event) string {
+	if index <= 0 || index >= len(events) {
+		return ""
+	}
+	delta := events[index].OccurredAt.Sub(events[index-1].OccurredAt)
+	if delta <= 0 {
+		return "took 0ms"
+	}
+	milliseconds := delta / time.Millisecond
+	if delta%time.Millisecond != 0 {
+		milliseconds++
+	}
+	return fmt.Sprintf("took %dms", milliseconds)
+}
+
 type pageData struct {
 	Title          string
 	Query          string
@@ -374,10 +394,21 @@ const pageTemplate = `<!doctype html>
     .event-head {
       display: flex;
       justify-content: space-between;
+      align-items: flex-start;
       gap: 16px;
       padding: 12px 14px;
       background: var(--panel-2);
       border-bottom: 1px solid var(--line);
+    }
+    .event-head-main,
+    .event-head-side {
+      display: grid;
+      gap: 2px;
+      align-content: start;
+    }
+    .event-head-side {
+      justify-items: end;
+      text-align: right;
     }
     .event-type { font-weight: 700; }
     .event-body {
@@ -459,22 +490,25 @@ const pageTemplate = `<!doctype html>
           <p class="muted">first {{fmtTime .Selected.Summary.FirstOccurredAt}} | last {{fmtTime .Selected.Summary.LastOccurredAt}}</p>
         </section>
         <section class="events">
-          {{range .Selected.Events}}
+          {{range $i, $event := .Selected.Events}}
             <article class="event">
               <div class="event-head">
-                <div>
-                  <div class="event-type">v{{.StreamVersion}} {{.EventType}}</div>
-                  <div class="muted">{{fmtTime .OccurredAt}}</div>
+                <div class="event-head-main">
+                  <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
+                  <div class="muted">{{fmtTime $event.OccurredAt}}</div>
                 </div>
-                <div class="muted">schema v{{.SchemaVersion}}</div>
+                <div class="event-head-side">
+                  <div class="muted">schema v{{$event.SchemaVersion}}</div>
+                  {{with fmtElapsedSincePrevious $i $.Selected.Events}}<div class="muted">{{.}}</div>{{end}}
+                </div>
               </div>
               <div class="event-body">
                 <div class="kv">
-                  <div><strong>event id</strong><br>{{.ID}}</div>
-                  <div><strong>causation</strong><br>{{if .CausationID}}{{.CausationID}}{{else}}-{{end}}</div>
-                  <div><strong>correlation</strong><br>{{if .CorrelationID}}{{.CorrelationID}}{{else}}-{{end}}</div>
+                  <div><strong>event id</strong><br>{{$event.ID}}</div>
+                  <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
+                  <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
                 </div>
-                <pre>{{prettyJSON .Payload}}</pre>
+                <pre>{{prettyJSON $event.Payload}}</pre>
               </div>
             </article>
           {{end}}

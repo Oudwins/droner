@@ -98,8 +98,11 @@ func TestServerRendersHTMLPage(t *testing.T) {
 		streams: []StreamSummary{{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now}},
 		byID: map[string]Stream{
 			"session/a": {
-				Summary: StreamSummary{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
-				Events:  []Event{{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.queued", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)}},
+				Summary: StreamSummary{StreamID: "session/a", EventCount: 2, FirstOccurredAt: now, LastOccurredAt: now.Add(1200 * time.Millisecond)},
+				Events: []Event{
+					{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.queued", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-2", StreamID: "session/a", StreamVersion: 2, EventType: "session.started", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+				},
 			},
 		},
 	}, ServerOptions{})
@@ -114,5 +117,22 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "session/a") || !strings.Contains(body, "session.queued") {
 		t.Fatalf("expected rendered stream details, body=%s", body)
+	}
+	if !strings.Contains(body, "took 1200ms") {
+		t.Fatalf("expected rounded elapsed time in header, body=%s", body)
+	}
+}
+
+func TestFmtElapsedSincePrevious(t *testing.T) {
+	events := []Event{
+		{OccurredAt: time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)},
+		{OccurredAt: time.Date(2026, 3, 29, 12, 0, 1, 200000000, time.UTC)},
+	}
+
+	if got := fmtElapsedSincePrevious(0, events); got != "" {
+		t.Fatalf("first event delta = %q, want empty string", got)
+	}
+	if got := fmtElapsedSincePrevious(1, events); got != "took 1200ms" {
+		t.Fatalf("second event delta = %q, want %q", got, "took 1200ms")
 	}
 }
