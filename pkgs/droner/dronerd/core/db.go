@@ -21,6 +21,15 @@ var schemaFS embed.FS
 
 func InitDB(config *conf.Config) (*db.Queries, error) {
 	dbPath := filepath.Join(config.Server.DataDir, "db", "droner.db")
+	conn, err := OpenSQLiteDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return db.New(conn), nil
+}
+
+func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
@@ -51,7 +60,20 @@ func InitDB(config *conf.Config) (*db.Queries, error) {
 		return nil, err
 	}
 
-	return db.New(conn), nil
+	return conn, nil
+}
+
+func ApplySchemas(conn *sql.DB) error {
+	schemas, err := loadSchemas()
+	if err != nil {
+		return err
+	}
+	for _, schema := range schemas {
+		if _, err := conn.Exec(schema); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureSessionsRemoteURLColumn(conn *sql.DB) error {

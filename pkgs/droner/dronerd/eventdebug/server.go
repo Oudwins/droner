@@ -120,6 +120,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var selected *Stream
+	selectedGroups := make([]eventGroupView, 0)
 	selectedID := strings.TrimSpace(r.URL.Query().Get("stream"))
 	if selectedID != "" {
 		stream, err := s.store.LoadStream(r.Context(), selectedID, StreamOptions{Limit: parseStreamLimit(r, s.defaultStreamLimit)})
@@ -129,6 +130,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil {
 			selected = &stream
+			selectedGroups = buildEventGroups(stream.Events)
 		}
 	}
 
@@ -137,6 +139,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Query:          r.URL.Query().Get("q"),
 		Streams:        streams,
 		Selected:       selected,
+		SelectedGroups: selectedGroups,
 		SelectedStream: selectedID,
 		ListLimit:      limit,
 		StreamLimit:    parseStreamLimit(r, s.defaultStreamLimit),
@@ -278,14 +281,69 @@ func ceilDurationMilliseconds(delta time.Duration) string {
 	return fmt.Sprintf("%dms", milliseconds)
 }
 
+func buildEventGroups(events []Event) []eventGroupView {
+	if len(events) == 0 {
+		return nil
+	}
+
+	groups := make([]eventGroupView, 0)
+	for i, event := range events {
+		action, status := eventActionParts(event.EventType)
+		view := eventView{Event: event}
+		if i > 0 {
+			view.ElapsedSincePrevious = fmtElapsedSincePrevious(i, events)
+		}
+
+		if len(groups) == 0 || groups[len(groups)-1].Action != action {
+			groups = append(groups, eventGroupView{Action: action})
+		}
+
+		group := &groups[len(groups)-1]
+		group.Events = append(group.Events, view)
+		group.EventCount = len(group.Events)
+		group.Duration = fmtElapsedBetween(group.Events[0].Event.OccurredAt, event.OccurredAt)
+		if status != "" {
+			group.Statuses = append(group.Statuses, status)
+		}
+	}
+
+	return groups
+}
+
+func eventActionParts(eventType string) (string, string) {
+	trimmed := strings.TrimSpace(eventType)
+	if trimmed == "" {
+		return "unknown", ""
+	}
+	lastDot := strings.LastIndex(trimmed, ".")
+	if lastDot <= 0 || lastDot == len(trimmed)-1 {
+		return trimmed, ""
+	}
+	return trimmed[:lastDot], trimmed[lastDot+1:]
+}
+
 type pageData struct {
 	Title          string
 	Query          string
 	Streams        []StreamSummary
 	Selected       *Stream
+	SelectedGroups []eventGroupView
 	SelectedStream string
 	ListLimit      int
 	StreamLimit    int
+}
+
+type eventView struct {
+	Event                Event
+	ElapsedSincePrevious string
+}
+
+type eventGroupView struct {
+	Action     string
+	Statuses   []string
+	Events     []eventView
+	EventCount int
+	Duration   string
 }
 
 const pageTemplate = `<!doctype html>
@@ -397,6 +455,32 @@ const pageTemplate = `<!doctype html>
       display: grid;
       gap: 14px;
     }
+    .event-group {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .event-group-summary {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 12px 14px;
+      cursor: pointer;
+      list-style: none;
+      background: var(--panel-2);
+    }
+    .event-group-summary::-webkit-details-marker {
+      display: none;
+    }
+    .event-group-body {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.5);
+    }
     .event {
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -502,27 +586,44 @@ const pageTemplate = `<!doctype html>
           <p class="muted">first {{fmtTime .Selected.Summary.FirstOccurredAt}} | last {{fmtTime .Selected.Summary.LastOccurredAt}}</p>
         </section>
         <section class="events">
-          {{range $i, $event := .Selected.Events}}
-            <article class="event">
-              <div class="event-head">
+          {{range .SelectedGroups}}
+            <details class="event-group">
+              <summary class="event-group-summary">
                 <div class="event-head-main">
-                  <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
-                  <div class="muted">{{fmtTime $event.OccurredAt}}</div>
+                  <div class="event-type">{{.Action}}</div>
+                  <div class="muted">{{if .Statuses}}{{range $i, $status := .Statuses}}{{if $i}} / {{end}}{{$status}}{{end}}{{else}}single event{{end}}</div>
                 </div>
                 <div class="event-head-side">
-                  <div class="muted">schema v{{$event.SchemaVersion}}</div>
-                  {{with fmtElapsedSincePrevious $i $.Selected.Events}}<div class="muted">{{.}}</div>{{end}}
+                  <div class="muted">{{.EventCount}} events</div>
+                  <div class="muted">{{.Duration}} total</div>
                 </div>
+              </summary>
+              <div class="event-group-body">
+                {{range .Events}}
+                  {{$event := .Event}}
+                  <article class="event">
+                    <div class="event-head">
+                      <div class="event-head-main">
+                        <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
+                        <div class="muted">{{fmtTime $event.OccurredAt}}</div>
+                      </div>
+                      <div class="event-head-side">
+                        <div class="muted">schema v{{$event.SchemaVersion}}</div>
+                        {{with .ElapsedSincePrevious}}<div class="muted">{{.}}</div>{{end}}
+                      </div>
+                    </div>
+                    <div class="event-body">
+                      <div class="kv">
+                        <div><strong>event id</strong><br>{{$event.ID}}</div>
+                        <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
+                        <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
+                      </div>
+                      <pre>{{prettyJSON $event.Payload}}</pre>
+                    </div>
+                  </article>
+                {{end}}
               </div>
-              <div class="event-body">
-                <div class="kv">
-                  <div><strong>event id</strong><br>{{$event.ID}}</div>
-                  <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
-                  <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
-                </div>
-                <pre>{{prettyJSON $event.Payload}}</pre>
-              </div>
-            </article>
+            </details>
           {{end}}
         </section>
       {{else}}

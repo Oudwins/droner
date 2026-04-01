@@ -98,10 +98,11 @@ func TestServerRendersHTMLPage(t *testing.T) {
 		streams: []StreamSummary{{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now}},
 		byID: map[string]Stream{
 			"session/a": {
-				Summary: StreamSummary{StreamID: "session/a", EventCount: 2, FirstOccurredAt: now, LastOccurredAt: now.Add(1200 * time.Millisecond)},
+				Summary: StreamSummary{StreamID: "session/a", EventCount: 3, FirstOccurredAt: now, LastOccurredAt: now.Add(1800 * time.Millisecond)},
 				Events: []Event{
-					{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.queued", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
-					{ID: "evt-2", StreamID: "session/a", StreamVersion: 2, EventType: "session.started", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.environment_provisioning.started", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-2", StreamID: "session/a", StreamVersion: 2, EventType: "session.environment_provisioning.success", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-3", StreamID: "session/a", StreamVersion: 3, EventType: "session.environment_provisioning.failed", SchemaVersion: 1, OccurredAt: now.Add(1800 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
 				},
 			},
 		},
@@ -115,11 +116,17 @@ func TestServerRendersHTMLPage(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "session/a") || !strings.Contains(body, "session.queued") {
+	if !strings.Contains(body, "session/a") || !strings.Contains(body, "session.environment_provisioning") {
 		t.Fatalf("expected rendered stream details, body=%s", body)
 	}
-	if !strings.Contains(body, "2 total events. 1200ms total. Showing up to 500.") {
+	if !strings.Contains(body, "3 total events. 1800ms total. Showing up to 500.") {
 		t.Fatalf("expected total stream duration in hero, body=%s", body)
+	}
+	if !strings.Contains(body, "started / success / failed") {
+		t.Fatalf("expected grouped status summary in HTML, body=%s", body)
+	}
+	if !strings.Contains(body, `<details class="event-group">`) {
+		t.Fatalf("expected collapsible event group, body=%s", body)
 	}
 	if !strings.Contains(body, "took 1200ms") {
 		t.Fatalf("expected rounded elapsed time in header, body=%s", body)
@@ -140,5 +147,31 @@ func TestFmtElapsedSincePrevious(t *testing.T) {
 	}
 	if got := fmtElapsedBetween(events[0].OccurredAt, events[1].OccurredAt); got != "1200ms" {
 		t.Fatalf("stream duration = %q, want %q", got, "1200ms")
+	}
+}
+
+func TestBuildEventGroups(t *testing.T) {
+	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		{EventType: "session.environment_provisioning.started", OccurredAt: now},
+		{EventType: "session.environment_provisioning.success", OccurredAt: now.Add(1200 * time.Millisecond)},
+		{EventType: "session.execution.started", OccurredAt: now.Add(2 * time.Second)},
+	}
+
+	groups := buildEventGroups(events)
+	if len(groups) != 2 {
+		t.Fatalf("group count = %d, want 2", len(groups))
+	}
+	if groups[0].Action != "session.environment_provisioning" {
+		t.Fatalf("first group action = %q, want %q", groups[0].Action, "session.environment_provisioning")
+	}
+	if got := strings.Join(groups[0].Statuses, "/"); got != "started/success" {
+		t.Fatalf("first group statuses = %q, want %q", got, "started/success")
+	}
+	if groups[0].Duration != "1200ms" {
+		t.Fatalf("first group duration = %q, want %q", groups[0].Duration, "1200ms")
+	}
+	if groups[1].Action != "session.execution" {
+		t.Fatalf("second group action = %q, want %q", groups[1].Action, "session.execution")
 	}
 }

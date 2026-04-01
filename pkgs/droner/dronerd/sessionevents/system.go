@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -21,12 +23,15 @@ import (
 )
 
 const (
-	consumerProjection    = "session_projection"
-	consumerCreateProcess = "session_create_process"
+	consumerProjection      = "session_projection"
+	consumerCreateProcess   = "session_create_process"
+	consumerCompleteProcess = "session_complete_process"
+	consumerDeleteProcess   = "session_delete_process"
 )
 
 type System struct {
 	db       *sql.DB
+	queries  *coredb.Queries
 	log      eventlog.EventLog
 	logger   *slog.Logger
 	config   *conf.Config
@@ -49,9 +54,30 @@ type CreateSessionResult struct {
 	TaskID string
 }
 
+type OperationResult struct {
+	TaskID string
+}
+
+type NukeResult struct {
+	Requested int
+}
+
 type ListItem struct {
 	SimpleID string
 	State    string
+}
+
+type SessionRef struct {
+	StreamID       string
+	SimpleID       string
+	BackendID      string
+	RepoPath       string
+	WorktreePath   string
+	LifecycleState string
+	PublicState    string
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type TaskSnapshot struct {
@@ -102,13 +128,11 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = log.Close()
 		}
 	}()
-	for _, stmt := range schemaStatements {
-		if _, err := conn.Exec(stmt); err != nil {
-			return nil, err
-		}
+	if err := core.ApplySchemas(conn); err != nil {
+		return nil, err
 	}
 
-	return &System{db: conn, log: log, logger: logger, config: config, backends: backendStore}, nil
+	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore}, nil
 }
 
 func (s *System) Close() error {
@@ -146,6 +170,24 @@ func (s *System) Start(ctx context.Context) {
 				return s.handleQueuedEvent(ctx, evt)
 			},
 		})
+		go s.runSubscription(ctx, consumerCompleteProcess, eventlog.Subscription{
+			ID: eventlog.SubscriberID(consumerCompleteProcess),
+			Filter: func(evt eventlog.Envelope) bool {
+				return evt.Type == eventTypeSessionCompletionRequested
+			},
+			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
+				return s.handleCompletionRequested(ctx, evt)
+			},
+		})
+		go s.runSubscription(ctx, consumerDeleteProcess, eventlog.Subscription{
+			ID: eventlog.SubscriberID(consumerDeleteProcess),
+			Filter: func(evt eventlog.Envelope) bool {
+				return evt.Type == eventTypeSessionDeletionRequested
+			},
+			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
+				return s.handleDeletionRequested(ctx, evt)
+			},
+		})
 	})
 }
 
@@ -153,37 +195,88 @@ func (s *System) CreateSession(ctx context.Context, input CreateSessionInput) (C
 	if _, err := s.appendEvent(ctx, input.StreamID, eventTypeSessionQueued, newQueuedPayload(input), "", input.StreamID); err != nil {
 		return CreateSessionResult{}, err
 	}
-	return CreateSessionResult{TaskID: taskIDPrefix + input.StreamID}, nil
+	return CreateSessionResult{TaskID: taskIDPrefixCreate + input.StreamID}, nil
 }
 
 func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error) {
-	query := `SELECT simple_id, public_state FROM session_projection`
-	args := []any{}
+	items := []ListItem{}
 	if !all {
-		query += ` WHERE public_state IN (?, ?)`
-		args = append(args, "queued", "running")
+		rows, err := s.queries.ListVisibleSessionProjectionItems(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			items = append(items, ListItem{SimpleID: row.SimpleID, State: row.PublicState})
+		}
+		return items, nil
 	}
-	query += ` ORDER BY updated_at DESC LIMIT 100`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.queries.ListAllSessionProjectionItems(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := []ListItem{}
-	for rows.Next() {
-		var item ListItem
-		if err := rows.Scan(&item.SimpleID, &item.State); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	for _, row := range rows {
+		items = append(items, ListItem{SimpleID: row.SimpleID, State: row.PublicState})
 	}
-	return items, rows.Err()
+	return items, nil
+}
+
+func (s *System) LookupSessionBySimpleID(ctx context.Context, simpleID string) (SessionRef, error) {
+	return s.loadProjectionBySimpleID(ctx, simpleID)
+}
+
+func (s *System) ListActiveSessionRefs(ctx context.Context) ([]SessionRef, error) {
+	return s.listActiveProjectionRefs(ctx)
+}
+
+func (s *System) RequestCompletion(ctx context.Context, simpleID string) (OperationResult, error) {
+	ref, err := s.LookupSessionBySimpleID(ctx, simpleID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if ref.LifecycleState == string(eventTypeSessionCompletionSuccess) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
+	}
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionCompletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+		return OperationResult{}, err
+	}
+	return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
+}
+
+func (s *System) RequestDeletion(ctx context.Context, simpleID string) (OperationResult, error) {
+	ref, err := s.LookupSessionBySimpleID(ctx, simpleID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
+	}
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+		return OperationResult{}, err
+	}
+	return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
+}
+
+func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
+	refs, err := s.ListActiveSessionRefs(ctx)
+	if err != nil {
+		return NukeResult{}, err
+	}
+	requested := 0
+	for _, ref := range refs {
+		if ref.LifecycleState == string(eventTypeSessionDeletionRequested) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+			continue
+		}
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+			return NukeResult{}, err
+		}
+		requested++
+	}
+	return NukeResult{Requested: requested}, nil
 }
 
 func (s *System) TaskStatus(ctx context.Context, taskID string) (*TaskSnapshot, error) {
-	streamID := strings.TrimSpace(strings.TrimPrefix(taskID, taskIDPrefix))
-	if streamID == "" || streamID == taskID {
+	taskType, streamID := parseTaskID(taskID)
+	if taskType == "" || streamID == "" {
 		return nil, sql.ErrNoRows
 	}
 
@@ -192,7 +285,7 @@ func (s *System) TaskStatus(ctx context.Context, taskID string) (*TaskSnapshot, 
 		return nil, err
 	}
 
-	status, startedAt, finishedAt := projection.taskTimes()
+	status, startedAt, finishedAt := projection.taskTimes(taskType)
 	return &TaskSnapshot{
 		TaskID:       taskID,
 		Status:       status,
@@ -203,6 +296,20 @@ func (s *System) TaskStatus(ctx context.Context, taskID string) (*TaskSnapshot, 
 		StartedAt:    startedAt,
 		FinishedAt:   finishedAt,
 	}, nil
+}
+
+func parseTaskID(taskID string) (string, string) {
+	trimmed := strings.TrimSpace(taskID)
+	switch {
+	case strings.HasPrefix(trimmed, taskIDPrefixCreate):
+		return "session_create", strings.TrimPrefix(trimmed, taskIDPrefixCreate)
+	case strings.HasPrefix(trimmed, taskIDPrefixComplete):
+		return "session_complete", strings.TrimPrefix(trimmed, taskIDPrefixComplete)
+	case strings.HasPrefix(trimmed, taskIDPrefixDelete):
+		return "session_delete", strings.TrimPrefix(trimmed, taskIDPrefixDelete)
+	default:
+		return "", ""
+	}
 }
 
 func (s *System) runSubscription(ctx context.Context, consumerName string, sub eventlog.Subscription) {
@@ -227,19 +334,4 @@ func (s *System) appendEvent(ctx context.Context, streamID string, eventType eve
 		return eventlog.Envelope{}, err
 	}
 	return s.log.Append(ctx, pending)
-}
-
-func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func parseTime(raw string) time.Time {
-	if raw == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed
 }

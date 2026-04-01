@@ -256,6 +256,27 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 		return
 	}
 
+	if s.events != nil {
+		result, err := s.events.RequestDeletion(r.Context(), payload.SessionID.String())
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
+				return
+			}
+			logger.Error("Failed to append deletion request", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session deletion", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		RenderJSON(w, r, schemas.TaskResponse{
+			TaskID: taskIDOrPlaceholder(result.TaskID, "session_delete"),
+			Type:   "session_delete",
+			Status: schemas.TaskStatusPending,
+			Result: &schemas.TaskResult{SessionID: payload.SessionID.String()},
+		}, Render.Status(http.StatusAccepted))
+		return
+	}
+
 	bytes, _ := json.Marshal(payload)
 	logger.Debug("Enqueueing task", slog.Any("payload", payload))
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteSession, bytes))
@@ -287,6 +308,39 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		flattened := z.Issues.FlattenAndCollect(errs)
 		logger.Info("Schema validation failed", slog.Any("errors", flattened))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", flattened), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	if s.events != nil {
+		ref, err := s.events.LookupSessionBySimpleID(r.Context(), payload.SessionID.String())
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
+				return
+			}
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to load session", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		if ref.PublicState != "running" && ref.PublicState != "completed" && ref.PublicState != "deleted" {
+			logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("sessionId", payload.SessionID.String()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
+			return
+		}
+
+		result, err := s.events.RequestCompletion(r.Context(), payload.SessionID.String())
+		if err != nil {
+			logger.Error("Failed to append completion request", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session completion", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		RenderJSON(w, r, schemas.TaskResponse{
+			TaskID: taskIDOrPlaceholder(result.TaskID, "session_complete"),
+			Type:   "session_complete",
+			Status: schemas.TaskStatusPending,
+			Result: &schemas.TaskResult{SessionID: payload.SessionID.String(), WorktreePath: ref.WorktreePath},
+		}, Render.Status(http.StatusAccepted))
 		return
 	}
 
@@ -329,7 +383,7 @@ func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Task id is required", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
-	if s.events != nil && strings.HasPrefix(taskID, "session-create:") {
+	if s.events != nil && (strings.HasPrefix(taskID, "session-create:") || strings.HasPrefix(taskID, "session-complete:") || strings.HasPrefix(taskID, "session-delete:")) {
 		snapshot, err := s.events.TaskStatus(r.Context(), taskID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -341,9 +395,17 @@ func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r
 			return
 		}
 
+		taskType := "session_create"
+		switch {
+		case strings.HasPrefix(taskID, "session-complete:"):
+			taskType = "session_complete"
+		case strings.HasPrefix(taskID, "session-delete:"):
+			taskType = "session_delete"
+		}
+
 		res := schemas.TaskResponse{
 			TaskID:    snapshot.TaskID,
-			Type:      "session_create",
+			Type:      taskType,
 			Status:    snapshot.Status,
 			CreatedAt: snapshot.CreatedAt.UTC().Format(time.RFC3339Nano),
 			Result: &schemas.TaskResult{
@@ -458,6 +520,25 @@ func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r
 }
 
 func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	if s.events != nil {
+		result, err := s.events.NukeSessions(r.Context())
+		if err != nil {
+			logger.Error("Failed to request session nuke", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to nuke sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		RenderJSON(w, r, schemas.TaskResponse{
+			TaskID:     "",
+			Type:       "session_nuke",
+			Status:     schemas.TaskStatusSucceeded,
+			CreatedAt:  now,
+			FinishedAt: now,
+			Result:     &schemas.TaskResult{SessionID: fmt.Sprintf("%d", result.Requested)},
+		}, Render.Status(http.StatusAccepted))
+		return
+	}
+
 	taskId, err := s.Base.TaskQueue.Enqueue(context.Background(), tasky.NewTask(core.JobDeleteAllSessions, []byte("{}")))
 	if err != nil {
 		logger.Error("Failed to enque job", slog.String("error", err.Error()))
@@ -538,4 +619,11 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 	}
 
 	RenderJSON(w, r, schemas.SessionListResponse{Sessions: items})
+}
+
+func taskIDOrPlaceholder(taskID string, fallback string) string {
+	if taskID != "" {
+		return taskID
+	}
+	return fallback
 }

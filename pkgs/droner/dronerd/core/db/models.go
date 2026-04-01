@@ -22,3 +22,18 @@ type Session struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+
+type SessionProjection struct {
+	StreamID       string
+	SimpleID       string
+	BackendID      string
+	RepoPath       string
+	WorktreePath   string
+	RemoteUrl      string
+	AgentConfig    string
+	LifecycleState string
+	PublicState    string
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}

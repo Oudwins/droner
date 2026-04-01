@@ -8,7 +8,9 @@ import (
 )
 
 const (
-	taskIDPrefix = "session-create:"
+	taskIDPrefixCreate   = "session-create:"
+	taskIDPrefixComplete = "session-complete:"
+	taskIDPrefixDelete   = "session-delete:"
 )
 
 const (
@@ -17,6 +19,12 @@ const (
 	eventTypeSessionEnvironmentProvisioned         = eventlog.EventType("session.environment_provisioned")
 	eventTypeSessionRuntimeStarted                 = eventlog.EventType("session.runtime_started")
 	eventTypeSessionReady                          = eventlog.EventType("session.ready")
+	eventTypeSessionCompletionRequested            = eventlog.EventType("session.completion.requested")
+	eventTypeSessionCompletionStarted              = eventlog.EventType("session.completion.started")
+	eventTypeSessionCompletionSuccess              = eventlog.EventType("session.completion.success")
+	eventTypeSessionDeletionRequested              = eventlog.EventType("session.deletion.requested")
+	eventTypeSessionDeletionSuccess                = eventlog.EventType("session.deletion.success")
+	eventTypeSessionCleanupFailed                  = eventlog.EventType("session.cleanup.failed")
 	eventTypeSessionFailed                         = eventlog.EventType("session.failed")
 )
 
@@ -33,6 +41,10 @@ type queuedPayload struct {
 type failedPayload struct {
 	Error          string `json:"error"`
 	BackendDetails string `json:"backendDetails,omitempty"`
+}
+
+type sessionIDPayload struct {
+	SimpleID string `json:"simpleId"`
 }
 
 func newQueuedPayload(input CreateSessionInput) queuedPayload {
@@ -52,6 +64,10 @@ func newFailedPayload(err error) failedPayload {
 	return failedPayload{Error: message, BackendDetails: message}
 }
 
+func newSessionIDPayload(simpleID string) sessionIDPayload {
+	return sessionIDPayload{SimpleID: simpleID}
+}
+
 func decodeQueuedPayload(evt eventlog.Envelope) (queuedPayload, error) {
 	var payload queuedPayload
 	err := json.Unmarshal(evt.Payload, &payload)
@@ -60,6 +76,12 @@ func decodeQueuedPayload(evt eventlog.Envelope) (queuedPayload, error) {
 
 func decodeFailedPayload(evt eventlog.Envelope) (failedPayload, error) {
 	var payload failedPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
+func decodeSessionIDPayload(evt eventlog.Envelope) (sessionIDPayload, error) {
+	var payload sessionIDPayload
 	err := json.Unmarshal(evt.Payload, &payload)
 	return payload, err
 }
@@ -85,6 +107,10 @@ func provisionStartedPayload(queued queuedPayload) map[string]string {
 
 func readyStepPayload(queued queuedPayload) map[string]string {
 	return map[string]string{"simpleId": queued.SimpleID}
+}
+
+func requestStepPayload(simpleID string) sessionIDPayload {
+	return newSessionIDPayload(simpleID)
 }
 
 func queuedBackendID(payload queuedPayload) conf.BackendID {

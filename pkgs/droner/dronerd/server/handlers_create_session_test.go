@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -473,6 +474,207 @@ func TestHandlerTaskStatusSynthesizesCreateTaskFromProjection(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for synthetic task success")
+}
+
+func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
+	waitForSessionState(t, server, "complete-me", "running")
+
+	payload, err := json.Marshal(schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID("complete-me")})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions/complete", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerCompleteSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	var response schemas.TaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal task response: %v", err)
+	}
+	if response.TaskID == "" || !strings.HasPrefix(response.TaskID, "session-complete:") {
+		t.Fatalf("task id = %q, want session-complete prefix", response.TaskID)
+	}
+	if response.Type != "session_complete" {
+		t.Fatalf("task type = %q, want session_complete", response.Type)
+	}
+	if response.Result == nil || response.Result.SessionID != "complete-me" || response.Result.WorktreePath != createResponse.WorktreePath {
+		t.Fatalf("unexpected task result: %#v", response.Result)
+	}
+
+	task := waitForTaskStatus(t, server, response.TaskID, schemas.TaskStatusSucceeded)
+	if task.Result == nil || task.Result.SessionID != "complete-me" {
+		t.Fatalf("unexpected final task result: %#v", task.Result)
+	}
+	waitForSessionState(t, server, "complete-me", "completed")
+}
+
+func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
+	waitForSessionState(t, server, "delete-me", "running")
+
+	payload, err := json.Marshal(schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID("delete-me")})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerDeleteSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	var response schemas.TaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal task response: %v", err)
+	}
+	if response.TaskID == "" || !strings.HasPrefix(response.TaskID, "session-delete:") {
+		t.Fatalf("task id = %q, want session-delete prefix", response.TaskID)
+	}
+	if response.Type != "session_delete" {
+		t.Fatalf("task type = %q, want session_delete", response.Type)
+	}
+	if response.Result == nil || response.Result.SessionID != "delete-me" {
+		t.Fatalf("unexpected delete task result: %#v", response.Result)
+	}
+
+	task := waitForTaskStatus(t, server, response.TaskID, schemas.TaskStatusSucceeded)
+	if task.Result == nil || task.Result.SessionID != "delete-me" || task.Result.WorktreePath != createResponse.WorktreePath {
+		t.Fatalf("unexpected final delete task result: %#v", task.Result)
+	}
+	waitForSessionState(t, server, "delete-me", "deleted")
+}
+
+func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "nuke-a")
+	createEventSourcedSession(t, server, repoDir, "nuke-b")
+	waitForSessionState(t, server, "nuke-a", "running")
+	waitForSessionState(t, server, "nuke-b", "running")
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions/nuke", bytes.NewReader([]byte("{}")))
+	rec := httptest.NewRecorder()
+	server.HandlerNukeSessions(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	var response schemas.TaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal nuke response: %v", err)
+	}
+	if response.Type != "session_nuke" {
+		t.Fatalf("task type = %q, want session_nuke", response.Type)
+	}
+	if response.Status != schemas.TaskStatusSucceeded {
+		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusSucceeded)
+	}
+
+	waitForSessionState(t, server, "nuke-a", "deleted")
+	waitForSessionState(t, server, "nuke-b", "deleted")
+
+	listReq := httptest.NewRequest(http.MethodGet, "/sessions", nil)
+	listRec := httptest.NewRecorder()
+	server.HandlerListSessions(server.Base.Logger, listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listResponse schemas.SessionListResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResponse); err != nil {
+		t.Fatalf("json.Unmarshal list response: %v", err)
+	}
+	if len(listResponse.Sessions) != 0 {
+		t.Fatalf("expected no active sessions after nuke, got %#v", listResponse.Sessions)
+	}
+}
+
+func createEventSourcedSession(t *testing.T, server *Server, repoDir, sessionID string) schemas.SessionCreateResponse {
+	t.Helper()
+
+	payload, err := json.Marshal(schemas.SessionCreateRequest{
+		Path:      repoDir,
+		SessionID: schemas.NewSSessionID(sessionID),
+		BackendID: conf.BackendLocal,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerCreateSession(server.Base.Logger, rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	var response schemas.SessionCreateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal create response: %v", err)
+	}
+	return response
+}
+
+func waitForSessionState(t *testing.T, server *Server, simpleID, wantState string) sessionevents.SessionRef {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ref, err := server.events.LookupSessionBySimpleID(context.Background(), simpleID)
+		if err == nil && ref.PublicState == wantState {
+			return ref
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("LookupSessionBySimpleID(%q): %v", simpleID, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for session %q state %q", simpleID, wantState)
+	return sessionevents.SessionRef{}
+}
+
+func waitForTaskStatus(t *testing.T, server *Server, taskID string, wantStatus schemas.TaskStatus) schemas.TaskResponse {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		taskReq := httptest.NewRequest(http.MethodGet, "/tasks/"+taskID, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", taskID)
+		taskReq = taskReq.WithContext(context.WithValue(taskReq.Context(), chi.RouteCtxKey, rctx))
+		taskRec := httptest.NewRecorder()
+		server.HandlerTaskStatus(server.Base.Logger, taskRec, taskReq)
+		if taskRec.Code == http.StatusNotFound {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		if taskRec.Code != http.StatusOK {
+			t.Fatalf("task status code = %d, want 200; body=%s", taskRec.Code, taskRec.Body.String())
+		}
+
+		var task schemas.TaskResponse
+		if err := json.Unmarshal(taskRec.Body.Bytes(), &task); err != nil {
+			t.Fatalf("json.Unmarshal task response: %v", err)
+		}
+		if task.Status == wantStatus {
+			return task
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for task %q status %q", taskID, wantStatus)
+	return schemas.TaskResponse{}
 }
 
 func bytesReader(payload []byte) *io.SectionReader {
