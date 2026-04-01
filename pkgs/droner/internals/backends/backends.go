@@ -40,9 +40,9 @@ type HydrationResult struct {
 	Error  string
 }
 
-func NewStore(config conf.SessionsConfig, queries *db.Queries) *Store {
+func NewStore(config *conf.Config, queries *db.Queries) *Store {
 	store := &Store{backends: map[conf.BackendID]Backend{}}
-	RegisterLocal(store, &config.Backends.Local, queries)
+	RegisterLocal(store, &config.Sessions.Backends.Local, queries, true)
 	return store
 }
 

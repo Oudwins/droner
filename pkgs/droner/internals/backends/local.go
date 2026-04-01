@@ -6,17 +6,18 @@ import (
 )
 
 type LocalBackend struct {
-	config *conf.LocalBackendConfig
-	db     *db.Queries
+	config                        *conf.LocalBackendConfig
+	db                            *db.Queries
+	disableCompletedWorktreeReuse bool
 }
 
 func (l LocalBackend) ID() conf.BackendID {
 	return conf.BackendLocal
 }
 
-func RegisterLocal(store *Store, config *conf.LocalBackendConfig, queries *db.Queries) {
+func RegisterLocal(store *Store, config *conf.LocalBackendConfig, queries *db.Queries, disableCompletedWorktreeReuse bool) {
 	if store == nil {
 		return
 	}
-	store.Register(LocalBackend{config: config, db: queries})
+	store.Register(LocalBackend{config: config, db: queries, disableCompletedWorktreeReuse: disableCompletedWorktreeReuse})
 }

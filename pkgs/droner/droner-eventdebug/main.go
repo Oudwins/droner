@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	defaultDBPath := filepath.Join(conf.GetConfig().Server.DataDir, "db", "droner.db")
+	defaultDBPath := filepath.Join(conf.GetConfig().Server.DataDir, "db", "droner.new.db")
 
 	addr := flag.String("addr", "localhost:57877", "listen address")
 	dbPath := flag.String("db", defaultDBPath, "path to sqlite database")

@@ -44,7 +44,7 @@ func New() *BaseServer {
 	queries, err := InitDB(config)
 	assert.AssertNil(err, "[CORE] Failed to initialize DB")
 	base.DB = queries
-	base.BackendStore = backends.NewStore(config.Sessions, queries)
+	base.BackendStore = backends.NewStore(config, queries)
 
 	queue, err := NewQueue(base)
 	assert.AssertNil(err, "[CORE] Failed to initialize queue")

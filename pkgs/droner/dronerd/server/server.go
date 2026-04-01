@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/tasky"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
@@ -22,6 +23,7 @@ type Server struct {
 	httpServer   *http.Server
 	canceler     context.CancelFunc
 	consumer     *tasky.Consumer[core.Jobs]
+	events       *sessionevents.System
 	shutdownOnce sync.Once
 }
 
@@ -36,6 +38,11 @@ func New() *Server {
 	return &Server{
 		Base:     base,
 		canceler: func() {},
+		events: func() *sessionevents.System {
+			system, err := sessionevents.Open(base.Config.Server.DataDir, base.Logger, base.Config, base.BackendStore)
+			assert.AssertNil(err, "[SERVER] Failed to initialize event-sourced create system")
+			return system
+		}(),
 	}
 }
 
@@ -75,11 +82,7 @@ func (s *Server) Start() error {
 	consumer := tasky.NewConsumer(s.Base.TaskQueue, tasky.ConsumerOptions{Workers: 1})
 	s.consumer = consumer
 	consumer.Start(ctx)
-	if err := s.hydrateRunningSessions(ctx); err != nil {
-		_ = listener.Close()
-		s.Shutdown()
-		return err
-	}
+	s.events.Start(ctx)
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -119,6 +122,9 @@ func (s *Server) Shutdown() {
 
 		if s.Base != nil {
 			s.Base.Close()
+		}
+		if err := s.events.Close(); err != nil {
+			s.Base.Logger.Error("[shutdown] event system shutdown failed", "error", err)
 		}
 	})
 }

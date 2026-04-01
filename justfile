@@ -6,7 +6,7 @@ droner_bin := bin_dir + "/droner"
 
 kill:
     @if command -v fuser >/dev/null 2>&1; then \
-        fuser -k 57876/tcp; \
+        fuser -k 57876/tcp >/dev/null 2>&1 || true; \
     elif command -v lsof >/dev/null 2>&1; then \
         lsof -ti tcp:57876 | xargs -r kill -9; \
     else \

@@ -87,7 +87,7 @@ func newHydrationTestServerWithLogger(t *testing.T, backend *hydrationBackend, l
 	if err != nil {
 		t.Fatalf("InitDB: %v", err)
 	}
-	store := backends.NewStore(config.Sessions, queries)
+	store := backends.NewStore(config, queries)
 	store.Register(backend)
 
 	return &Server{Base: &core.BaseServer{

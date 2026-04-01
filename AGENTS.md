@@ -11,6 +11,7 @@
 - Server entry point: `pkgs/droner/dronerd/main.go`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Core packages live under `pkgs/droner/internals/...`.
+- Shared event log abstraction lives in `pkgs/droner/internals/eventlog` with the first backend in `internals/eventlog/backends/sqlite`.
 - SDK package lives under `pkgs/droner/sdk`.
 - HTTP server code lives in `pkgs/droner/dronerd/server`.
 - JSON schemas/validation live in `pkgs/droner/internals/schemas`.
@@ -20,10 +21,15 @@
 - `flake.nix` provides Go, gopls, git, just, sqlc, and psmisc.
 - Inside the flake dev shell, `droner` is provided as a wrapper for `just cli` so repo-local CLI changes can be used without a global install.
 - Optional env vars can be set in `.env` (loaded by justfile).
+- Create/list/task-status tracer-bullet data now lives in `<data dir>/db/droner.new.db`; server startup skips old-session hydration, and `sessionevents` now uses the shared SQLite-backed `internals/eventlog` package for topic-scoped event storage/checkpoints.
+- TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
+- Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
+- GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.
 
 ## Build and run
 - Run server (kills port 57876 first): `just dev`.
 - Manual server run: `go run ./pkgs/droner/dronerd`.
+- Run event debug UI: `just eventdebug`.
 - Build binaries into `./bin`: `just build`.
 - Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd`.
 - Build CLI only: `go build -o ./bin/droner ./pkgs/droner/droner`.
@@ -88,9 +94,10 @@
 - Use `http.Error` for simple text errors only when consistent.
 
 ## Code style: logging
-- Server uses `slog` JSON logger; keep messages short.
+- Server uses `slog`; keep messages short.
 - Prefer structured fields over string concatenation.
 - Avoid `fmt.Println` for production logs.
+- Server logs fan out to colored `tint` output on stdout and plain text in `<data dir>/log.txt`.
 
 ## Code style: HTTP handlers
 - Validate request bodies with schemas before using data.
@@ -111,8 +118,9 @@
 
 ## Worktrees and sessions
 - Worktrees are named `<repo>..<sessionID>`.
-- Worktree setup can read `.cursor/worktrees.json` in the root repo.
+- Local backend worktree setup reads optional `<repo>/.cursor/worktrees.json` and runs `setup-worktree` commands independently inside the new worktree with `ROOT_WORKTREE_PATH`, `WORKTREE_PATH`, and `SESSION_ID` env vars.
 - Use `git worktree add`/`remove` helpers in `server`.
+- On server startup, persisted `running` sessions are hydrated via `Backend.HydrateSession`; local backend treats an existing tmux session as already hydrated, deletes sessions whose worktree is missing, and marks hydration failures as `failed`.
 
 ## When adding new code
 - Follow existing package layout under `pkgs/droner`.

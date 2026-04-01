@@ -126,7 +126,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
-	if l.db != nil {
+	if l.db != nil && !l.disableCompletedWorktreeReuse {
 		reused, err := l.tryReuseCompletedWorktree(ctx, repoPath, worktreePath, sessionID)
 		if err != nil {
 			return err

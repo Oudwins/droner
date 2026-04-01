@@ -16,6 +16,7 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/repo"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
@@ -152,6 +153,32 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	remoteURLValue := sql.NullString{}
 	if remoteURL != "" {
 		remoteURLValue = sql.NullString{String: remoteURL, Valid: true}
+	}
+	if s.events != nil {
+		result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
+			StreamID:        sessionID.String(),
+			SimpleID:        request.SessionID.String(),
+			BackendID:       request.BackendID,
+			RepoPath:        request.Path,
+			WorktreePath:    worktreePath,
+			RemoteURL:       remoteURL,
+			AgentConfigJSON: agentConfigValue.String,
+		})
+		if err != nil {
+			logger.Error("Failed to append session event", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, err.Error(), nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		res := schemas.SessionCreateResponse{
+			SessionID:    request.SessionID,
+			SimpleID:     request.SessionID.String(),
+			BackendID:    request.BackendID,
+			WorktreePath: worktreePath,
+			TaskID:       result.TaskID,
+		}
+		RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
+		return
 	}
 	sessionData := db.CreateSessionParams{
 		ID:           sessionID.String(),
@@ -302,6 +329,38 @@ func (s *Server) HandlerTaskStatus(logger *slog.Logger, w http.ResponseWriter, r
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Task id is required", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
+	if s.events != nil && strings.HasPrefix(taskID, "session-create:") {
+		snapshot, err := s.events.TaskStatus(r.Context(), taskID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Task not found", nil), Render.Status(http.StatusNotFound))
+				return
+			}
+			logger.Error("Failed to load synthetic task", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to load task", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+
+		res := schemas.TaskResponse{
+			TaskID:    snapshot.TaskID,
+			Type:      "session_create",
+			Status:    snapshot.Status,
+			CreatedAt: snapshot.CreatedAt.UTC().Format(time.RFC3339Nano),
+			Result: &schemas.TaskResult{
+				SessionID:    snapshot.SimpleID,
+				WorktreePath: snapshot.WorktreePath,
+			},
+			Error: snapshot.Error,
+		}
+		if !snapshot.StartedAt.IsZero() {
+			res.StartedAt = snapshot.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if !snapshot.FinishedAt.IsZero() {
+			res.FinishedAt = snapshot.FinishedAt.UTC().Format(time.RFC3339Nano)
+		}
+		RenderJSON(w, r, res)
+		return
+	}
 
 	queueDBPath := filepath.Join(s.Base.Config.Server.DataDir, "queue", "queue.db")
 	conn, err := sql.Open("sqlite", queueDBPath)
@@ -418,6 +477,23 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 	rawAll := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("all")))
 	if rawAll == "1" || rawAll == "true" || rawAll == "yes" {
 		all = true
+	}
+	if s.events != nil {
+		items, err := s.events.ListSessions(r.Context(), all)
+		if err != nil {
+			logger.Error("Failed to list event-sourced sessions", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		responseItems := make([]schemas.SessionListItem, 0, len(items))
+		for _, item := range items {
+			responseItems = append(responseItems, schemas.SessionListItem{
+				SimpleID: schemas.NewSSessionID(item.SimpleID),
+				State:    item.State,
+			})
+		}
+		RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
+		return
 	}
 
 	var sessions []db.Session
