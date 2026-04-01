@@ -8,8 +8,7 @@ import (
 type JsonResponseStatus string
 
 const (
-	JsonResponseStatusSuccess JsonResponseStatus = "success"
-	JsonResponseStatusFailed  JsonResponseStatus = "failed"
+	JsonResponseStatusFailed JsonResponseStatus = "failed"
 )
 
 type JsonResponseErrorCode string
@@ -19,7 +18,6 @@ const (
 	JsonResponseErrorCodeValidationFailed JsonResponseErrorCode = "validation_failed"
 	JsonResponseErroCodeInternal          JsonResponseErrorCode = "internal"
 	JsonResponseErrorCodeNotFound         JsonResponseErrorCode = "not_found"
-	JsonResponseErrorCodeAuthRequired     JsonResponseErrorCode = "auth_required"
 )
 
 type ErrorResponse struct {

@@ -31,16 +31,6 @@ func (i SSessionID) String() string {
 	return string(i)
 }
 
-// file system safe version of simpleID
-func (i SSessionID) FSsafe() string {
-	return strings.ReplaceAll(string(i), "/", ".")
-}
-
-// Folder name for the sesssion
-func (i SSessionID) SessionWorktreeName(repoName string) string {
-	return repoName + SimpleSessionDelimiter + string(i)
-}
-
 type SessionAgentConfig struct {
 	Model     string            `json:"model" zog:"model"`
 	AgentName string            `json:"agentName,omitempty" zog:"agentName"`
@@ -108,11 +98,6 @@ type SessionCreateResponse struct {
 
 type SessionDeleteRequest struct {
 	SessionID SSessionID `json:"sessionId" zog:"sessionId"`
-}
-
-type SessionDeleteResponse struct {
-	SessionID SSessionID `json:"sessionId"`
-	TaskId    string     `json:"taskId"`
 }
 
 type SessionListItem struct {

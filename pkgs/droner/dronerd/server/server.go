@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -12,7 +11,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
-	"github.com/Oudwins/droner/pkgs/droner/sdk"
 )
 
 type Server struct {
@@ -35,27 +33,6 @@ func New() *Server {
 			return system
 		}(),
 	}
-}
-
-func (s *Server) SafeStart() error {
-	if sdk.IsRunning(s.Base.Env.BASE_URL) {
-		return nil
-	}
-
-	// TODO: Start the queue & the subscription manager
-	go func() {
-		s.Base.Logger.Info("starting server")
-		err := s.Start()
-		if err != nil {
-			log.Fatal("[Droner] Failed to start server: " + err.Error())
-		}
-	}()
-
-	if sdk.WaitForStart(s.Base.Env.BASE_URL, s.Base.Logger) {
-		return nil
-	}
-
-	return errors.New("Couldn't start server")
 }
 
 func (s *Server) Start() error {
