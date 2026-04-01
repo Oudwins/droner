@@ -301,6 +301,7 @@ func buildEventGroups(events []Event) []eventGroupView {
 		group := &groups[len(groups)-1]
 		group.Events = append(group.Events, view)
 		group.EventCount = len(group.Events)
+		group.VersionLabel = formatVersionRange(group.Events[0].Event.StreamVersion, event.StreamVersion)
 		group.ExecTime = fmtElapsedBetween(group.Events[0].Event.OccurredAt, event.OccurredAt)
 		if status != "" {
 			group.Statuses = append(group.Statuses, status)
@@ -314,6 +315,13 @@ func buildEventGroups(events []Event) []eventGroupView {
 	}
 
 	return groups
+}
+
+func formatVersionRange(first int64, last int64) string {
+	if first == last {
+		return fmt.Sprintf("v%d", first)
+	}
+	return fmt.Sprintf("v%d-%d", first, last)
 }
 
 func eventActionParts(eventType string) (string, string) {
@@ -345,12 +353,13 @@ type eventView struct {
 }
 
 type eventGroupView struct {
-	Action     string
-	Statuses   []string
-	Events     []eventView
-	EventCount int
-	ExecTime   string
-	IdleTime   string
+	Action       string
+	Statuses     []string
+	Events       []eventView
+	EventCount   int
+	VersionLabel string
+	ExecTime     string
+	IdleTime     string
 }
 
 const pageTemplate = `<!doctype html>
@@ -594,44 +603,69 @@ const pageTemplate = `<!doctype html>
         </section>
         <section class="events">
           {{range .SelectedGroups}}
-            <details class="event-group">
-              <summary class="event-group-summary">
-                <div class="event-head-main">
-                  <div class="event-type">{{.Action}}</div>
-                  <div class="muted">{{if .Statuses}}{{range $i, $status := .Statuses}}{{if $i}} / {{end}}{{$status}}{{end}}{{else}}single event{{end}}</div>
+            {{if gt .EventCount 1}}
+              <details class="event-group">
+                <summary class="event-group-summary">
+                  <div class="event-head-main">
+                    <div class="event-type">{{.VersionLabel}} {{.Action}}</div>
+                    <div class="muted">{{if .Statuses}}{{range $i, $status := .Statuses}}{{if $i}} / {{end}}{{$status}}{{end}}{{else}}single event{{end}}</div>
+                  </div>
+                  <div class="event-head-side">
+                    <div class="muted">{{.EventCount}} events</div>
+                    <div class="muted">exec {{.ExecTime}}</div>
+                    {{with .IdleTime}}<div class="muted">idle {{.}}</div>{{end}}
+                  </div>
+                </summary>
+                <div class="event-group-body">
+                  {{range .Events}}
+                    {{$event := .Event}}
+                    <article class="event">
+                      <div class="event-head">
+                        <div class="event-head-main">
+                          <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
+                          <div class="muted">{{fmtTime $event.OccurredAt}}</div>
+                        </div>
+                        <div class="event-head-side">
+                          <div class="muted">schema v{{$event.SchemaVersion}}</div>
+                          {{with .ElapsedSincePrevious}}<div class="muted">{{.}}</div>{{end}}
+                        </div>
+                      </div>
+                      <div class="event-body">
+                        <div class="kv">
+                          <div><strong>event id</strong><br>{{$event.ID}}</div>
+                          <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
+                          <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
+                        </div>
+                        <pre>{{prettyJSON $event.Payload}}</pre>
+                      </div>
+                    </article>
+                  {{end}}
                 </div>
-                <div class="event-head-side">
-                  <div class="muted">{{.EventCount}} events</div>
-                  <div class="muted">exec {{.ExecTime}}</div>
-                  {{with .IdleTime}}<div class="muted">idle {{.}}</div>{{end}}
+              </details>
+            {{else}}
+              {{$item := index .Events 0}}
+              {{$event := $item.Event}}
+              <article class="event">
+                <div class="event-head">
+                  <div class="event-head-main">
+                    <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
+                    <div class="muted">{{fmtTime $event.OccurredAt}}</div>
+                  </div>
+                  <div class="event-head-side">
+                    <div class="muted">schema v{{$event.SchemaVersion}}</div>
+                    {{with $item.ElapsedSincePrevious}}<div class="muted">{{.}}</div>{{end}}
+                  </div>
                 </div>
-              </summary>
-              <div class="event-group-body">
-                {{range .Events}}
-                  {{$event := .Event}}
-                  <article class="event">
-                    <div class="event-head">
-                      <div class="event-head-main">
-                        <div class="event-type">v{{$event.StreamVersion}} {{$event.EventType}}</div>
-                        <div class="muted">{{fmtTime $event.OccurredAt}}</div>
-                      </div>
-                      <div class="event-head-side">
-                        <div class="muted">schema v{{$event.SchemaVersion}}</div>
-                        {{with .ElapsedSincePrevious}}<div class="muted">{{.}}</div>{{end}}
-                      </div>
-                    </div>
-                    <div class="event-body">
-                      <div class="kv">
-                        <div><strong>event id</strong><br>{{$event.ID}}</div>
-                        <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
-                        <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
-                      </div>
-                      <pre>{{prettyJSON $event.Payload}}</pre>
-                    </div>
-                  </article>
-                {{end}}
-              </div>
-            </details>
+                <div class="event-body">
+                  <div class="kv">
+                    <div><strong>event id</strong><br>{{$event.ID}}</div>
+                    <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
+                    <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
+                  </div>
+                  <pre>{{prettyJSON $event.Payload}}</pre>
+                </div>
+              </article>
+            {{end}}
           {{end}}
         </section>
       {{else}}

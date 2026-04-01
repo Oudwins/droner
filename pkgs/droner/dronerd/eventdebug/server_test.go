@@ -98,11 +98,12 @@ func TestServerRendersHTMLPage(t *testing.T) {
 		streams: []StreamSummary{{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now}},
 		byID: map[string]Stream{
 			"session/a": {
-				Summary: StreamSummary{StreamID: "session/a", EventCount: 3, FirstOccurredAt: now, LastOccurredAt: now.Add(1800 * time.Millisecond)},
+				Summary: StreamSummary{StreamID: "session/a", EventCount: 4, FirstOccurredAt: now, LastOccurredAt: now.Add(2500 * time.Millisecond)},
 				Events: []Event{
 					{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.environment_provisioning.started", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
 					{ID: "evt-2", StreamID: "session/a", StreamVersion: 2, EventType: "session.environment_provisioning.success", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
 					{ID: "evt-3", StreamID: "session/a", StreamVersion: 3, EventType: "session.environment_provisioning.failed", SchemaVersion: 1, OccurredAt: now.Add(1800 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-4", StreamID: "session/a", StreamVersion: 4, EventType: "session.execution.started", SchemaVersion: 1, OccurredAt: now.Add(2500 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
 				},
 			},
 		},
@@ -119,17 +120,23 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	if !strings.Contains(body, "session/a") || !strings.Contains(body, "environment_provisioning") {
 		t.Fatalf("expected rendered stream details, body=%s", body)
 	}
-	if !strings.Contains(body, "3 total events. 1800ms total. Showing up to 500.") {
+	if !strings.Contains(body, "4 total events. 2500ms total. Showing up to 500.") {
 		t.Fatalf("expected total stream duration in hero, body=%s", body)
 	}
 	if !strings.Contains(body, "started / success / failed") {
 		t.Fatalf("expected grouped status summary in HTML, body=%s", body)
 	}
+	if !strings.Contains(body, "v1-3 environment_provisioning") {
+		t.Fatalf("expected grouped version range in HTML, body=%s", body)
+	}
 	if !strings.Contains(body, "exec 1800ms") {
 		t.Fatalf("expected group exec time in HTML, body=%s", body)
 	}
-	if !strings.Contains(body, `<details class="event-group">`) {
-		t.Fatalf("expected collapsible event group, body=%s", body)
+	if count := strings.Count(body, `<details class="event-group">`); count != 1 {
+		t.Fatalf("details count = %d, want 1, body=%s", count, body)
+	}
+	if !strings.Contains(body, "v4 session.execution.started") {
+		t.Fatalf("expected single event to render as a normal card, body=%s", body)
 	}
 	if !strings.Contains(body, "took 1200ms") {
 		t.Fatalf("expected rounded elapsed time in header, body=%s", body)
@@ -156,9 +163,9 @@ func TestFmtElapsedSincePrevious(t *testing.T) {
 func TestBuildEventGroups(t *testing.T) {
 	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
 	events := []Event{
-		{EventType: "session.environment_provisioning.started", OccurredAt: now},
-		{EventType: "session.environment_provisioning.success", OccurredAt: now.Add(1200 * time.Millisecond)},
-		{EventType: "session.execution.started", OccurredAt: now.Add(2 * time.Second)},
+		{StreamVersion: 2, EventType: "session.environment_provisioning.started", OccurredAt: now},
+		{StreamVersion: 3, EventType: "session.environment_provisioning.success", OccurredAt: now.Add(1200 * time.Millisecond)},
+		{StreamVersion: 4, EventType: "session.execution.started", OccurredAt: now.Add(2 * time.Second)},
 	}
 
 	groups := buildEventGroups(events)
@@ -174,8 +181,14 @@ func TestBuildEventGroups(t *testing.T) {
 	if groups[0].ExecTime != "1200ms" {
 		t.Fatalf("first group exec time = %q, want %q", groups[0].ExecTime, "1200ms")
 	}
+	if groups[0].VersionLabel != "v2-3" {
+		t.Fatalf("first group version label = %q, want %q", groups[0].VersionLabel, "v2-3")
+	}
 	if groups[1].Action != "execution" {
 		t.Fatalf("second group action = %q, want %q", groups[1].Action, "execution")
+	}
+	if groups[1].VersionLabel != "v4" {
+		t.Fatalf("second group version label = %q, want %q", groups[1].VersionLabel, "v4")
 	}
 	if groups[1].IdleTime != "800ms" {
 		t.Fatalf("second group idle time = %q, want %q", groups[1].IdleTime, "800ms")
