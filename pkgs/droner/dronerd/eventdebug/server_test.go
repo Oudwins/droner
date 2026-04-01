@@ -118,6 +118,9 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	if !strings.Contains(body, "session/a") || !strings.Contains(body, "session.queued") {
 		t.Fatalf("expected rendered stream details, body=%s", body)
 	}
+	if !strings.Contains(body, "2 total events. 1200ms total. Showing up to 500.") {
+		t.Fatalf("expected total stream duration in hero, body=%s", body)
+	}
 	if !strings.Contains(body, "took 1200ms") {
 		t.Fatalf("expected rounded elapsed time in header, body=%s", body)
 	}
@@ -134,5 +137,8 @@ func TestFmtElapsedSincePrevious(t *testing.T) {
 	}
 	if got := fmtElapsedSincePrevious(1, events); got != "took 1200ms" {
 		t.Fatalf("second event delta = %q, want %q", got, "took 1200ms")
+	}
+	if got := fmtElapsedBetween(events[0].OccurredAt, events[1].OccurredAt); got != "1200ms" {
+		t.Fatalf("stream duration = %q, want %q", got, "1200ms")
 	}
 }

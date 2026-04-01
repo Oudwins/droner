@@ -52,6 +52,7 @@ func NewServer(store Store, opts ServerOptions) *Server {
 			"pathEscape":              url.PathEscape,
 			"prettyJSON":              prettyJSON,
 			"fmtTime":                 fmtTime,
+			"fmtElapsedBetween":       fmtElapsedBetween,
 			"fmtElapsedSincePrevious": fmtElapsedSincePrevious,
 		}).Parse(pageTemplate)),
 		mux: http.NewServeMux(),
@@ -256,14 +257,25 @@ func fmtElapsedSincePrevious(index int, events []Event) string {
 		return ""
 	}
 	delta := events[index].OccurredAt.Sub(events[index-1].OccurredAt)
+	return fmt.Sprintf("took %s", ceilDurationMilliseconds(delta))
+}
+
+func fmtElapsedBetween(start time.Time, end time.Time) string {
+	if start.IsZero() || end.IsZero() {
+		return "0ms"
+	}
+	return ceilDurationMilliseconds(end.Sub(start))
+}
+
+func ceilDurationMilliseconds(delta time.Duration) string {
 	if delta <= 0 {
-		return "took 0ms"
+		return "0ms"
 	}
 	milliseconds := delta / time.Millisecond
 	if delta%time.Millisecond != 0 {
 		milliseconds++
 	}
-	return fmt.Sprintf("took %dms", milliseconds)
+	return fmt.Sprintf("%dms", milliseconds)
 }
 
 type pageData struct {
@@ -486,7 +498,7 @@ const pageTemplate = `<!doctype html>
       {{if .Selected}}
         <section class="hero">
           <h2>{{.Selected.Summary.StreamID}}</h2>
-          <p class="muted">{{.Selected.Summary.EventCount}} total events. Showing up to {{$.StreamLimit}}.</p>
+          <p class="muted">{{.Selected.Summary.EventCount}} total events. {{fmtElapsedBetween .Selected.Summary.FirstOccurredAt .Selected.Summary.LastOccurredAt}} total. Showing up to {{$.StreamLimit}}.</p>
           <p class="muted">first {{fmtTime .Selected.Summary.FirstOccurredAt}} | last {{fmtTime .Selected.Summary.LastOccurredAt}}</p>
         </section>
         <section class="events">
