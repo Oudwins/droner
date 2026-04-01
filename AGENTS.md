@@ -8,7 +8,7 @@
 
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
-- Server entry point lives under `pkgs/droner/dronerd/cmd`: shared startup code is in `cmd/cmd.go`, with binaries in `cmd/dronerd` and `cmd/eventdebug`.
+- Server entry points live under `pkgs/droner/dronerd/cmd`: dronerd startup code is shared in `cmd/cmd.go`, the dronerd binary is in `cmd/dronerd`, and the event debug command plus its helpers live in `cmd/eventdebug`.
 - Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and schemas in `db/schemas`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Core packages live under `pkgs/droner/internals/...`.

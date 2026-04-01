@@ -1,4 +1,4 @@
-package eventdebug
+package main
 
 import (
 	"context"
