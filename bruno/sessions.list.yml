@@ -7,7 +7,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/sessions"
+  url: "{{baseUrl}}/sessions?limit=10&status=queued&status=running"
   params:
     - name: limit
       value: "10"
@@ -21,3 +21,6 @@ http:
 
 settings:
   encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
