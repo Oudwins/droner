@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -206,8 +207,7 @@ func (c *Client) CompleteSession(ctx context.Context, request schemas.SessionCom
 }
 
 func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse, error) {
-	// Default behaviour: list running sessions
-	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions?status=running", nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse
 }
 
 func (c *Client) ListSessionsAll(ctx context.Context) (*schemas.SessionListResponse, error) {
-	// Request without status filter
+	// Request without status filter (alias)
 	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {
 		return nil, err
@@ -254,6 +254,41 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return c.httpClient.Do(req)
+}
+
+// ListSessionsWithParams requests sessions with optional statuses and pagination.
+// If statuses is nil or empty, no status filter is applied.
+func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, offset int) (*schemas.SessionListResponse, error) {
+	path := "/sessions"
+	if len(statuses) > 0 || limit > 0 || offset > 0 {
+		q := make([]string, 0)
+		for _, s := range statuses {
+			q = append(q, "status="+s)
+		}
+		if limit > 0 {
+			q = append(q, "limit="+strconv.Itoa(limit))
+		}
+		if offset > 0 {
+			q = append(q, "offset="+strconv.Itoa(offset))
+		}
+		if len(q) > 0 {
+			path = path + "?" + strings.Join(q, "&")
+		}
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, responseError(resp)
+	}
+	var payload schemas.SessionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return &payload, nil
 }
 
 func responseError(resp *http.Response) error {

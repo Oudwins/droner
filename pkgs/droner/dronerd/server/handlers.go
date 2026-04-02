@@ -8,8 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
+
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
@@ -284,55 +283,40 @@ func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter,
 }
 
 func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	// New behaviour: always use the projection for listing. By default we
-	// return only running sessions. Clients can pass `status` to filter by a
-	// specific public_state, `limit` and `offset` for pagination, or
-	// `all=1` to request no status filter.
-
-	rawAll := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("all")))
-	rawLimit := strings.TrimSpace(r.URL.Query().Get("limit"))
-	rawOffset := strings.TrimSpace(r.URL.Query().Get("offset"))
-	rawStatus := strings.TrimSpace(r.URL.Query().Get("status"))
-
-	// interpret all flag
-	all := false
-	if rawAll == "1" || rawAll == "true" || rawAll == "yes" {
-		all = true
+	// Use zog schema to parse and validate query params (limit/offset/status)
+	var q schemas.SessionListQuery
+	if errs := schemas.SessionListQuerySchema.Parse(zhttp.Request(r), &q); errs != nil {
+		flattened := z.Issues.FlattenAndCollect(errs)
+		logger.Info("Query validation failed", slog.Any("errors", flattened))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Query validation failed", flattened), Render.Status(http.StatusBadRequest))
+		return
 	}
 
-	// parse limit
-	limit := 100
-	if rawLimit != "" {
-		v, err := strconv.Atoi(rawLimit)
-		if err != nil || v < 0 {
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Invalid limit", nil), Render.Status(http.StatusBadRequest))
-			return
-		}
-		limit = v
-	}
-	// parse offset
-	offset := 0
-	if rawOffset != "" {
-		v, err := strconv.Atoi(rawOffset)
-		if err != nil || v < 0 {
-			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Invalid offset", nil), Render.Status(http.StatusBadRequest))
-			return
-		}
-		offset = v
+	// Ensure non-negative values just in case
+	if q.Limit < 0 || q.Offset < 0 {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "limit and offset must be non-negative", nil), Render.Status(http.StatusBadRequest))
+		return
 	}
 
-	// determine status to query: if `all` set, leave empty (no filter);
-	// otherwise prefer explicit status param or default to "running".
-	status := ""
-	if !all {
-		if rawStatus != "" {
-			status = rawStatus
+	// Interpret status semantics:
+	// - If the client provided a single empty status value (status=), treat
+	//   that as an explicit request for any status (nil slice forwarded).
+	// - If the client provided no status param at all, default to visible
+	//   states (queued, running, completing) for backwards compatibility.
+	var statuses []string
+	if q.Status != nil {
+		if len(q.Status) == 1 && q.Status[0] == "" {
+			// explicit empty -> any status
+			statuses = nil
 		} else {
-			status = "running"
+			statuses = q.Status
 		}
+	} else {
+		// no status param -> default to visible states
+		statuses = []string{"queued", "running", "completing"}
 	}
 
-	items, err := s.events.ListSessionProjections(r.Context(), status, limit, offset)
+	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Offset)
 	if err != nil {
 		logger.Error("Failed to list session projections", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))

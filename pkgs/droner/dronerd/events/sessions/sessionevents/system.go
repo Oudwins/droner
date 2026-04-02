@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -266,30 +267,19 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 // If status is empty it returns all rows (respecting limit/offset). If status
 // is provided it filters on public_state = status. Limit/offset are applied
 // as provided.
-func (s *System) ListSessionProjections(ctx context.Context, status string, limit int, offset int) ([]ListItem, error) {
-	var rows *sql.Rows
-	var err error
-
-	if status == "" {
-		rows, err = s.db.QueryContext(ctx, `SELECT stream_id, repo_path, remote_url, branch, public_state FROM session_projection ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, offset)
-	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT stream_id, repo_path, remote_url, branch, public_state FROM session_projection WHERE public_state = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`, status, limit, offset)
+func (s *System) ListSessionProjections(ctx context.Context, statuses []string, limit int, offset int) ([]ListItem, error) {
+	// Use sqlc-backed query that accepts a comma-separated list of statuses.
+	statusesArg := ""
+	if len(statuses) > 0 {
+		statusesArg = strings.Join(statuses, ",")
 	}
+	rows, err := s.queries.ListSessionProjectionItemsByStatuses(ctx, statusesArg, statusesArg, limit, offset)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	items := []ListItem{}
-	for rows.Next() {
-		var id, repoPath, remoteURL, branch, publicState string
-		if err := rows.Scan(&id, &repoPath, &remoteURL, &branch, &publicState); err != nil {
-			return nil, err
-		}
-		items = append(items, newListItem(id, repoPath, remoteURL, branch, publicState))
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	items := make([]ListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
 	}
 	return items, nil
 }

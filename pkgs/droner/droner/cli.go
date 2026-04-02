@@ -286,9 +286,13 @@ func newSessionsCmd() *cobra.Command {
 			var response *schemas.SessionListResponse
 			var err error
 			if all {
-				response, err = client.ListSessionsAll(ctx)
+				// Explicitly request any status by passing an empty status value
+				// (produces ?status=). The server interprets this as "no
+				// status filter".
+				response, err = client.ListSessionsWithParams(ctx, []string{""}, 0, 0)
 			} else {
-				response, err = client.ListSessions(ctx)
+				// Default to listing running sessions in the CLI
+				response, err = client.ListSessionsWithParams(ctx, []string{"running"}, 0, 0)
 			}
 			if err != nil {
 				return err
