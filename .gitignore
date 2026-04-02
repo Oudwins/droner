@@ -5,6 +5,7 @@ result-*
 *.out
 *.test
 /pkgs/droner/bin/
+/pkgs/droner/eventdebug
 bin/
 .env
 thoughts/
