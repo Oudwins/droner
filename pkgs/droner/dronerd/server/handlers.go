@@ -297,25 +297,7 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		return
 	}
 
-	// Interpret status semantics:
-	// - If the client provided a single empty status value (status=), treat
-	//   that as an explicit request for any status (nil slice forwarded).
-	// - If the client provided no status param at all, default to visible
-	//   states (queued, running, completing) for backwards compatibility.
-	var statuses []string
-	if q.Status != nil {
-		if len(q.Status) == 1 && q.Status[0] == "" {
-			// explicit empty -> any status
-			statuses = nil
-		} else {
-			statuses = q.Status
-		}
-	} else {
-		// no status param -> default to visible states
-		statuses = []string{"queued", "running", "completing"}
-	}
-
-	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Cursor, string(q.Direction))
+	items, err := s.events.ListSessionProjections(r.Context(), q.Status, q.Limit, q.Cursor, string(q.Direction))
 	if err != nil {
 		logger.Error("Failed to list session projections", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))

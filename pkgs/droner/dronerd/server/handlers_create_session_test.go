@@ -352,6 +352,38 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	waitForSessionState(t, server, "complete-me", "completed")
 }
 
+func TestHandlerListSessionsWithoutStatusFilterIncludesCompleted(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "completed-visible")
+	waitForSessionState(t, server, "completed-visible", "running")
+
+	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("completed-visible")})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions/complete", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerCompleteSession(server.Base.Logger, rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("complete status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	completed := waitForSessionState(t, server, "completed-visible", "completed")
+
+	response := listSessions(t, server, "/sessions?limit=10")
+	if len(response.Sessions) != 1 {
+		t.Fatalf("listed %d sessions, want 1", len(response.Sessions))
+	}
+	if got := response.Sessions[0].ID; got != completed.StreamID {
+		t.Fatalf("listed id = %q, want %q", got, completed.StreamID)
+	}
+	if got := response.Sessions[0].State; got != "completed" {
+		t.Fatalf("listed state = %q, want completed", got)
+	}
+}
+
 func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 

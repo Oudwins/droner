@@ -157,11 +157,11 @@ curl -sS -X POST http://localhost:57876/sessions \
     }
   }'
 
-# list queued and running sessions
+# list up to the last 100 sessions of any status
 curl -sS http://localhost:57876/sessions
 
-# list up to the last 100 sessions of any status
-curl -sS "http://localhost:57876/sessions?all=true"
+# list only queued and running sessions
+curl -sS "http://localhost:57876/sessions?status=queued&status=running"
 
 # check an async task
 curl -sS http://localhost:57876/tasks/<task-id>
