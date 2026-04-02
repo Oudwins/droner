@@ -2,13 +2,15 @@ package sessionevents
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
 
-type sessionProjection struct {
+type projectionMutation struct {
 	StreamID       string
 	Harness        string
 	Branch         string
@@ -24,80 +26,19 @@ type sessionProjection struct {
 	UpdatedAt      time.Time
 }
 
-type projectionMutation struct {
-	StreamID       string
-	Harness        string
-	Branch         string
-	BackendID      string
-	RepoPath       string
-	WorktreePath   string
-	RemoteURL      string
-	AgentConfig    string
-	LifecycleState string
-	PublicState    string
-	LastError      string
-	OccurredAt     time.Time
-}
-
 func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope) error {
-	switch evt.Type {
-	case eventTypeSessionQueued:
-		payload, err := decodeQueuedPayload(evt)
-		if err != nil {
-			return err
-		}
-		return s.upsertProjection(ctx, projectionMutation{
-			StreamID:       string(evt.StreamID),
-			Harness:        payload.Harness,
-			Branch:         payload.Branch,
-			BackendID:      payload.BackendID,
-			RepoPath:       payload.RepoPath,
-			WorktreePath:   payload.WorktreePath,
-			RemoteURL:      payload.RemoteURL,
-			AgentConfig:    payload.AgentConfigJSON,
-			LifecycleState: string(eventTypeSessionQueued),
-			PublicState:    "queued",
-			OccurredAt:     evt.OccurredAt,
-		})
-	case eventTypeSessionEnvironmentProvisioningStarted:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningStarted), "queued", "", evt.OccurredAt)
-	case eventTypeSessionEnvironmentProvisioningSuccess:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningSuccess), "queued", "", evt.OccurredAt)
-	case eventTypeSessionReady:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionReady), "running", "", evt.OccurredAt)
-	case eventTypeSessionEnvironmentProvisioningFailed:
-		payload, err := decodeFailedPayload(evt)
-		if err != nil {
-			return err
-		}
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionEnvironmentProvisioningFailed), "failed", payload.Error, evt.OccurredAt)
-	case eventTypeSessionCompletionRequested:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionRequested), "running", "", evt.OccurredAt)
-	case eventTypeSessionCompletionStarted:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionStarted), "completing", "", evt.OccurredAt)
-	case eventTypeSessionCompletionSuccess:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionSuccess), "completed", "", evt.OccurredAt)
-	case eventTypeSessionCompletionFailed:
-		payload, err := decodeFailedPayload(evt)
-		if err != nil {
-			return err
-		}
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionCompletionFailed), "failed", payload.Error, evt.OccurredAt)
-	case eventTypeSessionDeletionRequested:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionRequested), "deleting", "", evt.OccurredAt)
-	case eventTypeSessionDeletionStarted:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionStarted), "deleting", "", evt.OccurredAt)
-	case eventTypeSessionDeletionSuccess:
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionSuccess), "deleted", "", evt.OccurredAt)
-	case eventTypeSessionDeletionFailed:
-		payload, err := decodeFailedPayload(evt)
-		if err != nil {
-			return err
-		}
-		return s.patchProjection(ctx, string(evt.StreamID), string(eventTypeSessionDeletionFailed), "failed", payload.Error, evt.OccurredAt)
-	default:
+	state, err := s.loadProjectionStateForUpdate(ctx, evt)
+	if err != nil {
+		return err
+	}
+	changed, err := state.Apply(evt)
+	if err != nil {
+		return err
+	}
+	if !changed {
 		return nil
 	}
+	return s.upsertProjection(ctx, state.projectionMutation())
 }
 
 func (s *System) upsertProjection(ctx context.Context, m projectionMutation) error {
@@ -113,27 +54,21 @@ func (s *System) upsertProjection(ctx context.Context, m projectionMutation) err
 		LifecycleState: m.LifecycleState,
 		PublicState:    m.PublicState,
 		LastError:      m.LastError,
-		CreatedAt:      m.OccurredAt.UTC(),
-		UpdatedAt:      m.OccurredAt.UTC(),
+		CreatedAt:      m.CreatedAt.UTC(),
+		UpdatedAt:      m.UpdatedAt.UTC(),
 	})
 }
 
-func (s *System) patchProjection(ctx context.Context, streamID, lifecycleState, publicState, lastError string, occurredAt time.Time) error {
-	return s.queries.PatchSessionProjection(ctx, coredb.PatchSessionProjectionParams{
-		LifecycleState: lifecycleState,
-		PublicState:    publicState,
-		LastError:      lastError,
-		UpdatedAt:      occurredAt.UTC(),
-		StreamID:       streamID,
-	})
-}
-
-func (s *System) loadProjection(ctx context.Context, streamID string) (sessionProjection, error) {
-	row, err := s.queries.GetSessionProjectionByStreamID(ctx, streamID)
-	if err != nil {
-		return sessionProjection{}, err
+func (s *System) loadProjectionStateForUpdate(ctx context.Context, evt eventlog.Envelope) (sessionState, error) {
+	row, err := s.queries.GetSessionProjectionByStreamID(ctx, string(evt.StreamID))
+	if err == nil {
+		return stateFromProjection(row), nil
 	}
-	return projectionFromRow(row), nil
+	if !errors.Is(err, sql.ErrNoRows) {
+		return sessionState{}, err
+	}
+	state, _, err := s.loadSessionStateBeforeVersion(ctx, string(evt.StreamID), evt.StreamVersion)
+	return state, err
 }
 
 func (s *System) loadProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
@@ -189,24 +124,6 @@ func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string
 		refs = append(refs, sessionRefFromRow(row))
 	}
 	return refs, nil
-}
-
-func projectionFromRow(row coredb.SessionProjection) sessionProjection {
-	return sessionProjection{
-		StreamID:       row.StreamID,
-		Harness:        row.Harness,
-		Branch:         row.Branch,
-		BackendID:      row.BackendID,
-		RepoPath:       row.RepoPath,
-		WorktreePath:   row.WorktreePath,
-		RemoteURL:      row.RemoteUrl,
-		AgentConfig:    row.AgentConfig,
-		LifecycleState: row.LifecycleState,
-		PublicState:    row.PublicState,
-		LastError:      row.LastError,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
-	}
 }
 
 func sessionRefFromRow(row coredb.SessionProjection) SessionRef {

@@ -13,12 +13,12 @@ import (
 )
 
 func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		switch projection.LifecycleState {
+		switch state.LifecycleState {
 		case string(eventTypeSessionReady), string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess):
 			return nil
 		}
@@ -34,29 +34,29 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 }
 
 func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
 
 	var nextType eventlog.EventType
 	var nextPayload any
-	switch projection.LifecycleState {
+	switch state.LifecycleState {
 	case string(eventTypeSessionQueued):
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
-		nextPayload = provisioningStepPayload(projection.Branch, provisioningModeInitial)
+		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
 	case string(eventTypeSessionEnvironmentProvisioningStarted):
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
-		nextPayload = provisioningStepPayload(projection.Branch, provisioningModeInitial)
+		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
 	case string(eventTypeSessionReady):
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
-		nextPayload = provisioningStepPayload(projection.Branch, provisioningModeRestart)
+		nextPayload = provisioningStepPayload(state.Branch, provisioningModeRestart)
 	case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted):
 		nextType = eventTypeSessionCompletionStarted
-		nextPayload = requestStepPayload(projection.Branch)
+		nextPayload = requestStepPayload(state.Branch)
 	case string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted):
 		nextType = eventTypeSessionDeletionStarted
-		nextPayload = requestStepPayload(projection.Branch)
+		nextPayload = requestStepPayload(state.Branch)
 	default:
 		return nil
 	}
@@ -66,7 +66,7 @@ func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Enve
 }
 
 func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
@@ -75,27 +75,27 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 		return err
 	}
 
-	agentConfig, err := s.agentConfigFromJSON(conf.HarnessID(projection.Harness), projection.AgentConfig)
+	agentConfig, err := s.agentConfigFromJSON(conf.HarnessID(state.Harness), state.AgentConfig)
 	if err != nil {
 		return s.appendProvisioningFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
 	}
 
-	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
+	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
 	if err != nil {
 		return s.appendProvisioningFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
 	}
 
 	if payload.Mode == provisioningModeRestart {
 		result, hydrateErr := backend.HydrateSession(ctx, coredb.Session{
-			ID:           projection.StreamID,
-			Harness:      projection.Harness,
-			Branch:       projection.Branch,
+			ID:           state.StreamID,
+			Harness:      state.Harness,
+			Branch:       state.Branch,
 			Status:       coredb.SessionStatusRunning,
-			BackendID:    projection.BackendID,
-			RepoPath:     projection.RepoPath,
-			RemoteUrl:    sql.NullString{String: projection.RemoteURL, Valid: projection.RemoteURL != ""},
-			WorktreePath: projection.WorktreePath,
-			AgentConfig:  sql.NullString{String: projection.AgentConfig, Valid: projection.AgentConfig != ""},
+			BackendID:    state.BackendID,
+			RepoPath:     state.RepoPath,
+			RemoteUrl:    sql.NullString{String: state.RemoteURL, Valid: state.RemoteURL != ""},
+			WorktreePath: state.WorktreePath,
+			AgentConfig:  sql.NullString{String: state.AgentConfig, Valid: state.AgentConfig != ""},
 		}, agentConfig)
 		if hydrateErr != nil {
 			return s.appendProvisioningFailure(ctx, evt, hydrateErr)
@@ -108,13 +108,13 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 			return s.appendProvisioningFailure(ctx, evt, errors.New(message))
 		}
 	} else {
-		reusableRefs, err := s.listReusableProjectionRefs(ctx, projection.RepoPath, projection.BackendID)
+		reusableRefs, err := s.listReusableProjectionRefs(ctx, state.RepoPath, state.BackendID)
 		if err != nil {
 			return s.appendProvisioningFailure(ctx, evt, err)
 		}
 		cleanupCandidates := make([]backends.ReusableWorktreeCandidate, 0)
 		nextIndex := 0
-		if createErr := backend.CreateSession(ctx, projection.RepoPath, projection.WorktreePath, projection.Branch, agentConfig, backends.CreateSessionOptions{
+		if createErr := backend.CreateSession(ctx, state.RepoPath, state.WorktreePath, state.Branch, agentConfig, backends.CreateSessionOptions{
 			NextReusableWorktree: func(context.Context) (*backends.ReusableWorktreeCandidate, error) {
 				if nextIndex >= len(reusableRefs) {
 					return nil, nil
@@ -145,7 +145,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 	}
 
 	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionReady} {
-		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, requestStepPayload(projection.Branch), string(evt.ID), string(evt.StreamID)); err != nil {
+		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID)); err != nil {
 			return err
 		}
 	}
@@ -158,11 +158,11 @@ func (s *System) appendProvisioningFailure(ctx context.Context, cause eventlog.E
 }
 
 func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionCompletionStarted) || projection.LifecycleState == string(eventTypeSessionCompletionSuccess) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == string(eventTypeSessionCompletionStarted) || state.LifecycleState == string(eventTypeSessionCompletionSuccess) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -174,30 +174,30 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 }
 
 func (s *System) handleCompletionStarted(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionCompletionSuccess) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == string(eventTypeSessionCompletionSuccess) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
-	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
+	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
 	if err != nil {
 		return s.appendCompletionFailure(ctx, evt, err)
 	}
-	if err := backend.CompleteSession(ctx, projection.WorktreePath, projection.Branch); err != nil {
+	if err := backend.CompleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
 		return s.appendCompletionFailure(ctx, evt, err)
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionSuccess, requestStepPayload(projection.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
 func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionDeletionStarted) || projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == string(eventTypeSessionDeletionStarted) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -209,21 +209,21 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 }
 
 func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
-	if projection.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return nil
 	}
-	backend, err := s.backends.Get(conf.BackendID(projection.BackendID))
+	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
 	if err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
-	if err := backend.DeleteSession(ctx, projection.WorktreePath, projection.Branch); err != nil {
+	if err := backend.DeleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(projection.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 

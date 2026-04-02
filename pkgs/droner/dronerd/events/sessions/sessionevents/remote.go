@@ -36,12 +36,12 @@ func splitRemoteSubscriptionKey(key string) (string, string, bool) {
 	return remoteURL, branch, true
 }
 
-func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessionProjection) error {
-	remoteURL := strings.TrimSpace(projection.RemoteURL)
+func (s *System) ensureRemoteSubscription(ctx context.Context, state sessionState) error {
+	remoteURL := strings.TrimSpace(state.RemoteURL)
 	if remoteURL == "" {
 		return nil
 	}
-	branch := strings.TrimSpace(projection.Branch)
+	branch := strings.TrimSpace(state.Branch)
 	if branch == "" {
 		return nil
 	}
@@ -57,8 +57,8 @@ func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessio
 	handler := func(event remote.BranchEvent) {
 		appendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.appendRemoteObservation(appendCtx, projection.StreamID, projection.Branch, event); err != nil {
-			s.logger.Error("failed to append remote observation", "stream_id", projection.StreamID, "branch", projection.Branch, "event_type", event.Type, "error", err)
+		if err := s.appendRemoteObservation(appendCtx, state.StreamID, state.Branch, event); err != nil {
+			s.logger.Error("failed to append remote observation", "stream_id", state.StreamID, "branch", state.Branch, "event_type", event.Type, "error", err)
 		}
 	}
 
@@ -70,7 +70,7 @@ func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessio
 	s.remoteSubs.subs[key] = struct{}{}
 	s.remoteSubs.mu.Unlock()
 
-	s.logger.Info("remote subscription started", "stream_id", projection.StreamID, "branch", projection.Branch, "remote_url", remoteURL)
+	s.logger.Info("remote subscription started", "stream_id", state.StreamID, "branch", state.Branch, "remote_url", remoteURL)
 	return nil
 }
 
@@ -133,16 +133,16 @@ func (s *System) appendRemoteObservation(ctx context.Context, streamID, branch s
 }
 
 func (s *System) handleRemoteSubscriptionEvent(ctx context.Context, evt eventlog.Envelope) error {
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
 
 	switch evt.Type {
 	case eventTypeSessionReady:
-		return s.ensureRemoteSubscription(ctx, projection)
+		return s.ensureRemoteSubscription(ctx, state)
 	case eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
-		return s.stopRemoteSubscription(ctx, projection.RemoteURL, projection.Branch)
+		return s.stopRemoteSubscription(ctx, state.RemoteURL, state.Branch)
 	default:
 		return nil
 	}
@@ -153,12 +153,12 @@ func (s *System) handleRemoteObservationEvent(ctx context.Context, evt eventlog.
 		return nil
 	}
 
-	projection, err := s.loadProjection(ctx, string(evt.StreamID))
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
 	if err != nil {
 		return err
 	}
 
-	switch projection.LifecycleState {
+	switch state.LifecycleState {
 	case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted), string(eventTypeSessionCompletionSuccess), string(eventTypeSessionCompletionFailed), string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted), string(eventTypeSessionDeletionSuccess), string(eventTypeSessionDeletionFailed):
 		return nil
 	}

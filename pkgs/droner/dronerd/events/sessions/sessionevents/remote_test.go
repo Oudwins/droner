@@ -389,23 +389,21 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) {
 	system, backend, _, _ := newRemoteTestSystem(t)
 
-	oldCreatedAt := time.Now().UTC().Add(-time.Hour)
-	if err := system.queries.UpsertSessionProjection(context.Background(), coredb.UpsertSessionProjectionParams{
-		StreamID:       "old-stream",
-		Branch:         "old-branch",
-		BackendID:      conf.BackendLocal.String(),
-		RepoPath:       "/tmp/repo",
-		WorktreePath:   filepath.Join(backend.worktreeRoot, "repo..old-branch"),
-		RemoteUrl:      "",
-		AgentConfig:    "",
-		LifecycleState: string(eventTypeSessionCompletionSuccess),
-		PublicState:    "completed",
-		LastError:      "",
-		CreatedAt:      oldCreatedAt,
-		UpdatedAt:      oldCreatedAt,
+	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
+		StreamID:     "old-stream",
+		Harness:      conf.HarnessOpenCode,
+		Branch:       "old-branch",
+		BackendID:    conf.BackendLocal,
+		RepoPath:     "/tmp/repo",
+		WorktreePath: filepath.Join(backend.worktreeRoot, "repo..old-branch"),
 	}); err != nil {
-		t.Fatalf("UpsertSessionProjection old: %v", err)
+		t.Fatalf("CreateSession old: %v", err)
 	}
+	waitForPublicState(t, system, "old-branch", "running")
+	if _, err := system.RequestCompletion(context.Background(), "old-branch"); err != nil {
+		t.Fatalf("RequestCompletion old: %v", err)
+	}
+	waitForPublicState(t, system, "old-branch", "completed")
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     "new-stream",
