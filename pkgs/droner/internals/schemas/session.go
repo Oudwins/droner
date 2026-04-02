@@ -154,11 +154,21 @@ type SessionListQuery struct {
 	Direction SessionListDirection `zog:"direction"`
 }
 
+type SessionNavigationQuery struct {
+	ID     string  `zog:"id"`
+	Branch SBranch `zog:"branch"`
+}
+
 var SessionListQuerySchema = z.Struct(z.Shape{
 	"Status":    z.Slice(z.String().Min(1).Required()).Optional(),
 	"Limit":     z.Int().Default(100).GTE(1),
 	"Cursor":    z.String().Optional(),
 	"Direction": z.StringLike[SessionListDirection]().OneOf([]SessionListDirection{SessionListDirectionBefore, SessionListDirectionAfter}).Default(SessionListDirectionAfter),
+})
+
+var SessionNavigationQuerySchema = z.Struct(z.Shape{
+	"ID":     z.String().Optional().Trim(),
+	"Branch": branch().Optional().Trim().Match(branchRegex).Not().Match(multiupleSlashes),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {

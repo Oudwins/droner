@@ -14,6 +14,8 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Group(func(r chi.Router) {
+		r.Get("/_session/next", HandlerWithLogger(s.HandlerSessionNext))
+		r.Get("/_session/prev", HandlerWithLogger(s.HandlerSessionPrev))
 		r.Get("/sessions", HandlerWithLogger(s.HandlerListSessions))
 		r.Post("/sessions", HandlerWithLogger(s.HandlerCreateSession))
 		r.Delete("/sessions", HandlerWithLogger(s.HandlerDeleteSession))

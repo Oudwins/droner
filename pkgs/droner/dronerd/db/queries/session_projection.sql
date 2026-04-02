@@ -59,6 +59,14 @@ SELECT *
 FROM session_projection
 WHERE branch = ?;
 
+-- name: GetLatestNavigationSessionProjectionByBranch :one
+SELECT *
+FROM session_projection
+WHERE branch = ?
+  AND public_state IN ('running', 'completed')
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: ListVisibleSessionProjectionItems :many
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection

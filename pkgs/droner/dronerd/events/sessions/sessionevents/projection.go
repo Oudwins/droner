@@ -144,6 +144,14 @@ func (s *System) loadProjectionByBranch(ctx context.Context, branch string) (Ses
 	return sessionRefFromRow(row), nil
 }
 
+func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+	row, err := s.queries.GetLatestNavigationSessionProjectionByBranch(ctx, branch)
+	if err != nil {
+		return SessionRef{}, err
+	}
+	return sessionRefFromRow(row), nil
+}
+
 func (s *System) listActiveProjectionRefs(ctx context.Context) ([]SessionRef, error) {
 	rows, err := s.queries.ListActiveSessionProjectionRefs(ctx)
 	if err != nil {

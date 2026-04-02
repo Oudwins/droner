@@ -510,6 +510,125 @@ func TestHandlerListSessionsSupportsCursorDirections(t *testing.T) {
 	}
 }
 
+func TestHandlerSessionNavigationWithoutParamsReturnsFirstRunningSession(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	branches := []string{"nav-a", "nav-b", "nav-c"}
+	for _, branch := range branches {
+		createEventSourcedSession(t, server, repoDir, branch)
+		waitForSessionState(t, server, branch, "running")
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	expected := listSessions(t, server, "/sessions?status=running&limit=1")
+	if len(expected.Sessions) != 1 {
+		t.Fatalf("expected list returned %d sessions, want 1", len(expected.Sessions))
+	}
+
+	nextResponse := navigateSession(t, server, "/_session/next")
+	if got, want := len(nextResponse.Sessions), 1; got != want {
+		t.Fatalf("next listed %d sessions, want %d", got, want)
+	}
+	if got, want := nextResponse.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("next id = %q, want %q", got, want)
+	}
+
+	prevResponse := navigateSession(t, server, "/_session/prev")
+	if got, want := len(prevResponse.Sessions), 1; got != want {
+		t.Fatalf("prev listed %d sessions, want %d", got, want)
+	}
+	if got, want := prevResponse.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("prev id = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationByIDMatchesSessionListing(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	branches := []string{"nav-id-a", "nav-id-b", "nav-id-c", "nav-id-d"}
+	for _, branch := range branches {
+		createEventSourcedSession(t, server, repoDir, branch)
+		waitForSessionState(t, server, branch, "running")
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	fullResponse := listSessions(t, server, "/sessions?status=running&limit=10")
+	anchorID := fullResponse.Sessions[1].ID
+
+	nextResponse := navigateSession(t, server, "/_session/next?id="+anchorID)
+	expectedNext := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=after")
+	if got, want := nextResponse, expectedNext; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
+		t.Fatalf("next response = %#v, want %#v", got, want)
+	}
+
+	prevResponse := navigateSession(t, server, "/_session/prev?id="+anchorID)
+	expectedPrev := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=before")
+	if got, want := prevResponse, expectedPrev; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
+		t.Fatalf("prev response = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationIDTakesPrecedenceOverBranch(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	branches := []string{"nav-priority-a", "nav-priority-b", "nav-priority-c"}
+	for _, branch := range branches {
+		createEventSourcedSession(t, server, repoDir, branch)
+		waitForSessionState(t, server, branch, "running")
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	fullResponse := listSessions(t, server, "/sessions?status=running&limit=10")
+	anchorID := fullResponse.Sessions[0].ID
+
+	response := navigateSession(t, server, "/_session/next?id="+anchorID+"&branch=nav-priority-c")
+	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=after")
+	if got, want := response, expected; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
+		t.Fatalf("response = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationByBranchResolvesCompletedSessionID(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "branch-nav-a")
+	createEventSourcedSession(t, server, repoDir, "branch-nav-b")
+	createEventSourcedSession(t, server, repoDir, "branch-nav-c")
+	waitForSessionState(t, server, "branch-nav-a", "running")
+	completedRef := waitForSessionState(t, server, "branch-nav-b", "running")
+	waitForSessionState(t, server, "branch-nav-c", "running")
+	time.Sleep(2 * time.Millisecond)
+
+	completeSession(t, server, "branch-nav-b")
+	completedRef = waitForSessionState(t, server, "branch-nav-b", "completed")
+
+	response := navigateSession(t, server, "/_session/next?branch=branch-nav-b")
+	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+completedRef.StreamID+"&direction=after")
+	if len(expected.Sessions) == 0 {
+		t.Fatalf("expected navigation target for completed branch")
+	}
+	if got, want := response.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("response id = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationReturnsEmptyWhenNoMatches(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "nav-empty")
+	ref := waitForSessionState(t, server, "nav-empty", "running")
+
+	response := navigateSession(t, server, "/_session/next?id="+ref.StreamID)
+	if len(response.Sessions) != 0 {
+		t.Fatalf("next listed %d sessions, want 0", len(response.Sessions))
+	}
+
+	response = navigateSession(t, server, "/_session/next?branch=does-not-exist")
+	if len(response.Sessions) != 0 {
+		t.Fatalf("branch listed %d sessions, want 0", len(response.Sessions))
+	}
+}
+
 func TestHandlerListSessionsRejectsInvalidDirection(t *testing.T) {
 	server, _, _, _ := newEventSourcedCreateSessionTestServer(t)
 
@@ -564,6 +683,39 @@ func listSessions(t *testing.T, server *Server, target string) schemas.SessionLi
 		t.Fatalf("json.Unmarshal list response: %v", err)
 	}
 	return response
+}
+
+func navigateSession(t *testing.T, server *Server, target string) schemas.SessionListResponse {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	rec := httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("navigate status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response schemas.SessionListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal navigate response: %v", err)
+	}
+	return response
+}
+
+func completeSession(t *testing.T, server *Server, branch string) {
+	t.Helper()
+
+	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch(branch)})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions/complete", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerCompleteSession(server.Base.Logger, rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("complete status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
 }
 
 func waitForSessionState(t *testing.T, server *Server, branch, wantState string) sessionevents.SessionRef {

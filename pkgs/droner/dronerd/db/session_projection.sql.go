@@ -11,6 +11,36 @@ import (
 	"time"
 )
 
+const getLatestNavigationSessionProjectionByBranch = `-- name: GetLatestNavigationSessionProjectionByBranch :one
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+FROM session_projection
+WHERE branch = ?
+  AND public_state IN ('running', 'completed')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestNavigationSessionProjectionByBranch(ctx context.Context, branch string) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getLatestNavigationSessionProjectionByBranch, branch)
+	var i SessionProjection
+	err := row.Scan(
+		&i.StreamID,
+		&i.Harness,
+		&i.Branch,
+		&i.BackendID,
+		&i.RepoPath,
+		&i.WorktreePath,
+		&i.RemoteUrl,
+		&i.AgentConfig,
+		&i.LifecycleState,
+		&i.PublicState,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSessionProjectionByBranch = `-- name: GetSessionProjectionByBranch :one
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection

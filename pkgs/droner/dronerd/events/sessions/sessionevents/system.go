@@ -351,6 +351,10 @@ func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (Sess
 	return s.loadProjectionByBranch(ctx, branch)
 }
 
+func (s *System) LookupLatestNavigationSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+	return s.loadLatestNavigationProjectionByBranch(ctx, branch)
+}
+
 func (s *System) ListActiveSessionRefs(ctx context.Context) ([]SessionRef, error) {
 	return s.listActiveProjectionRefs(ctx)
 }

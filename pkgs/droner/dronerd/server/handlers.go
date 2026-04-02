@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"time"
 
@@ -303,6 +304,52 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
+	renderSessionListResponse(w, r, items)
+}
+
+func (s *Server) HandlerSessionNext(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	s.handleSessionNavigation(logger, w, r, string(schemas.SessionListDirectionAfter))
+}
+
+func (s *Server) HandlerSessionPrev(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	s.handleSessionNavigation(logger, w, r, string(schemas.SessionListDirectionBefore))
+}
+
+func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWriter, r *http.Request, direction string) {
+	var q schemas.SessionNavigationQuery
+	if errs := schemas.SessionNavigationQuerySchema.Parse(zhttp.Request(r), &q); errs != nil {
+		flattened := z.Issues.FlattenAndCollect(errs)
+		logger.Info("Query validation failed", slog.Any("errors", flattened))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Query validation failed", flattened), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	cursor := strings.TrimSpace(q.ID)
+	if cursor == "" && q.Branch != "" {
+		ref, err := s.events.LookupLatestNavigationSessionByBranch(r.Context(), q.Branch.String())
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				renderSessionListResponse(w, r, nil)
+				return
+			}
+			logger.Error("Failed to resolve navigation branch", slog.String("branch", q.Branch.String()), slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve session branch", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		cursor = ref.StreamID
+	}
+
+	items, err := s.events.ListSessionProjections(r.Context(), []string{"running"}, 1, cursor, direction)
+	if err != nil {
+		logger.Error("Failed to navigate session projections", slog.String("direction", direction), slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to navigate sessions", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	renderSessionListResponse(w, r, items)
+}
+
+func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []sessionevents.ListItem) {
 	responseItems := make([]schemas.SessionListItem, 0, len(items))
 	for _, item := range items {
 		responseItems = append(responseItems, schemas.SessionListItem{
