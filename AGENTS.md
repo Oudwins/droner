@@ -12,7 +12,7 @@
 - Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and Goose migrations in `db/migrations`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Shared cross-package helpers live under `pkgs/droner/internals/...`; dronerd-only helpers now live under `pkgs/droner/dronerd/internals/...`.
-- Shared event log abstraction lives in `pkgs/droner/internals/eventlog` with the first backend in `internals/eventlog/backends/sqlite`.
+- Shared event log abstraction lives in `pkgs/droner/internals/eventlog`; dronerd's SQLite backend and queries live under `pkgs/droner/dronerd/events/backend/sqlite3`.
 - SDK package lives under `pkgs/droner/sdk`.
 - HTTP server code lives in `pkgs/droner/dronerd/server`.
 - Dronerd-owned helper packages such as backends, remote integration, repo/session id helpers, and assertions live under `pkgs/droner/dronerd/internals`.
@@ -23,7 +23,7 @@
 - `flake.nix` provides Go, gopls, git, just, sqlc, and psmisc.
 - Inside the flake dev shell, `droner` is provided as a wrapper for `just cli` so repo-local CLI changes can be used without a global install.
 - Optional env vars can be set in `.env` (loaded by justfile).
-- Create/list/task-status tracer-bullet projection data lives in `<data dir>/db/droner.db`; the sessions event log now lives separately in `<data dir>/db/droner.sessionslog.db`, opened via `dronerd/events/sessions/sessionslog` on top of the shared SQLite-backed `internals/eventlog` backend. On startup, `sessionevents` now appends `session.hydration.requested` for hydratable projection rows, re-enters the normal started-event flow for provisioning/completion/deletion, and restores live GitHub branch/PR subscriptions after `session.ready`.
+- Create/list/task-status tracer-bullet projection data lives in `<data dir>/db/droner.db`; the sessions event log now lives separately in `<data dir>/db/droner.sessionslog.db`, opened via `dronerd/events/sessions/sessionslog` on top of the dronerd-owned SQLite backend in `dronerd/events/backend/sqlite3`. On startup, `sessionevents` now appends `session.hydration.requested` for hydratable projection rows, re-enters the normal started-event flow for provisioning/completion/deletion, and restores live GitHub branch/PR subscriptions after `session.ready`.
 - Both SQLite databases are Goose-managed in-process on startup. Use `just migrate-up|down|status|version` for explicit migration commands, and `sqlc` reads main DB DDL from `dronerd/db/migrations`.
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
 - Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.

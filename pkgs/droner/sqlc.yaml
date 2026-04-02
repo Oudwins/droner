@@ -7,3 +7,10 @@ sql:
       go:
         package: "db"
         out: "dronerd/db"
+  - engine: "sqlite"
+    queries: "dronerd/events/backend/sqlite3/db/queries"
+    schema: "dronerd/events/backend/sqlite3/db/migrations"
+    gen:
+      go:
+        package: "db"
+        out: "dronerd/events/backend/sqlite3/db"

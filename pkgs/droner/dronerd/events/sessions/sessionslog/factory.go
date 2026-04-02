@@ -2,11 +2,10 @@ package sessionslog
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
+	sqlite3eventlog "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3"
+	backenddb "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/internals/eventlog/backends/sqlite"
 )
 
 const DBFileName = "droner.sessionslog.db"
@@ -14,15 +13,11 @@ const DBFileName = "droner.sessionslog.db"
 const Topic = eventlog.Topic("sessions")
 
 func DBPath(dataDir string) string {
-	return filepath.Join(filepath.Clean(dataDir), "db", DBFileName)
+	return backenddb.DBPath(dataDir)
 }
 
-func OpenBackend(dataDir string) (*sqliteeventlog.Backend, error) {
-	path := DBPath(dataDir)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create sessionslog db dir: %w", err)
-	}
-	backend, err := sqliteeventlog.New(sqliteeventlog.Config{Path: path})
+func OpenBackend(dataDir string) (*sqlite3eventlog.Backend, error) {
+	backend, err := sqlite3eventlog.New(sqlite3eventlog.Config{Path: DBPath(dataDir)})
 	if err != nil {
 		return nil, fmt.Errorf("open sessionslog sqlite backend: %w", err)
 	}

@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	backenddb "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/internals/eventlog/backends/sqlite"
 	"github.com/pressly/goose/v3"
 )
 
@@ -76,8 +76,8 @@ func selectTargets(target string, dataDir string) ([]migrationTarget, error) {
 	sessions := migrationTarget{
 		name:        "sessionslog",
 		path:        sessionslog.DBPath(dataDir),
-		open:        sqliteeventlog.OpenDB,
-		newProvider: sqliteeventlog.NewMigrationProvider,
+		open:        backenddb.OpenSQLiteDBWithoutMigrations,
+		newProvider: backenddb.NewMigrationProvider,
 	}
 	switch target {
 	case "main":

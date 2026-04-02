@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/internals/eventlog/backends/sqlite"
 )
 
 func TestAppendAndLoadStream(t *testing.T) {
