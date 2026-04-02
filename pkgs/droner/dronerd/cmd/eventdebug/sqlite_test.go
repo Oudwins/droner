@@ -54,6 +54,12 @@ func TestSQLiteStore(t *testing.T) {
 	if len(streams) != 2 {
 		t.Fatalf("stream count = %d, want 2", len(streams))
 	}
+	if streams[0].StreamID != "session/b" {
+		t.Fatalf("first stream = %q, want %q", streams[0].StreamID, "session/b")
+	}
+	if streams[1].StreamID != "session/a" {
+		t.Fatalf("second stream = %q, want %q", streams[1].StreamID, "session/a")
+	}
 
 	stream, err := store.LoadStream(context.Background(), "session/a", StreamOptions{})
 	if err != nil {

@@ -65,7 +65,7 @@ func (s *SQLiteStore) ListStreams(ctx context.Context, opts ListOptions) ([]Stre
 		FROM %s
 		WHERE stream_id LIKE ?
 		GROUP BY stream_id
-		ORDER BY MAX(occurred_at) DESC, stream_id ASC
+		ORDER BY MIN(occurred_at) DESC, stream_id ASC
 		LIMIT ?
 	`, s.tableName), query, limit)
 	if err != nil {
