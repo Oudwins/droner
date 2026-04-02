@@ -1,20 +1,19 @@
 info:
   name: Next Session
   type: http
-  seq: 13
+  seq: 6
   tags:
     - sessions
 
 http:
   method: GET
-  url: "{{baseUrl}}/_session/next"
+  url: "{{baseUrl}}/_session/next?id=019d4e80-a57c-7d6f-929c-e8346a0d87fc"
   params:
     - name: id
-      value: "{{sessionId}}"
+      value: 019d4e80-a57c-7d6f-929c-e8346a0d87fc
       type: query
-      disabled: true
     - name: branch
-      value: "{{sessionBranch}}"
+      value: x
       type: query
       disabled: true
 

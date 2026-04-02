@@ -1,7 +1,7 @@
 info:
   name: Shutdown Server
   type: http
-  seq: 99
+  seq: 9
   tags:
     - dangerous
 
@@ -11,3 +11,6 @@ http:
 
 settings:
   encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

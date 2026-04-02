@@ -1,7 +1,7 @@
 info:
   name: Nuke Sessions
   type: http
-  seq: 14
+  seq: 8
   tags:
     - sessions
     - dangerous
@@ -14,8 +14,10 @@ http:
       value: application/json
   body:
     type: json
-    data: |-
-      {}
+    data: "{}"
 
 settings:
   encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

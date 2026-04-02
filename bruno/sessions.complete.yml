@@ -1,7 +1,7 @@
 info:
   name: Complete Session
   type: http
-  seq: 12
+  seq: 4
   tags:
     - sessions
 
@@ -20,3 +20,6 @@ http:
 
 settings:
   encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

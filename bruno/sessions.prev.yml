@@ -1,7 +1,7 @@
 info:
   name: Previous Session
   type: http
-  seq: 14
+  seq: 7
   tags:
     - sessions
 
@@ -10,11 +10,11 @@ http:
   url: "{{baseUrl}}/_session/prev"
   params:
     - name: id
-      value: "{{sessionId}}"
+      value: ""
       type: query
       disabled: true
     - name: branch
-      value: "{{sessionBranch}}"
+      value: ""
       type: query
       disabled: true
 

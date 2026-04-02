@@ -1,7 +1,7 @@
 info:
   name: List Sessions
   type: http
-  seq: 11
+  seq: 3
   tags:
     - sessions
 
