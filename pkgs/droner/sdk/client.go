@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -19,6 +21,17 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 }
+
+// SessionStatus represents the public lifecycle state of a session.
+type SessionStatus string
+
+const (
+	SessionStatusQueued     SessionStatus = "queued"
+	SessionStatusRunning    SessionStatus = "running"
+	SessionStatusCompleting SessionStatus = "completing"
+	SessionStatusDeleted    SessionStatus = "deleted"
+	SessionStatusCompleted  SessionStatus = "completed"
+)
 
 var ErrAuthRequired = errors.New("auth required")
 var ErrShutdownUnsupported = errors.New("shutdown unsupported")
@@ -225,7 +238,8 @@ func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse
 }
 
 func (c *Client) ListSessionsAll(ctx context.Context) (*schemas.SessionListResponse, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions?all=1", nil)
+	// Request without status filter (alias)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +266,41 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return c.httpClient.Do(req)
+}
+
+// ListSessionsWithParams requests sessions with optional statuses and pagination.
+// If statuses is nil or empty, no status filter is applied.
+func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, cursor string) (*schemas.SessionListResponse, error) {
+	path := "/sessions"
+	q := make([]string, 0)
+	if len(statuses) > 0 {
+		for _, s := range statuses {
+			q = append(q, "status="+url.QueryEscape(s))
+		}
+	}
+	if limit > 0 {
+		q = append(q, "limit="+strconv.Itoa(limit))
+	}
+	if cursor != "" {
+		q = append(q, "cursor="+url.QueryEscape(cursor))
+	}
+	if len(q) > 0 {
+		path = path + "?" + strings.Join(q, "&")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, responseError(resp)
+	}
+	var payload schemas.SessionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return &payload, nil
 }
 
 func responseError(resp *http.Response) error {

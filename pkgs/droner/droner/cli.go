@@ -274,7 +274,7 @@ func newSessionsCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "sessions",
-		Short: "List sessions",
+		Short: "List sessions (defaults to running)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := sdk.NewClient()
@@ -286,9 +286,11 @@ func newSessionsCmd() *cobra.Command {
 			var response *schemas.SessionListResponse
 			var err error
 			if all {
-				response, err = client.ListSessionsAll(ctx)
+				// Explicitly request any status: pass nil statuses and no cursor
+				response, err = client.ListSessionsWithParams(ctx, nil, 0, "")
 			} else {
-				response, err = client.ListSessions(ctx)
+				// Default to listing running sessions in the CLI
+				response, err = client.ListSessionsWithParams(ctx, []string{string(sdk.SessionStatusQueued), string(sdk.SessionStatusRunning)}, 0, "")
 			}
 			if err != nil {
 				return err
@@ -297,7 +299,7 @@ func newSessionsCmd() *cobra.Command {
 				if all {
 					fmt.Println("No sessions.")
 				} else {
-					fmt.Println("No queued or running sessions.")
+					fmt.Println("No running sessions.")
 				}
 				return nil
 			}
@@ -310,7 +312,7 @@ func newSessionsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "list last 100 sessions of any status")
+	cmd.Flags().BoolVar(&all, "all", false, "list last 100 sessions of any status (no status filter). By default lists running sessions")
 	return cmd
 }
 

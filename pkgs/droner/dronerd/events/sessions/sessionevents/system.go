@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -256,6 +257,30 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 	if err != nil {
 		return nil, err
 	}
+	for _, row := range rows {
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+	}
+	return items, nil
+}
+
+// ListSessionProjections reads directly from the session_projection table.
+// If status is empty it returns all rows (respecting limit/offset). If status
+// is provided it filters on public_state = status. Limit/offset are applied
+// as provided.
+func (s *System) ListSessionProjections(ctx context.Context, statuses []string, limit int, cursor string) ([]ListItem, error) {
+	// Use sqlc-backed query that accepts a comma-separated list of statuses
+	// and an optional cursor (stream_id) for pagination. The query returns
+	// items older than the cursor (stream_id < cursor) ordered by stream_id
+	// descending. If cursor is empty, it returns the most recent items.
+	statusesArg := ""
+	if len(statuses) > 0 {
+		statusesArg = strings.Join(statuses, ",")
+	}
+	rows, err := s.queries.ListSessionProjectionItemsByStatuses(ctx, statusesArg, statusesArg, cursor, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
 	}

@@ -127,6 +127,19 @@ var SessionCompleteSchema = z.Struct(z.Shape{
 	"Branch": branch().Required().Trim(),
 })
 
+// SessionListQuery represents query parameters accepted by GET /sessions.
+type SessionListQuery struct {
+	Status []string `zog:"status"`
+	Limit  int      `zog:"limit"`
+	Cursor string   `zog:"cursor"`
+}
+
+var SessionListQuerySchema = z.Struct(z.Shape{
+	"Status": z.Slice(z.String().Min(1).Required()).Optional(),
+	"Limit":  z.Int().Default(100).GTE(1),
+	"Cursor": z.String().Optional(),
+})
+
 func cleanPathTransform(valPtr *string, c z.Ctx) error {
 	*valPtr = filepath.Clean(*valPtr)
 	return nil
