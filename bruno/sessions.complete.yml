@@ -18,18 +18,5 @@ http:
         "branch": "{{sessionBranch}}"
       }
 
-runtime:
-  scripts:
-    - type: tests
-      code: |-
-        test("returns accepted", function() {
-          expect(res.status).to.equal(202);
-        });
-
-        test("returns a completion task", function() {
-          expect(res.getBody()).to.have.property("task_id");
-          expect(res.getBody().type).to.equal("session_complete");
-        });
-
 settings:
   encodeUrl: true

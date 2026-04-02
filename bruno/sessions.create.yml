@@ -24,17 +24,7 @@ runtime:
       code: |-
         bru.setVar("sessionBranch", res.getBody().branch);
 
-    - type: tests
-      code: |-
-        test("returns accepted", function() {
-          expect(res.status).to.equal(202);
-        });
-
-        test("returns identifiers", function() {
-          expect(res.getBody()).to.have.property("id");
-          expect(res.getBody()).to.have.property("taskId");
-          expect(res.getBody()).to.have.property("worktreePath");
-        });
+    # tests removed per request
 
 docs: |-
   Creates a session against the local droner server.

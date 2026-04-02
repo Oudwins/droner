@@ -19,18 +19,5 @@ http:
       value: running
       type: query
 
-runtime:
-  scripts:
-    - type: tests
-      code: |-
-        test("returns a 200", function() {
-          expect(res.status).to.equal(200);
-        });
-
-        test("returns sessions array", function() {
-          expect(res.getBody()).to.have.property("sessions");
-          expect(res.getBody().sessions).to.be.an("array");
-        });
-
 settings:
   encodeUrl: true

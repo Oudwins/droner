@@ -17,18 +17,5 @@ http:
     data: |-
       {}
 
-runtime:
-  scripts:
-    - type: tests
-      code: |-
-        test("returns accepted", function() {
-          expect(res.status).to.equal(202);
-        });
-
-        test("returns a nuke task", function() {
-          expect(res.getBody()).to.have.property("task_id");
-          expect(res.getBody().type).to.equal("session_nuke");
-        });
-
 settings:
   encodeUrl: true

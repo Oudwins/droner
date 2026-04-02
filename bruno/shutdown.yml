@@ -9,17 +9,5 @@ http:
   method: POST
   url: "{{baseUrl}}/shutdown"
 
-runtime:
-  scripts:
-    - type: tests
-      code: |-
-        test("returns accepted", function() {
-          expect(res.status).to.equal(202);
-        });
-
-        test("returns shutdown text", function() {
-          expect(res.getBody()).to.equal("Shutting down");
-        });
-
 settings:
   encodeUrl: true
