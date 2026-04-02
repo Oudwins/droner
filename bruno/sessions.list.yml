@@ -7,7 +7,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/sessions?limit=10&status=queued&status=running"
+  url: "{{baseUrl}}/sessions?limit=10&status=running"
   params:
     - name: limit
       value: "10"
@@ -15,9 +15,18 @@ http:
     - name: status
       value: queued
       type: query
+      disabled: true
     - name: status
       value: running
       type: query
+    - name: cursor
+      value: ""
+      type: query
+      disabled: true
+    - name: direction
+      value: after
+      type: query
+      disabled: true
 
 settings:
   encodeUrl: true
