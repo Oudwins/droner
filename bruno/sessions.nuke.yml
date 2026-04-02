@@ -1,0 +1,21 @@
+info:
+  name: Nuke Sessions
+  type: http
+  seq: 14
+  tags:
+    - sessions
+    - dangerous
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions/nuke"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {}
+
+settings:
+  encodeUrl: true

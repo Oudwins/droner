@@ -1,0 +1,13 @@
+info:
+  name: Shutdown Server
+  type: http
+  seq: 99
+  tags:
+    - dangerous
+
+http:
+  method: POST
+  url: "{{baseUrl}}/shutdown"
+
+settings:
+  encodeUrl: true

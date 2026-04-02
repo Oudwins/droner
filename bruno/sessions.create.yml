@@ -1,0 +1,33 @@
+info:
+  name: Create Session
+  type: http
+  seq: 10
+  tags:
+    - sessions
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "path": "{{dronerRepoPath}}"
+      }
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        bru.setVar("sessionBranch", res.getBody().branch);
+
+    # tests removed per request
+
+docs: |-
+  Creates a session against the local droner server.
+  Set DRONER_REPO_PATH to an absolute path to a git repository before running.
+settings:
+  encodeUrl: true

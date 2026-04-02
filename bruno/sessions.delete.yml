@@ -1,0 +1,22 @@
+info:
+  name: Delete Session
+  type: http
+  seq: 13
+  tags:
+    - sessions
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/sessions"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "branch": "{{sessionBranch}}"
+      }
+
+settings:
+  encodeUrl: true
