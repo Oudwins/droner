@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionslog"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	sqliteeventlog "github.com/Oudwins/droner/pkgs/droner/internals/eventlog/backends/sqlite"
 	"github.com/pressly/goose/v3"

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/repo"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/zog/zhttp"

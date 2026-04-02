@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 
