@@ -31,9 +31,10 @@
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.
 
 ## Build and run
-- Run server (kills port 57876 first): `just dev`.
+- Run server plus event debug UI: `just dev`.
+- Run server only (kills port 57876 first): `just dev-main`.
+- Run event debug UI only: `just dev-debugger`.
 - Manual server run: `go run ./pkgs/droner/dronerd/cmd/dronerd`.
-- Run event debug UI: `just eventdebug`.
 - Build binaries into `./bin`: `just build`.
 - Build server only: `go build -o ./bin/dronerd ./pkgs/droner/dronerd/cmd/dronerd`.
 - Build CLI only: `go build -o ./bin/droner ./pkgs/droner/droner`.

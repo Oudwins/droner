@@ -251,7 +251,9 @@ Notes:
 ## Development
 
 ```bash
-just dev        # run the server on port 57876
+just dev        # run dronerd on 57876 and eventdebug on 57877
+just dev-main   # run only dronerd on 57876
+just dev-debugger # run only eventdebug on 57877
 just cli *args  # build the CLI and run it with arguments
 droner help     # same as above inside nix develop / direnv
 just cli --help # build the CLI and run it

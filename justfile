@@ -6,17 +6,24 @@ droner_bin := bin_dir + "/droner"
 
 kill:
     @if command -v fuser >/dev/null 2>&1; then \
-        fuser -k 57876/tcp >/dev/null 2>&1 || true; \
+        fuser -k 57876/tcp 57877/tcp >/dev/null 2>&1 || true; \
     elif command -v lsof >/dev/null 2>&1; then \
-        lsof -ti tcp:57876 | xargs -r kill -9; \
+        lsof -ti tcp:57876,tcp:57877 | xargs -r kill -9; \
     else \
-        echo "No fuser or lsof; cannot free port 57876"; \
+        echo "No fuser or lsof; cannot free ports 57876 or 57877"; \
     fi
 
 dev: kill
+    trap 'kill 0' INT TERM EXIT; (cd ./pkgs/droner && go run ./dronerd/cmd/dronerd) & (cd ./pkgs/droner && go run ./dronerd/cmd/eventdebug) & wait
+
+dev-main: kill
     cd ./pkgs/droner && go run ./dronerd/cmd/dronerd
-eventdebug:
+
+dev-debugger:
     cd ./pkgs/droner && go run ./dronerd/cmd/eventdebug
+
+eventdebug:
+    just dev-debugger
 
 build:
     mkdir -p {{bin_dir}}
