@@ -453,7 +453,7 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 	waitForSessionState(t, server, "nuke-a", "deleted")
 	waitForSessionState(t, server, "nuke-b", "deleted")
 
-	listReq := httptest.NewRequest(http.MethodGet, "/sessions", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/sessions?status=queued&status=running", nil)
 	listRec := httptest.NewRecorder()
 	server.HandlerListSessions(server.Base.Logger, listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -464,7 +464,7 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 		t.Fatalf("json.Unmarshal list response: %v", err)
 	}
 	if len(listResponse.Sessions) != 0 {
-		t.Fatalf("expected no active sessions after nuke, got %#v", listResponse.Sessions)
+		t.Fatalf("expected no queued or running sessions after nuke, got %#v", listResponse.Sessions)
 	}
 }
 
