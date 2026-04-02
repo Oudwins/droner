@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,8 +284,63 @@ func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter,
 }
 
 func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	all := false
+	// Support both the older event-sourced listing and a direct projection
+	// listing with optional filters. If the client provides any of
+	// status/limit/offset we will read from the projection table so callers
+	// can filter and paginate. The legacy "all" query parameter continues
+	// to work and returns the last 100 sessions of any status.
+
 	rawAll := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("all")))
+	rawLimit := strings.TrimSpace(r.URL.Query().Get("limit"))
+	rawOffset := strings.TrimSpace(r.URL.Query().Get("offset"))
+	rawStatus := strings.TrimSpace(r.URL.Query().Get("status"))
+
+	// If the client provided any projection-specific parameters, use the
+	// projection path which supports filtering and pagination.
+	if rawStatus != "" || rawLimit != "" || rawOffset != "" {
+		// parse limit
+		limit := 100
+		if rawLimit != "" {
+			v, err := strconv.Atoi(rawLimit)
+			if err != nil || v < 0 {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Invalid limit", nil), Render.Status(http.StatusBadRequest))
+				return
+			}
+			limit = v
+		}
+		// parse offset
+		offset := 0
+		if rawOffset != "" {
+			v, err := strconv.Atoi(rawOffset)
+			if err != nil || v < 0 {
+				RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Invalid offset", nil), Render.Status(http.StatusBadRequest))
+				return
+			}
+			offset = v
+		}
+
+		items, err := s.events.ListSessionProjections(r.Context(), rawStatus, limit, offset)
+		if err != nil {
+			logger.Error("Failed to list session projections", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+		responseItems := make([]schemas.SessionListItem, 0, len(items))
+		for _, item := range items {
+			responseItems = append(responseItems, schemas.SessionListItem{
+				ID:        item.ID,
+				Repo:      item.Repo,
+				RemoteURL: item.RemoteURL,
+				Branch:    schemas.NewSBranch(item.Branch),
+				State:     item.State,
+			})
+		}
+		RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
+		return
+	}
+
+	// Legacy behaviour: respect `all` and return event-sourced list
+	all := false
 	if rawAll == "1" || rawAll == "true" || rawAll == "yes" {
 		all = true
 	}
@@ -304,6 +360,5 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 			State:     item.State,
 		})
 	}
-
 	RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
 }
