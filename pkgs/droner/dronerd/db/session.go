@@ -7,7 +7,7 @@ import (
 
 type Session struct {
 	ID           string
-	SimpleID     string
+	Branch       string
 	Status       SessionStatus
 	BackendID    string
 	RepoPath     string

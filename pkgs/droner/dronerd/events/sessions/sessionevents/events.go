@@ -42,7 +42,7 @@ const (
 
 type queuedPayload struct {
 	StreamID        string `json:"streamId"`
-	SimpleID        string `json:"simpleId"`
+	Branch          string `json:"branch"`
 	BackendID       string `json:"backendId"`
 	RepoPath        string `json:"repoPath"`
 	WorktreePath    string `json:"worktreePath"`
@@ -55,19 +55,18 @@ type failedPayload struct {
 	BackendDetails string `json:"backendDetails,omitempty"`
 }
 
-type sessionIDPayload struct {
-	SimpleID string `json:"simpleId"`
+type branchPayload struct {
+	Branch string `json:"branch"`
 }
 
 type provisioningPayload struct {
-	SimpleID string `json:"simpleId"`
-	Mode     string `json:"mode,omitempty"`
+	Branch string `json:"branch"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 type remoteObservationPayload struct {
-	SimpleID   string    `json:"simpleId"`
-	RemoteURL  string    `json:"remoteUrl"`
 	Branch     string    `json:"branch"`
+	RemoteURL  string    `json:"remoteUrl"`
 	PRNumber   *int      `json:"prNumber,omitempty"`
 	PRState    string    `json:"prState,omitempty"`
 	ObservedAt time.Time `json:"observedAt"`
@@ -76,7 +75,7 @@ type remoteObservationPayload struct {
 func newQueuedPayload(input CreateSessionInput) queuedPayload {
 	return queuedPayload{
 		StreamID:        input.StreamID,
-		SimpleID:        input.SimpleID,
+		Branch:          input.Branch,
 		BackendID:       input.BackendID.String(),
 		RepoPath:        input.RepoPath,
 		WorktreePath:    input.WorktreePath,
@@ -90,8 +89,8 @@ func newFailedPayload(err error) failedPayload {
 	return failedPayload{Error: message, BackendDetails: message}
 }
 
-func newSessionIDPayload(simpleID string) sessionIDPayload {
-	return sessionIDPayload{SimpleID: simpleID}
+func newBranchPayload(branch string) branchPayload {
+	return branchPayload{Branch: branch}
 }
 
 func decodeQueuedPayload(evt eventlog.Envelope) (queuedPayload, error) {
@@ -106,8 +105,8 @@ func decodeFailedPayload(evt eventlog.Envelope) (failedPayload, error) {
 	return payload, err
 }
 
-func decodeSessionIDPayload(evt eventlog.Envelope) (sessionIDPayload, error) {
-	var payload sessionIDPayload
+func decodeBranchPayload(evt eventlog.Envelope) (branchPayload, error) {
+	var payload branchPayload
 	err := json.Unmarshal(evt.Payload, &payload)
 	return payload, err
 }
@@ -140,30 +139,29 @@ func newPendingEvent(streamID string, eventType eventlog.EventType, payload any,
 }
 
 func provisionStartedPayload(queued queuedPayload) map[string]string {
-	return map[string]string{"simpleId": queued.SimpleID}
+	return map[string]string{"branch": queued.Branch}
 }
 
 func readyStepPayload(queued queuedPayload) map[string]string {
-	return map[string]string{"simpleId": queued.SimpleID}
+	return map[string]string{"branch": queued.Branch}
 }
 
-func requestStepPayload(simpleID string) sessionIDPayload {
-	return newSessionIDPayload(simpleID)
+func requestStepPayload(branch string) branchPayload {
+	return newBranchPayload(branch)
 }
 
-func provisioningStepPayload(simpleID string, mode string) provisioningPayload {
-	return provisioningPayload{SimpleID: simpleID, Mode: mode}
+func provisioningStepPayload(branch string, mode string) provisioningPayload {
+	return provisioningPayload{Branch: branch, Mode: mode}
 }
 
 func queuedBackendID(payload queuedPayload) conf.BackendID {
 	return conf.BackendID(payload.BackendID)
 }
 
-func newRemoteObservationPayload(simpleID string, event remote.BranchEvent) remoteObservationPayload {
+func newRemoteObservationPayload(branch string, event remote.BranchEvent) remoteObservationPayload {
 	payload := remoteObservationPayload{
-		SimpleID:   simpleID,
+		Branch:     branch,
 		RemoteURL:  event.RemoteURL,
-		Branch:     event.Branch,
 		ObservedAt: event.Timestamp,
 	}
 	if event.PRNumber != nil {

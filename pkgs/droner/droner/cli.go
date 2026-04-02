@@ -27,7 +27,7 @@ import (
 
 type NewArgs struct {
 	Path      string `zog:"path"`
-	ID        string `zog:"id"`
+	Branch    string `zog:"branch"`
 	Model     string `zog:"model"`
 	AgentName string `zog:"agent"`
 	Prompt    string `zog:"prompt"`
@@ -35,7 +35,7 @@ type NewArgs struct {
 
 var newArgsSchema = z.Struct(z.Shape{
 	"Path":      z.String().Optional().Trim(),
-	"ID":        z.String().Optional().Trim(),
+	"Branch":    z.String().Optional().Trim(),
 	"Model":     z.String().Optional().Trim(),
 	"AgentName": z.String().Optional().Trim(),
 	"Prompt":    z.String().Optional().Trim(),
@@ -148,7 +148,7 @@ func newCompleteCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
-			response, err := client.CompleteSession(ctx, schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
+			response, err := client.CompleteSession(ctx, schemas.SessionCompleteRequest{Branch: schemas.NewSBranch(args.ID)})
 			if err != nil {
 				return err
 			}
@@ -196,7 +196,7 @@ func newNewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&args.Path, "path", "", "path to the repository")
-	cmd.Flags().StringVar(&args.ID, "id", "", "session ID")
+	cmd.Flags().StringVar(&args.Branch, "branch", "", "branch name")
 	cmd.Flags().StringVar(&args.Model, "model", "", "agent model")
 	cmd.Flags().StringVar(&args.AgentName, "agent", "", "opencode agent")
 	cmd.Flags().StringVar(&args.Prompt, "prompt", "", "agent prompt")
@@ -220,7 +220,7 @@ func newDelCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondShort)
 			defer cancel()
-			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID(args.ID)})
+			response, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{Branch: schemas.NewSBranch(args.ID)})
 			if err != nil {
 				return err
 			}
@@ -302,9 +302,9 @@ func newSessionsCmd() *cobra.Command {
 				return nil
 			}
 			writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(writer, "simpleId\tstate")
+			fmt.Fprintln(writer, "id\trepo\tremoteUrl\tbranch\tstate")
 			for _, session := range response.Sessions {
-				fmt.Fprintf(writer, "%s\t%s\n", session.SimpleID, session.State)
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", session.ID, session.Repo, session.RemoteURL, session.Branch, session.State)
 			}
 			writer.Flush()
 			return nil
@@ -345,7 +345,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
-	request := schemas.SessionCreateRequest{Path: args.Path, SessionID: schemas.NewSSessionID(args.ID)}
+	request := schemas.SessionCreateRequest{Path: args.Path, Branch: schemas.NewSBranch(args.Branch)}
 	if includeAgentConfig {
 		agentConfig := &schemas.SessionAgentConfig{Model: args.Model, AgentName: strings.TrimSpace(args.AgentName)}
 		prompt := strings.TrimSpace(args.Prompt)
@@ -383,8 +383,8 @@ func confirmAction(prompt string) (bool, error) {
 func printOperationSummary(response *schemas.TaskResponse) {
 	if response.Type == "session_nuke" {
 		fmt.Printf("status: %s\n", response.Status)
-		if response.Result != nil && response.Result.SessionID != "" {
-			fmt.Printf("requested: %s\n", response.Result.SessionID)
+		if response.Result != nil && response.Result.Requested != "" {
+			fmt.Printf("requested: %s\n", response.Result.Requested)
 		}
 		if response.Error != "" {
 			fmt.Printf("error: %s\n", response.Error)
@@ -394,8 +394,8 @@ func printOperationSummary(response *schemas.TaskResponse) {
 
 	fmt.Printf("status: %s\n", response.Status)
 	if response.Result != nil {
-		if sessionID := operationSimpleSessionID(response.Result); sessionID != "" {
-			fmt.Printf("session: %s\n", sessionID)
+		if branch := operationBranch(response.Result); branch != "" {
+			fmt.Printf("branch: %s\n", branch)
 		}
 		if response.Result.WorktreePath != "" {
 			fmt.Printf("worktree: %s\n", response.Result.WorktreePath)
@@ -406,12 +406,12 @@ func printOperationSummary(response *schemas.TaskResponse) {
 	}
 }
 
-func operationSimpleSessionID(result *schemas.TaskResult) string {
+func operationBranch(result *schemas.TaskResult) string {
 	if result == nil {
 		return ""
 	}
-	if result.SessionID != "" && !looksLikeUUID(result.SessionID) {
-		return result.SessionID
+	if result.Branch != "" {
+		return result.Branch
 	}
 	if result.WorktreePath != "" {
 		base := filepath.Base(result.WorktreePath)
@@ -419,12 +419,5 @@ func operationSimpleSessionID(result *schemas.TaskResult) string {
 			return parts[1]
 		}
 	}
-	return result.SessionID
-}
-
-func looksLikeUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	return value[8] == '-' && value[13] == '-' && value[18] == '-' && value[23] == '-'
+	return ""
 }

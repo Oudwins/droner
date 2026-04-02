@@ -136,7 +136,7 @@ func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("cancelled-session"),
+		Branch:    schemas.NewSBranch("cancelled-session"),
 		BackendID: conf.BackendLocal,
 	})
 	if err != nil {
@@ -153,7 +153,7 @@ func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	_, err = projectionQueries.GetSessionProjectionBySimpleID(context.Background(), "cancelled-session")
+	_, err = projectionQueries.GetSessionProjectionByBranch(context.Background(), "cancelled-session")
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected no projection row, got err=%v", err)
 	}
@@ -164,7 +164,7 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("file-prompt-session"),
+		Branch:    schemas.NewSBranch("file-prompt-session"),
 		BackendID: conf.BackendLocal,
 		AgentConfig: &schemas.SessionAgentConfig{
 			Message: &messages.Message{
@@ -211,7 +211,7 @@ func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("inline-image-session"),
+		Branch:    schemas.NewSBranch("inline-image-session"),
 		BackendID: conf.BackendLocal,
 		AgentConfig: &schemas.SessionAgentConfig{
 			Message: &messages.Message{
@@ -265,7 +265,7 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: schemas.NewSSessionID("evented-session"),
+		Branch:    schemas.NewSBranch("evented-session"),
 		BackendID: conf.BackendLocal,
 	})
 	if err != nil {
@@ -287,8 +287,8 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 		t.Fatal("expected event task id")
 	}
 	projection := waitForProjection(t, projectionQueries, "evented-session")
-	if projection.SimpleID != "evented-session" {
-		t.Fatalf("projection simple_id = %q, want evented-session", projection.SimpleID)
+	if projection.Branch != "evented-session" {
+		t.Fatalf("projection branch = %q, want evented-session", projection.Branch)
 	}
 
 	projectionConn, err := sql.Open("sqlite", db.DBPath(dataDir))
@@ -314,7 +314,7 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
 	waitForSessionState(t, server, "complete-me", "running")
 
-	payload, err := json.Marshal(schemas.SessionCompleteRequest{SessionID: schemas.NewSSessionID("complete-me")})
+	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("complete-me")})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	if response.Status != schemas.TaskStatusPending {
 		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
 	}
-	if response.Result == nil || response.Result.SessionID != "complete-me" || response.Result.WorktreePath != createResponse.WorktreePath {
+	if response.Result == nil || response.Result.Branch != "complete-me" || response.Result.WorktreePath != createResponse.WorktreePath {
 		t.Fatalf("unexpected task result: %#v", response.Result)
 	}
 
@@ -353,7 +353,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
 	waitForSessionState(t, server, "delete-me", "running")
 
-	payload, err := json.Marshal(schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID("delete-me")})
+	payload, err := json.Marshal(schemas.SessionDeleteRequest{Branch: schemas.NewSBranch("delete-me")})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	if response.Status != schemas.TaskStatusPending {
 		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
 	}
-	if response.Result == nil || response.Result.SessionID != "delete-me" || createResponse.WorktreePath == "" {
+	if response.Result == nil || response.Result.Branch != "delete-me" || createResponse.WorktreePath == "" {
 		t.Fatalf("unexpected delete task result: %#v", response.Result)
 	}
 
@@ -431,12 +431,12 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 	}
 }
 
-func createEventSourcedSession(t *testing.T, server *Server, repoDir, sessionID string) schemas.SessionCreateResponse {
+func createEventSourcedSession(t *testing.T, server *Server, repoDir, branch string) schemas.SessionCreateResponse {
 	t.Helper()
 
 	payload, err := json.Marshal(schemas.SessionCreateRequest{
 		Path:      repoDir,
-		SessionID: schemas.NewSSessionID(sessionID),
+		Branch:    schemas.NewSBranch(branch),
 		BackendID: conf.BackendLocal,
 	})
 	if err != nil {
@@ -457,39 +457,39 @@ func createEventSourcedSession(t *testing.T, server *Server, repoDir, sessionID 
 	return response
 }
 
-func waitForSessionState(t *testing.T, server *Server, simpleID, wantState string) sessionevents.SessionRef {
+func waitForSessionState(t *testing.T, server *Server, branch, wantState string) sessionevents.SessionRef {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		ref, err := server.events.LookupSessionBySimpleID(context.Background(), simpleID)
+		ref, err := server.events.LookupSessionByBranch(context.Background(), branch)
 		if err == nil && ref.PublicState == wantState {
 			return ref
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("LookupSessionBySimpleID(%q): %v", simpleID, err)
+			t.Fatalf("LookupSessionByBranch(%q): %v", branch, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for session %q state %q", simpleID, wantState)
+	t.Fatalf("timed out waiting for session %q state %q", branch, wantState)
 	return sessionevents.SessionRef{}
 }
 
-func waitForProjection(t *testing.T, queries *db.Queries, simpleID string) db.SessionProjection {
+func waitForProjection(t *testing.T, queries *db.Queries, branch string) db.SessionProjection {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		projection, err := queries.GetSessionProjectionBySimpleID(context.Background(), simpleID)
+		projection, err := queries.GetSessionProjectionByBranch(context.Background(), branch)
 		if err == nil {
 			return projection
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("GetSessionProjectionBySimpleID(%q): %v", simpleID, err)
+			t.Fatalf("GetSessionProjectionByBranch(%q): %v", branch, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for projection %q", simpleID)
+	t.Fatalf("timed out waiting for projection %q", branch)
 	return db.SessionProjection{}
 }
 

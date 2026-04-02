@@ -41,7 +41,7 @@ func TestClientSessionFlows(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /sessions":
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{SessionID: schemas.NewSSessionID("simple-1"), SimpleID: "simple-1", TaskID: "task1"})
+			_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-1", Branch: schemas.NewSBranch("simple-1"), TaskID: "task1"})
 		case http.MethodDelete + " /sessions":
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task2", Status: schemas.TaskStatusPending, Type: "session_delete"})
@@ -59,14 +59,14 @@ func TestClientSessionFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if createResp.SimpleID != "simple-1" {
-		t.Fatalf("unexpected simple id %s", createResp.SimpleID)
+	if createResp.Branch != "simple-1" {
+		t.Fatalf("unexpected branch %s", createResp.Branch)
 	}
 	if createResp.TaskID != "task1" {
 		t.Fatalf("unexpected task id %s", createResp.TaskID)
 	}
 
-	deleteResp, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{SessionID: schemas.NewSSessionID("abc")})
+	deleteResp, err := client.DeleteSession(ctx, schemas.SessionDeleteRequest{Branch: schemas.NewSBranch("abc")})
 	if err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 
 type SessionProjection struct {
 	StreamID       string
-	SimpleID       string
+	Branch         string
 	BackendID      string
 	RepoPath       string
 	WorktreePath   string

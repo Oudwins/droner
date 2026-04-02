@@ -59,7 +59,7 @@ Create a named session for another repo and wait for the setup task:
 ```bash
 droner new \
   --path /path/to/repo \
-  --id review/api-cleanup \
+  --branch review/api-cleanup \
   --model openai/gpt-5-mini \
   --agent build \
   --prompt "trace the failing tests and fix them" \
@@ -134,17 +134,17 @@ The server listens on `http://localhost:57876` by default.
 # health
 curl -sS http://localhost:57876/version
 
-# create session with an auto-generated session id
+# create session with an auto-generated branch
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
   -d '{"path":"/path/to/repo"}'
 
-# create session with an explicit session id and agent config
+# create session with an explicit branch and agent config
 curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "path":"/path/to/repo",
-    "sessionId":"review/api-cleanup",
+    "branch":"review/api-cleanup",
     "agentConfig":{
       "model":"openai/gpt-5-mini",
       "agentName":"build",
@@ -168,12 +168,12 @@ curl -sS http://localhost:57876/tasks/<task-id>
 # stop a session but keep its worktree
 curl -sS -X POST http://localhost:57876/sessions/complete \
   -H "Content-Type: application/json" \
-  -d '{"sessionId":"review/api-cleanup"}'
+  -d '{"branch":"review/api-cleanup"}'
 
 # delete a session and remove its worktree
 curl -sS -X DELETE http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
-  -d '{"sessionId":"review/api-cleanup"}'
+  -d '{"branch":"review/api-cleanup"}'
 ```
 
 ## Configuration

@@ -8,8 +8,9 @@ const (
 )
 
 type TaskResult struct {
-	SessionID    string `json:"session_id,omitempty"`
-	WorktreePath string `json:"worktree_path,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Requested    string `json:"requested,omitempty"`
+	WorktreePath string `json:"worktreePath,omitempty"`
 }
 
 type TaskResponse struct {

@@ -8,11 +8,11 @@ import (
 )
 
 func PrintSessionCreated(response *schemas.SessionCreateResponse) {
-	simpleID := strings.TrimSpace(response.SimpleID)
-	if simpleID == "" && response.SessionID != "" {
-		simpleID = response.SessionID.String()
+	branch := strings.TrimSpace(response.Branch.String())
+	if branch != "" {
+		fmt.Printf("branch: %s\n", branch)
 	}
-	if simpleID != "" {
-		fmt.Printf("session: %s\n", simpleID)
+	if id := strings.TrimSpace(response.ID); id != "" {
+		fmt.Printf("id: %s\n", id)
 	}
 }

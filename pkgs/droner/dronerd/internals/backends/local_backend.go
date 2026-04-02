@@ -66,8 +66,8 @@ func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error
 }
 
 func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error) {
-	sessionName := tmuxSessionName(session.RepoPath, session.SimpleID)
-	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.SimpleID) == "" {
+	sessionName := tmuxSessionName(session.RepoPath, session.Branch)
+	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.Branch) == "" {
 		sessionName = tmuxSessionNameFromWorktreePath(session.WorktreePath)
 	}
 
@@ -226,7 +226,7 @@ func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath str
 		return candidate, false, nil
 	}
 
-	_ = l.killTmuxSession(candidate.SimpleID)
+	_ = l.killTmuxSession(candidate.Branch)
 	if err := l.resetAndCleanWorktree(oldWorktreePath); err != nil {
 		return candidate, false, nil
 	}
@@ -245,7 +245,7 @@ func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath str
 	if err != nil {
 		return candidate, false, err
 	}
-	if err := l.deleteGitBranch(commonGitDir, candidate.SimpleID); err != nil {
+	if err := l.deleteGitBranch(commonGitDir, candidate.Branch); err != nil {
 		return candidate, false, err
 	}
 	return candidate, true, nil

@@ -202,17 +202,17 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 	return system, backend, dataDir, cancel
 }
 
-func waitForPublicState(t *testing.T, system *System, simpleID string, want string) SessionRef {
+func waitForPublicState(t *testing.T, system *System, branch string, want string) SessionRef {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		ref, err := system.LookupSessionBySimpleID(context.Background(), simpleID)
+		ref, err := system.LookupSessionByBranch(context.Background(), branch)
 		if err == nil && ref.PublicState == want {
 			return ref
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("session %s did not reach state %s", simpleID, want)
+	t.Fatalf("session %s did not reach state %s", branch, want)
 	return SessionRef{}
 }
 
@@ -263,14 +263,14 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 
 	const (
 		streamID  = "stream-remote-1"
-		simpleID  = "watch-branch"
+		branch    = "watch-branch"
 		repoPath  = "/tmp/repo"
 		remoteURL = "git@github.com:org/repo.git"
 	)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     streamID,
-		SimpleID:     simpleID,
+		Branch:       branch,
 		BackendID:    conf.BackendLocal,
 		RepoPath:     repoPath,
 		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..watch-branch"),
@@ -279,31 +279,31 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	waitForPublicState(t, system, simpleID, "running")
-	stub.waitForSubscription(t, remoteURL, simpleID)
+	waitForPublicState(t, system, branch, "running")
+	stub.waitForSubscription(t, remoteURL, branch)
 
 	if !stub.emit(remote.BranchEvent{
 		Type:      remote.PRMerged,
 		RemoteURL: remoteURL,
-		Branch:    simpleID,
+		Branch:    branch,
 		Timestamp: time.Now().UTC(),
 	}) {
 		t.Fatal("expected remote event handler to be registered")
 	}
 
-	waitForPublicState(t, system, simpleID, "completed")
+	waitForPublicState(t, system, branch, "completed")
 	if backend.CompleteCalls() != 1 {
 		t.Fatalf("expected 1 completion call, got %d", backend.CompleteCalls())
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if !stub.hasSubscription(remoteURL, simpleID) {
+		if !stub.hasSubscription(remoteURL, branch) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if stub.hasSubscription(remoteURL, simpleID) {
+	if stub.hasSubscription(remoteURL, branch) {
 		t.Fatal("expected remote subscription to be removed after completion")
 	}
 
@@ -323,12 +323,12 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 
 	const (
 		streamID = "stream-hydrate-1"
-		simpleID = "hydrate-branch"
+		branch   = "hydrate-branch"
 	)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     streamID,
-		SimpleID:     simpleID,
+		Branch:       branch,
 		BackendID:    conf.BackendLocal,
 		RepoPath:     "/tmp/repo",
 		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..hydrate-branch"),
@@ -336,7 +336,7 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	waitForPublicState(t, system, simpleID, "running")
+	waitForPublicState(t, system, branch, "running")
 	beforeCreateCalls := backend.CreateCalls()
 	if beforeCreateCalls == 0 {
 		t.Fatal("expected initial create provisioning to run")
@@ -391,7 +391,7 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 	oldCreatedAt := time.Now().UTC().Add(-time.Hour)
 	if err := system.queries.UpsertSessionProjection(context.Background(), coredb.UpsertSessionProjectionParams{
 		StreamID:       "old-stream",
-		SimpleID:       "old-branch",
+		Branch:         "old-branch",
 		BackendID:      conf.BackendLocal.String(),
 		RepoPath:       "/tmp/repo",
 		WorktreePath:   filepath.Join(backend.worktreeRoot, "repo..old-branch"),
@@ -408,7 +408,7 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     "new-stream",
-		SimpleID:     "new-branch",
+		Branch:       "new-branch",
 		BackendID:    conf.BackendLocal,
 		RepoPath:     "/tmp/repo",
 		WorktreePath: filepath.Join(backend.worktreeRoot, "repo..new-branch"),

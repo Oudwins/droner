@@ -16,19 +16,18 @@ const (
 	SimpleSessionDelimiter = ".."
 )
 
-func NewSSessionID(s string) SSessionID {
-	return SSessionID(strings.ReplaceAll(s, ".", "/"))
+func NewSBranch(s string) SBranch {
+	return SBranch(strings.ReplaceAll(s, ".", "/"))
 }
 
-// Simple Session ID
-type SSessionID string
+type SBranch string
 
-func sessionID() *z.StringSchema[SSessionID] {
-	return z.StringLike[SSessionID]()
+func branch() *z.StringSchema[SBranch] {
+	return z.StringLike[SBranch]()
 }
 
-func (i SSessionID) String() string {
-	return string(i)
+func (b SBranch) String() string {
+	return string(b)
 }
 
 type SessionAgentConfig struct {
@@ -39,7 +38,7 @@ type SessionAgentConfig struct {
 
 type SessionCreateRequest struct {
 	Path        string              `json:"path"`
-	SessionID   SSessionID          `json:"sessionId,omitempty" zog:"sessionId"`
+	Branch      SBranch             `json:"branch,omitempty" zog:"branch"`
 	BackendID   conf.BackendID      `json:"backendId,omitempty" zog:"backendId"`
 	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
 }
@@ -47,7 +46,7 @@ type SessionCreateRequest struct {
 func (r SessionCreateRequest) LogValue() slog.Value {
 	attrs := []slog.Attr{
 		slog.String("path", r.Path),
-		slog.String("sessionId", r.SessionID.String()),
+		slog.String("branch", r.Branch.String()),
 		slog.String("backendId", string(r.BackendID)),
 	}
 
@@ -74,12 +73,12 @@ func (c SessionAgentConfig) LogValue() slog.Value {
 	return slog.GroupValue(attrs...)
 }
 
-var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
+var branchRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
 var multiupleSlashes = regexp.MustCompile(`//+`)
 
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform),
-	"SessionID": sessionID().Optional().Trim().Match(sessionIDRegex).Not().Match(multiupleSlashes),
+	"Branch":    branch().Optional().Trim().Match(branchRegex).Not().Match(multiupleSlashes),
 	"BackendID": conf.BackendIDSchema,
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
 		"Model":     z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
@@ -89,20 +88,23 @@ var SessionCreateSchema = z.Struct(z.Shape{
 })
 
 type SessionCreateResponse struct {
-	SessionID    SSessionID     `json:"sessionId"`
-	SimpleID     string         `json:"simpleId"`
+	ID           string         `json:"id"`
+	Branch       SBranch        `json:"branch"`
 	BackendID    conf.BackendID `json:"backendId"`
 	WorktreePath string         `json:"worktreePath"`
 	TaskID       string         `json:"taskId"`
 }
 
 type SessionDeleteRequest struct {
-	SessionID SSessionID `json:"sessionId" zog:"sessionId"`
+	Branch SBranch `json:"branch" zog:"branch"`
 }
 
 type SessionListItem struct {
-	SimpleID SSessionID `json:"simpleId"`
-	State    string     `json:"state"`
+	ID        string  `json:"id"`
+	Repo      string  `json:"repo"`
+	RemoteURL string  `json:"remoteUrl"`
+	Branch    SBranch `json:"branch"`
+	State     string  `json:"state"`
 }
 
 type SessionListResponse struct {
@@ -110,15 +112,15 @@ type SessionListResponse struct {
 }
 
 var SessionDeleteSchema = z.Struct(z.Shape{
-	"SessionID": sessionID().Required().Trim(),
+	"Branch": branch().Required().Trim(),
 })
 
 type SessionCompleteRequest struct {
-	SessionID SSessionID `json:"sessionId" zog:"sessionId"`
+	Branch SBranch `json:"branch" zog:"branch"`
 }
 
 var SessionCompleteSchema = z.Struct(z.Shape{
-	"SessionID": sessionID().Required().Trim(),
+	"Branch": branch().Required().Trim(),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {

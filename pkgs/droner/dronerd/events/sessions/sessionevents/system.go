@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -41,7 +42,7 @@ type System struct {
 
 type CreateSessionInput struct {
 	StreamID        string
-	SimpleID        string
+	Branch          string
 	BackendID       conf.BackendID
 	RepoPath        string
 	WorktreePath    string
@@ -62,13 +63,16 @@ type NukeResult struct {
 }
 
 type ListItem struct {
-	SimpleID string
-	State    string
+	ID        string
+	Repo      string
+	RemoteURL string
+	Branch    string
+	State     string
 }
 
 type SessionRef struct {
 	StreamID       string
-	SimpleID       string
+	Branch         string
 	BackendID      string
 	RepoPath       string
 	WorktreePath   string
@@ -208,8 +212,8 @@ func (s *System) enqueueHydrationRequests(ctx context.Context) {
 		return
 	}
 	for _, ref := range refs {
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
-			s.logger.Error("failed to append session hydration request", "stream_id", ref.StreamID, "simple_id", ref.SimpleID, "error", err)
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+			s.logger.Error("failed to append session hydration request", "stream_id", ref.StreamID, "branch", ref.Branch, "error", err)
 		}
 	}
 }
@@ -220,7 +224,7 @@ func (s *System) Hydrate(ctx context.Context) error {
 		return err
 	}
 	for _, ref := range refs {
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 			return err
 		}
 	}
@@ -242,7 +246,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 			return nil, err
 		}
 		for _, row := range rows {
-			items = append(items, ListItem{SimpleID: row.SimpleID, State: row.PublicState})
+			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
 		}
 		return items, nil
 	}
@@ -251,42 +255,42 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 		return nil, err
 	}
 	for _, row := range rows {
-		items = append(items, ListItem{SimpleID: row.SimpleID, State: row.PublicState})
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
 	}
 	return items, nil
 }
 
-func (s *System) LookupSessionBySimpleID(ctx context.Context, simpleID string) (SessionRef, error) {
-	return s.loadProjectionBySimpleID(ctx, simpleID)
+func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+	return s.loadProjectionByBranch(ctx, branch)
 }
 
 func (s *System) ListActiveSessionRefs(ctx context.Context) ([]SessionRef, error) {
 	return s.listActiveProjectionRefs(ctx)
 }
 
-func (s *System) RequestCompletion(ctx context.Context, simpleID string) (OperationResult, error) {
-	ref, err := s.LookupSessionBySimpleID(ctx, simpleID)
+func (s *System) RequestCompletion(ctx context.Context, branch string) (OperationResult, error) {
+	ref, err := s.LookupSessionByBranch(ctx, branch)
 	if err != nil {
 		return OperationResult{}, err
 	}
 	if ref.LifecycleState == string(eventTypeSessionCompletionSuccess) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
 	}
-	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionCompletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionCompletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 		return OperationResult{}, err
 	}
 	return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
 }
 
-func (s *System) RequestDeletion(ctx context.Context, simpleID string) (OperationResult, error) {
-	ref, err := s.LookupSessionBySimpleID(ctx, simpleID)
+func (s *System) RequestDeletion(ctx context.Context, branch string) (OperationResult, error) {
+	ref, err := s.LookupSessionByBranch(ctx, branch)
 	if err != nil {
 		return OperationResult{}, err
 	}
 	if ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
 	}
-	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 		return OperationResult{}, err
 	}
 	return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
@@ -302,12 +306,20 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 		if ref.LifecycleState == string(eventTypeSessionDeletionRequested) || ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
 			continue
 		}
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.SimpleID), "", ref.StreamID); err != nil {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 			return NukeResult{}, err
 		}
 		requested++
 	}
 	return NukeResult{Requested: requested}, nil
+}
+
+func newListItem(id, repoPath, remoteURL, branch, state string) ListItem {
+	repo := filepath.Base(filepath.Clean(repoPath))
+	if repo == "." || repo == string(filepath.Separator) {
+		repo = ""
+	}
+	return ListItem{ID: id, Repo: repo, RemoteURL: remoteURL, Branch: branch, State: state}
 }
 
 func (s *System) runSubscription(ctx context.Context, consumerName string, sub eventlog.Subscription) {

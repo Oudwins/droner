@@ -84,7 +84,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	// LOGIC
 	// NOTE: Parallel requests with the same ID are allowed by this behaviour. Can fix this later. Its safe because create session should fail at db level
-	if request.SessionID == "" {
+	if request.Branch == "" {
 		var msg *messages.Message
 		if request.AgentConfig != nil {
 			msg = request.AgentConfig.Message
@@ -112,15 +112,15 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Generated ID that was empty", nil), Render.Status(http.StatusInternalServerError))
 			return
 		}
-		request.SessionID = schemas.NewSSessionID(generatedID)
+		request.Branch = schemas.NewSBranch(generatedID)
 	}
 
-	if err := backend.ValidateSessionID(request.Path, request.SessionID.String()); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Session ID is not available", nil), Render.Status(http.StatusBadRequest))
+	if err := backend.ValidateSessionID(request.Path, request.Branch.String()); err != nil {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Branch is not available", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
 
-	worktreePath, err := backend.WorktreePath(request.Path, request.SessionID.String())
+	worktreePath, err := backend.WorktreePath(request.Path, request.Branch.String())
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve worktree path", nil), Render.Status(http.StatusInternalServerError))
 		return
@@ -144,7 +144,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 	result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
 		StreamID:        sessionID.String(),
-		SimpleID:        request.SessionID.String(),
+		Branch:          request.Branch.String(),
 		BackendID:       request.BackendID,
 		RepoPath:        request.Path,
 		WorktreePath:    worktreePath,
@@ -158,8 +158,8 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	res := schemas.SessionCreateResponse{
-		SessionID:    request.SessionID,
-		SimpleID:     request.SessionID.String(),
+		ID:           sessionID.String(),
+		Branch:       request.Branch,
 		BackendID:    request.BackendID,
 		WorktreePath: worktreePath,
 		TaskID:       result.TaskID,
@@ -194,7 +194,7 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 		return
 	}
 
-	result, err := s.events.RequestDeletion(r.Context(), payload.SessionID.String())
+	result, err := s.events.RequestDeletion(r.Context(), payload.Branch.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
@@ -209,7 +209,7 @@ func (s *Server) HandlerDeleteSession(logger *slog.Logger, w http.ResponseWriter
 		TaskID: result.TaskID,
 		Type:   "session_delete",
 		Status: schemas.TaskStatusPending,
-		Result: &schemas.TaskResult{SessionID: payload.SessionID.String()},
+		Result: &schemas.TaskResult{Branch: payload.Branch.String()},
 	}, Render.Status(http.StatusAccepted))
 }
 
@@ -230,7 +230,7 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		return
 	}
 
-	ref, err := s.events.LookupSessionBySimpleID(r.Context(), payload.SessionID.String())
+	ref, err := s.events.LookupSessionByBranch(r.Context(), payload.Branch.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session not found", nil), Render.Status(http.StatusNotFound))
@@ -241,12 +241,12 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 	}
 
 	if ref.PublicState != "running" && ref.PublicState != "completed" && ref.PublicState != "deleted" {
-		logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("sessionId", payload.SessionID.String()))
+		logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("branch", payload.Branch.String()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
 		return
 	}
 
-	result, err := s.events.RequestCompletion(r.Context(), payload.SessionID.String())
+	result, err := s.events.RequestCompletion(r.Context(), payload.Branch.String())
 	if err != nil {
 		logger.Error("Failed to append completion request", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to request session completion", nil), Render.Status(http.StatusInternalServerError))
@@ -257,7 +257,7 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		TaskID: result.TaskID,
 		Type:   "session_complete",
 		Status: schemas.TaskStatusPending,
-		Result: &schemas.TaskResult{SessionID: payload.SessionID.String(), WorktreePath: ref.WorktreePath},
+		Result: &schemas.TaskResult{Branch: payload.Branch.String(), WorktreePath: ref.WorktreePath},
 	}, Render.Status(http.StatusAccepted))
 }
 
@@ -276,7 +276,7 @@ func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter,
 		Status:     schemas.TaskStatusSucceeded,
 		CreatedAt:  now,
 		FinishedAt: now,
-		Result:     &schemas.TaskResult{SessionID: fmt.Sprintf("%d", result.Requested)},
+		Result:     &schemas.TaskResult{Requested: fmt.Sprintf("%d", result.Requested)},
 	}, Render.Status(http.StatusAccepted))
 }
 
@@ -295,8 +295,11 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 	responseItems := make([]schemas.SessionListItem, 0, len(items))
 	for _, item := range items {
 		responseItems = append(responseItems, schemas.SessionListItem{
-			SimpleID: schemas.NewSSessionID(item.SimpleID),
-			State:    item.State,
+			ID:        item.ID,
+			Repo:      item.Repo,
+			RemoteURL: item.RemoteURL,
+			Branch:    schemas.NewSBranch(item.Branch),
+			State:     item.State,
 		})
 	}
 

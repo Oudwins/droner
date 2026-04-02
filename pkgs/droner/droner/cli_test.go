@@ -73,18 +73,18 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 					t.Fatalf("decode create request: %v", err)
 				}
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{SessionID: schemas.NewSSessionID("simple-new"), SimpleID: "simple-new", TaskID: "task-new"})
+				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-new", Branch: schemas.NewSBranch("simple-new"), TaskID: "task-new"})
 				return
 			}
 			if r.Method == http.MethodDelete {
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{SessionID: "abc"}})
+				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-del", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{Branch: "abc"}})
 				return
 			}
 		case "/sessions/complete":
 			if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{SessionID: "abc", WorktreePath: "/tmp/worktree"}})
+				_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task-complete", Status: schemas.TaskStatusPending, Result: &schemas.TaskResult{Branch: "abc", WorktreePath: "/tmp/worktree"}})
 				return
 			}
 		default:
@@ -101,7 +101,7 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run new: %v", err)
 	}
-	if !strings.Contains(output, "session: simple-new") {
+	if !strings.Contains(output, "branch: simple-new") || !strings.Contains(output, "id: stream-new") {
 		t.Fatalf("unexpected new output: %s", output)
 	}
 	if createRequest.AgentConfig == nil {
@@ -120,7 +120,7 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run del: %v", err)
 	}
-	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "session: abc") {
+	if !strings.Contains(output, "status: pending") || !strings.Contains(output, "branch: abc") {
 		t.Fatalf("unexpected del output: %s", output)
 	}
 

@@ -37,7 +37,7 @@ type AgentConfig struct {
 
 type ReusableWorktreeCandidate struct {
 	StreamID     string
-	SimpleID     string
+	Branch       string
 	RepoPath     string
 	WorktreePath string
 }

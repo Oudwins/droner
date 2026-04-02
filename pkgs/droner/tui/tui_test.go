@@ -20,8 +20,8 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 	if request.Path != "/tmp/repo" {
 		t.Fatalf("expected path to be preserved, got %q", request.Path)
 	}
-	if request.SessionID != "" {
-		t.Fatalf("expected session ID to be omitted, got %q", request.SessionID)
+	if request.Branch != "" {
+		t.Fatalf("expected branch to be omitted, got %q", request.Branch)
 	}
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -99,8 +99,8 @@ func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
 	if request.AgentConfig != nil {
 		t.Fatal("expected agent config to be omitted for empty prompt")
 	}
-	if request.SessionID != "" {
-		t.Fatalf("expected session ID to be omitted, got %q", request.SessionID)
+	if request.Branch != "" {
+		t.Fatalf("expected branch to be omitted, got %q", request.Branch)
 	}
 }
 

@@ -41,7 +41,7 @@ func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessio
 	if remoteURL == "" {
 		return nil
 	}
-	branch := strings.TrimSpace(projection.SimpleID)
+	branch := strings.TrimSpace(projection.Branch)
 	if branch == "" {
 		return nil
 	}
@@ -57,8 +57,8 @@ func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessio
 	handler := func(event remote.BranchEvent) {
 		appendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.appendRemoteObservation(appendCtx, projection.StreamID, projection.SimpleID, event); err != nil {
-			s.logger.Error("failed to append remote observation", "stream_id", projection.StreamID, "simple_id", projection.SimpleID, "event_type", event.Type, "error", err)
+		if err := s.appendRemoteObservation(appendCtx, projection.StreamID, projection.Branch, event); err != nil {
+			s.logger.Error("failed to append remote observation", "stream_id", projection.StreamID, "branch", projection.Branch, "event_type", event.Type, "error", err)
 		}
 	}
 
@@ -70,7 +70,7 @@ func (s *System) ensureRemoteSubscription(ctx context.Context, projection sessio
 	s.remoteSubs.subs[key] = struct{}{}
 	s.remoteSubs.mu.Unlock()
 
-	s.logger.Info("remote subscription started", "stream_id", projection.StreamID, "simple_id", projection.SimpleID, "remote_url", remoteURL)
+	s.logger.Info("remote subscription started", "stream_id", projection.StreamID, "branch", projection.Branch, "remote_url", remoteURL)
 	return nil
 }
 
@@ -97,7 +97,7 @@ func (s *System) stopRemoteSubscription(ctx context.Context, remoteURL, branch s
 	delete(s.remoteSubs.subs, key)
 	s.remoteSubs.mu.Unlock()
 
-	s.logger.Info("remote subscription stopped", "simple_id", branch, "remote_url", remoteURL)
+	s.logger.Info("remote subscription stopped", "branch", branch, "remote_url", remoteURL)
 	return nil
 }
 
@@ -118,17 +118,17 @@ func (s *System) closeRemoteSubscriptions(ctx context.Context) {
 			continue
 		}
 		if err := s.stopRemoteSubscription(ctx, remoteURL, branch); err != nil {
-			s.logger.Error("failed to stop remote subscription during close", "remote_url", remoteURL, "simple_id", branch, "error", err)
+			s.logger.Error("failed to stop remote subscription during close", "remote_url", remoteURL, "branch", branch, "error", err)
 		}
 	}
 }
 
-func (s *System) appendRemoteObservation(ctx context.Context, streamID, simpleID string, event remote.BranchEvent) error {
+func (s *System) appendRemoteObservation(ctx context.Context, streamID, branch string, event remote.BranchEvent) error {
 	eventType, ok := remoteObservedEventType(event.Type)
 	if !ok {
 		return nil
 	}
-	_, err := s.appendEvent(ctx, streamID, eventType, newRemoteObservationPayload(simpleID, event), "", streamID)
+	_, err := s.appendEvent(ctx, streamID, eventType, newRemoteObservationPayload(branch, event), "", streamID)
 	return err
 }
 
@@ -142,7 +142,7 @@ func (s *System) handleRemoteSubscriptionEvent(ctx context.Context, evt eventlog
 	case eventTypeSessionReady:
 		return s.ensureRemoteSubscription(ctx, projection)
 	case eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
-		return s.stopRemoteSubscription(ctx, projection.RemoteURL, projection.SimpleID)
+		return s.stopRemoteSubscription(ctx, projection.RemoteURL, projection.Branch)
 	default:
 		return nil
 	}
@@ -167,10 +167,10 @@ func (s *System) handleRemoteObservationEvent(ctx context.Context, evt eventlog.
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(payload.SimpleID) == "" {
-		return fmt.Errorf("remote observation missing simple id")
+	if strings.TrimSpace(payload.Branch) == "" {
+		return fmt.Errorf("remote observation missing branch")
 	}
 
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionRequested, requestStepPayload(payload.SimpleID), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionRequested, requestStepPayload(payload.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }

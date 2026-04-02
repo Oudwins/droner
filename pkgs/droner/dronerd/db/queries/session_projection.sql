@@ -1,7 +1,7 @@
 -- name: UpsertSessionProjection :exec
 INSERT INTO session_projection (
   stream_id,
-  simple_id,
+  branch,
   backend_id,
   repo_path,
   worktree_path,
@@ -27,7 +27,7 @@ INSERT INTO session_projection (
   ?
 )
 ON CONFLICT(stream_id) DO UPDATE SET
-  simple_id = excluded.simple_id,
+  branch = excluded.branch,
   backend_id = excluded.backend_id,
   repo_path = excluded.repo_path,
   worktree_path = excluded.worktree_path,
@@ -51,20 +51,20 @@ SELECT *
 FROM session_projection
 WHERE stream_id = ?;
 
--- name: GetSessionProjectionBySimpleID :one
+-- name: GetSessionProjectionByBranch :one
 SELECT *
 FROM session_projection
-WHERE simple_id = ?;
+WHERE branch = ?;
 
 -- name: ListVisibleSessionProjectionItems :many
-SELECT simple_id, public_state
+SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
 WHERE public_state IN ('queued', 'running', 'completing')
 ORDER BY updated_at DESC
 LIMIT 100;
 
 -- name: ListAllSessionProjectionItems :many
-SELECT simple_id, public_state
+SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
 ORDER BY updated_at DESC
 LIMIT 100;
