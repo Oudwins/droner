@@ -274,7 +274,7 @@ func newSessionsCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "sessions",
-		Short: "List sessions",
+		Short: "List sessions (defaults to running)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := sdk.NewClient()
@@ -297,7 +297,7 @@ func newSessionsCmd() *cobra.Command {
 				if all {
 					fmt.Println("No sessions.")
 				} else {
-					fmt.Println("No queued or running sessions.")
+					fmt.Println("No running sessions.")
 				}
 				return nil
 			}
@@ -310,7 +310,7 @@ func newSessionsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "list last 100 sessions of any status")
+	cmd.Flags().BoolVar(&all, "all", false, "list last 100 sessions of any status (no status filter). By default lists running sessions")
 	return cmd
 }
 

@@ -206,7 +206,8 @@ func (c *Client) CompleteSession(ctx context.Context, request schemas.SessionCom
 }
 
 func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
+	// Default behaviour: list running sessions
+	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions?status=running", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +226,8 @@ func (c *Client) ListSessions(ctx context.Context) (*schemas.SessionListResponse
 }
 
 func (c *Client) ListSessionsAll(ctx context.Context) (*schemas.SessionListResponse, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions?all=1", nil)
+	// Request without status filter
+	resp, err := c.doRequest(ctx, http.MethodGet, "/sessions", nil)
 	if err != nil {
 		return nil, err
 	}
