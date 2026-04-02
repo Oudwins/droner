@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS session_projection (
   stream_id TEXT PRIMARY KEY,
   simple_id TEXT NOT NULL UNIQUE,
@@ -15,3 +16,7 @@ CREATE TABLE IF NOT EXISTS session_projection (
 
 CREATE INDEX IF NOT EXISTS session_projection_public_state_idx
   ON session_projection(public_state, updated_at DESC);
+
+-- +goose Down
+DROP INDEX IF EXISTS session_projection_public_state_idx;
+DROP TABLE IF EXISTS session_projection;

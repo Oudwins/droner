@@ -14,11 +14,9 @@ import (
 )
 
 type Config struct {
-	Path            string
-	DB              *sql.DB
-	EventTable      string
-	CheckpointTable string
-	PollInterval    time.Duration
+	Path         string
+	DB           *sql.DB
+	PollInterval time.Duration
 }
 
 type Backend struct {
@@ -33,18 +31,6 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.DB == nil && cfg.Path == "" {
 		return nil, errors.New("sqlite eventlog requires a db or path")
 	}
-	if cfg.EventTable == "" {
-		cfg.EventTable = defaultEventTable
-	}
-	if cfg.CheckpointTable == "" {
-		cfg.CheckpointTable = defaultCheckpointTable
-	}
-	if err := validateName(cfg.EventTable); err != nil {
-		return nil, err
-	}
-	if err := validateName(cfg.CheckpointTable); err != nil {
-		return nil, err
-	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 200 * time.Millisecond
 	}
@@ -52,49 +38,17 @@ func New(cfg Config) (*Backend, error) {
 	db := cfg.DB
 	ownsDB := false
 	if db == nil {
-		opened, err := sql.Open("sqlite", cfg.Path)
+		opened, err := OpenDB(cfg.Path)
 		if err != nil {
-			return nil, err
-		}
-		if err := opened.Ping(); err != nil {
-			_ = opened.Close()
 			return nil, err
 		}
 		db = opened
 		ownsDB = true
+	} else if err := configureDB(db); err != nil {
+		return nil, err
 	}
 
-	// This backend is write-heavy and often has multiple goroutines sharing one
-	// sqlite handle (process manager, projections, checkpoints). Serializing the
-	// pool and waiting briefly on file locks avoids noisy SQLITE_BUSY failures.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-
-	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
-		if ownsDB {
-			_ = db.Close()
-		}
-		return nil, err
-	}
-	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
-		if ownsDB {
-			_ = db.Close()
-		}
-		return nil, err
-	}
-	if _, err := db.Exec(`PRAGMA synchronous = NORMAL;`); err != nil {
-		if ownsDB {
-			_ = db.Close()
-		}
-		return nil, err
-	}
-	if _, err := db.Exec(eventTableDDL(cfg.EventTable)); err != nil {
-		if ownsDB {
-			_ = db.Close()
-		}
-		return nil, err
-	}
-	if _, err := db.Exec(checkpointTableDDL(cfg.CheckpointTable)); err != nil {
+	if err := ensureMigrations(context.Background(), db); err != nil {
 		if ownsDB {
 			_ = db.Close()
 		}
@@ -103,8 +57,8 @@ func New(cfg Config) (*Backend, error) {
 
 	return &Backend{
 		db:         db,
-		eventTable: cfg.EventTable,
-		checkTable: cfg.CheckpointTable,
+		eventTable: defaultEventTable,
+		checkTable: defaultCheckpointTable,
 		ownsDB:     ownsDB,
 		pollEvery:  cfg.PollInterval,
 	}, nil

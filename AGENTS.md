@@ -9,7 +9,7 @@
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
 - Server entry points live under `pkgs/droner/dronerd/cmd`: dronerd startup code is shared in `cmd/cmd.go`, the dronerd binary is in `cmd/dronerd`, and the event debug command plus its helpers live in `cmd/eventdebug`.
-- Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and schemas in `db/schemas`.
+- Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and Goose migrations in `db/migrations`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Shared cross-package helpers live under `pkgs/droner/internals/...`; dronerd-only helpers now live under `pkgs/droner/dronerd/internals/...`.
 - Shared event log abstraction lives in `pkgs/droner/internals/eventlog` with the first backend in `internals/eventlog/backends/sqlite`.
@@ -24,6 +24,7 @@
 - Inside the flake dev shell, `droner` is provided as a wrapper for `just cli` so repo-local CLI changes can be used without a global install.
 - Optional env vars can be set in `.env` (loaded by justfile).
 - Create/list/task-status tracer-bullet projection data lives in `<data dir>/db/droner.db`; the sessions event log now lives separately in `<data dir>/db/droner.sessionslog.db`, owned exclusively by the shared SQLite-backed `internals/eventlog` backend via `dronerd/sessionslog`. On startup, `sessionevents` now appends `session.hydration.requested` for hydratable projection rows, re-enters the normal started-event flow for provisioning/completion/deletion, and restores live GitHub branch/PR subscriptions after `session.ready`.
+- Both SQLite databases are Goose-managed in-process on startup. Use `just migrate-up|down|status|version` for explicit migration commands, and `sqlc` reads main DB DDL from `dronerd/db/migrations`.
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
 - Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.

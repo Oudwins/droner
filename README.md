@@ -38,6 +38,8 @@ just build-all
 
 Inside `nix develop` (or when `.envrc` is loaded through direnv), `droner` is also available on `PATH` as a wrapper around `just cli`, so you can use the in-repo development build without installing it globally.
 
+On startup, droner automatically runs embedded SQLite migrations for `droner.db` and `droner.sessionslog.db`; no external `goose` binary is required.
+
 ## Quick start
 
 Start the server:
@@ -106,6 +108,23 @@ Notes:
 - `droner complete` stops the tmux session but leaves the worktree on disk
 - `droner del` stops tmux, removes the worktree, and deletes the backing branch
 - GitHub access comes from `GITHUB_TOKEN` or `gh auth login`
+
+## Development migrations
+
+Use the repo-owned migration command through `just`:
+
+```bash
+just migrate-up
+just migrate-status
+just migrate-down target=main
+just migrate-version target=sessionslog
+```
+
+Targets:
+
+- `all` (default)
+- `main`
+- `sessionslog`
 
 ## Local server API
 

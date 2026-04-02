@@ -39,4 +39,16 @@ cli *args: build
 gen-sqlc:
     cd ./pkgs/droner && sqlc generate
 
+migrate-up target="all":
+    cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} up
+
+migrate-down target="all":
+    cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} down
+
+migrate-status target="all":
+    cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} status
+
+migrate-version target="all":
+    cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} version
+
 gen: gen-sqlc

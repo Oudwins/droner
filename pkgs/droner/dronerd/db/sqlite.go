@@ -1,20 +1,14 @@
 package db
 
 import (
+	"context"
 	"database/sql"
-	"embed"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	_ "modernc.org/sqlite"
 )
-
-//go:embed schemas/*.sql
-var schemaFS embed.FS
 
 const (
 	DBFileName       = "droner.db"
@@ -26,6 +20,18 @@ func DBPath(dataDir string) string {
 }
 
 func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
+	conn, err := OpenSQLiteDBWithoutMigrations(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureMigrations(context.Background(), conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func OpenSQLiteDBWithoutMigrations(dbPath string) (*sql.DB, error) {
 	if filepath.Base(dbPath) == DBFileName {
 		if err := migrateLegacyDBPath(dbPath); err != nil {
 			return nil, err
@@ -40,6 +46,11 @@ func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = conn.Close()
+		}
+	}()
 	conn.SetMaxOpenConns(1)
 	conn.SetMaxIdleConns(1)
 
@@ -51,16 +62,6 @@ func OpenSQLiteDB(dbPath string) (*sql.DB, error) {
 	}
 	if _, err := conn.Exec("PRAGMA synchronous = NORMAL;"); err != nil {
 		return nil, err
-	}
-
-	schemas, err := loadSchemas()
-	if err != nil {
-		return nil, err
-	}
-	for _, schema := range schemas {
-		if _, err := conn.Exec(schema); err != nil {
-			return nil, err
-		}
 	}
 
 	return conn, nil
@@ -92,28 +93,4 @@ func migrateLegacyDBPath(dbPath string) error {
 	}
 
 	return nil
-}
-
-func loadSchemas() ([]string, error) {
-	paths, err := fs.Glob(schemaFS, "schemas/*.sql")
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(paths)
-	if len(paths) == 0 {
-		return nil, fs.ErrNotExist
-	}
-	var schemas []string
-	for _, schemaPath := range paths {
-		contents, err := schemaFS.ReadFile(schemaPath)
-		if err != nil {
-			return nil, err
-		}
-		schema := strings.TrimSpace(string(contents))
-		if schema == "" {
-			continue
-		}
-		schemas = append(schemas, schema)
-	}
-	return schemas, nil
 }

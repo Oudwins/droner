@@ -2,7 +2,7 @@ version: "2"
 sql:
   - engine: "sqlite"
     queries: "dronerd/db/queries"
-    schema: "dronerd/db/schemas"
+    schema: "dronerd/db/migrations"
     gen:
       go:
         package: "db"
