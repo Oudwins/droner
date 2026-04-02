@@ -116,11 +116,12 @@ type SessionDeleteRequest struct {
 }
 
 type SessionListItem struct {
-	ID        string  `json:"id"`
-	Repo      string  `json:"repo"`
-	RemoteURL string  `json:"remoteUrl"`
-	Branch    SBranch `json:"branch"`
-	State     string  `json:"state"`
+	ID          string  `json:"id"`
+	Repo        string  `json:"repo"`
+	RemoteURL   string  `json:"remoteUrl"`
+	TmuxSession string  `json:"tmuxSession"`
+	Branch      SBranch `json:"branch"`
+	State       string  `json:"state"`
 }
 
 type SessionListResponse struct {

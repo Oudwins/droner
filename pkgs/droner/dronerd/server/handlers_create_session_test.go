@@ -382,6 +382,9 @@ func TestHandlerListSessionsWithoutStatusFilterIncludesCompleted(t *testing.T) {
 	if got := response.Sessions[0].State; got != "completed" {
 		t.Fatalf("listed state = %q, want completed", got)
 	}
+	if got, want := response.Sessions[0].TmuxSession, "repo#completed-visible"; got != want {
+		t.Fatalf("listed tmuxSession = %q, want %q", got, want)
+	}
 }
 
 func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {

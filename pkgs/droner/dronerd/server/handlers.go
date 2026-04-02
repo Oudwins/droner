@@ -362,12 +362,18 @@ func navigationBranchFromTmuxSession(tmuxSession string) string {
 func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []sessionevents.ListItem) {
 	responseItems := make([]schemas.SessionListItem, 0, len(items))
 	for _, item := range items {
+		tmuxSession := ""
+		if item.Repo != "" && item.Branch != "" {
+			tmuxSession = item.Repo + "#" + item.Branch
+		}
+
 		responseItems = append(responseItems, schemas.SessionListItem{
-			ID:        item.ID,
-			Repo:      item.Repo,
-			RemoteURL: item.RemoteURL,
-			Branch:    schemas.NewSBranch(item.Branch),
-			State:     item.State,
+			ID:          item.ID,
+			Repo:        item.Repo,
+			RemoteURL:   item.RemoteURL,
+			TmuxSession: tmuxSession,
+			Branch:      schemas.NewSBranch(item.Branch),
+			State:       item.State,
 		})
 	}
 	RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
