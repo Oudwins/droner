@@ -568,7 +568,7 @@ func TestHandlerSessionNavigationByIDMatchesSessionListing(t *testing.T) {
 	}
 }
 
-func TestHandlerSessionNavigationIDTakesPrecedenceOverBranch(t *testing.T) {
+func TestHandlerSessionNavigationIDTakesPrecedenceOverTmuxSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	branches := []string{"nav-priority-a", "nav-priority-b", "nav-priority-c"}
@@ -581,14 +581,14 @@ func TestHandlerSessionNavigationIDTakesPrecedenceOverBranch(t *testing.T) {
 	fullResponse := listSessions(t, server, "/sessions?status=running&limit=10")
 	anchorID := fullResponse.Sessions[0].ID
 
-	response := navigateSession(t, server, "/_session/next?id="+anchorID+"&branch=nav-priority-c")
+	response := navigateSession(t, server, "/_session/next?id="+anchorID+"&tmuxsession=workspace#nav-priority-c")
 	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=after")
 	if got, want := response, expected; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
 		t.Fatalf("response = %#v, want %#v", got, want)
 	}
 }
 
-func TestHandlerSessionNavigationByBranchResolvesCompletedSessionID(t *testing.T) {
+func TestHandlerSessionNavigationByTmuxSessionResolvesCompletedSessionID(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "branch-nav-a")
@@ -602,7 +602,7 @@ func TestHandlerSessionNavigationByBranchResolvesCompletedSessionID(t *testing.T
 	completeSession(t, server, "branch-nav-b")
 	completedRef = waitForSessionState(t, server, "branch-nav-b", "completed")
 
-	response := navigateSession(t, server, "/_session/next?branch=branch-nav-b")
+	response := navigateSession(t, server, "/_session/next?tmuxsession=workspace#branch-nav-b")
 	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+completedRef.StreamID+"&direction=after")
 	if len(expected.Sessions) == 0 {
 		t.Fatalf("expected navigation target for completed branch")
@@ -623,9 +623,33 @@ func TestHandlerSessionNavigationReturnsEmptyWhenNoMatches(t *testing.T) {
 		t.Fatalf("next listed %d sessions, want 0", len(response.Sessions))
 	}
 
-	response = navigateSession(t, server, "/_session/next?branch=does-not-exist")
-	if len(response.Sessions) != 0 {
-		t.Fatalf("branch listed %d sessions, want 0", len(response.Sessions))
+	expected := listSessions(t, server, "/sessions?status=running&limit=1")
+	if len(expected.Sessions) != 1 {
+		t.Fatalf("expected list returned %d sessions, want 1", len(expected.Sessions))
+	}
+
+	response = navigateSession(t, server, "/_session/next?tmuxsession=workspace#does-not-exist")
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("unknown tmuxsession listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("unknown tmuxsession id = %q, want %q", got, want)
+	}
+
+	response = navigateSession(t, server, "/_session/next?tmuxsession=workspace#")
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("empty tmuxsession branch listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("empty tmuxsession branch id = %q, want %q", got, want)
+	}
+
+	response = navigateSession(t, server, "/_session/next?tmuxsession=workspace")
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("tmuxsession without delimiter listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, expected.Sessions[0].ID; got != want {
+		t.Fatalf("tmuxsession without delimiter id = %q, want %q", got, want)
 	}
 }
 

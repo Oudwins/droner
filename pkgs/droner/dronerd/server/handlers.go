@@ -325,18 +325,20 @@ func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWri
 	}
 
 	cursor := strings.TrimSpace(q.ID)
-	if cursor == "" && q.Branch != "" {
-		ref, err := s.events.LookupLatestNavigationSessionByBranch(r.Context(), q.Branch.String())
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				renderSessionListResponse(w, r, nil)
-				return
+	if cursor == "" {
+		branch := navigationBranchFromTmuxSession(q.TmuxSession)
+		if branch != "" {
+			ref, err := s.events.LookupLatestNavigationSessionByBranch(r.Context(), branch)
+			if err != nil {
+				if !errors.Is(err, sql.ErrNoRows) {
+					logger.Error("Failed to resolve navigation branch", slog.String("branch", branch), slog.String("error", err.Error()))
+					RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve session branch", nil), Render.Status(http.StatusInternalServerError))
+					return
+				}
+			} else {
+				cursor = ref.StreamID
 			}
-			logger.Error("Failed to resolve navigation branch", slog.String("branch", q.Branch.String()), slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve session branch", nil), Render.Status(http.StatusInternalServerError))
-			return
 		}
-		cursor = ref.StreamID
 	}
 
 	items, err := s.events.ListSessionProjections(r.Context(), []string{"running"}, 1, cursor, direction)
@@ -347,6 +349,14 @@ func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWri
 	}
 
 	renderSessionListResponse(w, r, items)
+}
+
+func navigationBranchFromTmuxSession(tmuxSession string) string {
+	parts := strings.Split(strings.TrimSpace(tmuxSession), "#")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []sessionevents.ListItem) {

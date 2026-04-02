@@ -155,8 +155,8 @@ type SessionListQuery struct {
 }
 
 type SessionNavigationQuery struct {
-	ID     string  `zog:"id"`
-	Branch SBranch `zog:"branch"`
+	ID          string `zog:"id"`
+	TmuxSession string `zog:"tmuxsession"`
 }
 
 var SessionListQuerySchema = z.Struct(z.Shape{
@@ -167,8 +167,8 @@ var SessionListQuerySchema = z.Struct(z.Shape{
 })
 
 var SessionNavigationQuerySchema = z.Struct(z.Shape{
-	"ID":     z.String().Optional().Trim(),
-	"Branch": branch().Optional().Trim().Match(branchRegex).Not().Match(multiupleSlashes),
+	"ID":          z.String().Optional().Trim(),
+	"TmuxSession": z.String().Optional().Trim(),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {
