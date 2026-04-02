@@ -135,7 +135,7 @@ type SessionListQuery struct {
 }
 
 var SessionListQuerySchema = z.Struct(z.Shape{
-	"Status": z.Slice(z.String()).Optional(),
+	"Status": z.Slice(z.String().Min(1).Required()).Optional(),
 	"Limit":  z.Int().Default(100).GTE(1),
 	"Cursor": z.String().Optional(),
 })
