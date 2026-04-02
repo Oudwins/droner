@@ -1,0 +1,3 @@
+method: POST
+path: /shutdown
+description: Requests the server to shut down (async)

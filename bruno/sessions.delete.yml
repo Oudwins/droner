@@ -1,0 +1,5 @@
+method: DELETE
+path: /sessions
+description: Delete a session. Accepts empty body or JSON with branch field
+example_body:
+  branch: "feature/my-session"

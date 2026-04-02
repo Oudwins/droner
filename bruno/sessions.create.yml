@@ -1,0 +1,8 @@
+method: POST
+path: /sessions
+description: Create a new session. Expects JSON body conforming to SessionCreateRequest
+example_body:
+  path: ";/path/to/repo"
+  backendID: "local"
+  harness: "local"
+  agentConfig: null

@@ -1,0 +1,5 @@
+method: POST
+path: /sessions/complete
+description: Mark a session complete. Expects JSON body { branch: string }
+example_body:
+  branch: "feature/my-session"

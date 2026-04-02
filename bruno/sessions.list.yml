@@ -1,0 +1,7 @@
+method: GET
+path: /sessions
+description: List sessions. Supports query params: limit, cursor, status
+example_query:
+  limit: 10
+  cursor: ""
+  status: [queued, running]

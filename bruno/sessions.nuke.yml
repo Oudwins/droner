@@ -1,0 +1,3 @@
+method: POST
+path: /sessions/nuke
+description: Remove all sessions (administrative). No body required
