@@ -22,6 +22,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
@@ -70,7 +71,6 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 	initGitRepo(t, repoDir)
 
 	config := &conf.Config{
-		Server: conf.ServerConfig{DataDir: dataDir},
 		Sessions: conf.SessionsConfig{
 			Harness: conf.SessionHarnessConfig{
 				Defaults: conf.SessionHarnessDefaultsConfig{Selected: conf.HarnessOpenCode},
@@ -98,11 +98,12 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	server := &Server{Base: &core.BaseServer{
 		Config:       config,
+		Env:          &env.EnvStruct{DATA_DIR: dataDir},
 		Logger:       logger,
 		BackendStore: store,
 	}}
 
-	events, err := sessionevents.Open(server.Base.Config.Server.DataDir, server.Base.Logger, server.Base.Config, server.Base.BackendStore)
+	events, err := sessionevents.Open(server.Base.Env.DATA_DIR, server.Base.Logger, server.Base.Config, server.Base.BackendStore)
 	if err != nil {
 		t.Fatalf("sessionevents.Open: %v", err)
 	}

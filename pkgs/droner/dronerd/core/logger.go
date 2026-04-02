@@ -10,7 +10,7 @@ import (
 	"github.com/lmittmann/tint"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 )
 
 type fanoutHandler struct {
@@ -69,22 +69,32 @@ func (h *fanoutHandler) WithGroup(name string) slog.Handler {
 	return &fanoutHandler{handlers: handlers}
 }
 
-func InitLogger(config *conf.Config) (*slog.Logger, *os.File) {
-	logPath := filepath.Join(config.Server.DataDir, "log.txt")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		assert.AssertNil(err, "[CORE] Failed to initialize log directory")
+func InitLogger(runtimeEnv *env.EnvStruct) (*slog.Logger, *os.File) {
+	var logFile *os.File
+	level := runtimeEnv.LOG_LEVEL.SlogLevel()
+	handlers := make([]slog.Handler, 0, 2)
+	if runtimeEnv.LOG_OUTPUT == env.LogOutputStd || runtimeEnv.LOG_OUTPUT == env.LogOutputBoth {
+		handlers = append(handlers, tint.NewHandler(os.Stdout, &tint.Options{
+			Level:     level,
+			AddSource: true,
+		}))
 	}
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	assert.AssertNil(err, "[CORE] Failed to open log file")
-	stdoutHandler := tint.NewHandler(os.Stdout, &tint.Options{
-		Level:     slog.LevelDebug,
-		AddSource: true,
-	})
-	fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level:     slog.LevelDebug,
-		AddSource: true,
-	})
-	logger := slog.New(newFanoutHandler(stdoutHandler, fileHandler))
+	if runtimeEnv.LOG_OUTPUT == env.LogOutputFile || runtimeEnv.LOG_OUTPUT == env.LogOutputBoth {
+		logPath := filepath.Join(runtimeEnv.DATA_DIR, "log.txt")
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+			assert.AssertNil(err, "[CORE] Failed to initialize log directory")
+		}
+		var err error
+		logFile, err = os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		assert.AssertNil(err, "[CORE] Failed to open log file")
+
+		handlers = append(handlers, slog.NewTextHandler(logFile, &slog.HandlerOptions{
+			Level:     level,
+			AddSource: true,
+		}))
+	}
+
+	logger := slog.New(newFanoutHandler(handlers...))
 
 	slog.SetDefault(logger)
 	return logger, logFile

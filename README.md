@@ -179,15 +179,12 @@ curl -sS -X DELETE http://localhost:57876/sessions \
 
 ## Configuration
 
-Optional config lives at `~/.droner/droner.json`.
+Optional config lives at `$DRONERD_DATA_DIR/droner.json` and defaults to `~/.droner/droner.json`.
 
 Example:
 
 ```json
 {
-  "server": {
-    "data_dir": "~/.droner"
-  },
   "sessions": {
     "backends": {
       "default": "local",
@@ -218,6 +215,9 @@ Example:
 Environment variables:
 
 - `DRONER_ENV_PORT`: change the local server port
+- `DRONERD_DATA_DIR`: set the droner data directory (defaults to `~/.droner`)
+- `DRONERD_LOG_LEVEL`: set log level to `debug`, `info`, `warn`, or `error` (defaults to `debug`)
+- `DRONERD_LOG_OUTPUT`: set log sink to `std`, `file`, or `both` (defaults to `file`)
 - `GITHUB_TOKEN`: optional GitHub token (preferred for CI); otherwise droner falls back to `gh auth token`
 
 ## Cursor worktree setup

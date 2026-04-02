@@ -26,7 +26,7 @@
 - Create/list/task-status tracer-bullet projection data lives in `<data dir>/db/droner.db`; the sessions event log now lives separately in `<data dir>/db/droner.sessionslog.db`, opened via `dronerd/events/sessions/sessionslog` on top of the dronerd-owned SQLite backend in `dronerd/events/backend/sqlite3`. On startup, `sessionevents` now appends `session.hydration.requested` for hydratable projection rows, re-enters the normal started-event flow for provisioning/completion/deletion, and restores live GitHub branch/PR subscriptions after `session.ready`. Runtime session consumers now reconstruct per-session state from the event stream; `session_projection` is the read model for listing/discovery and API reads.
 - Both SQLite databases are Goose-managed in-process on startup. Use `just db-migrate-up|down|status|version` for explicit migration commands, and `sqlc` reads main DB DDL from `dronerd/db/migrations`.
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
-- Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
+- Root config lives at `$DRONERD_DATA_DIR/droner.json` and defaults to `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
 - TUI startup now discovers OpenCode custom slash commands from `~/.config/opencode/commands/*.md`; recognized leading `/command` input is sent as a first-class command payload while unknown slash input remains a normal prompt.
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.
 
@@ -103,7 +103,7 @@
 - Server uses `slog`; keep messages short.
 - Prefer structured fields over string concatenation.
 - Avoid `fmt.Println` for production logs.
-- Server logs fan out to colored `tint` output on stdout and plain text in `<data dir>/log.txt`.
+- Server logs can write to stdout, `<data dir>/log.txt`, or both via `DRONERD_LOG_OUTPUT`; verbosity is controlled by `DRONERD_LOG_LEVEL`, which currently defaults to `debug`.
 
 ## Code style: HTTP handlers
 - Validate request bodies with schemas before using data.

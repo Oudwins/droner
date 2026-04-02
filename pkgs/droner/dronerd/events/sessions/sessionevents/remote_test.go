@@ -167,7 +167,6 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 	}
 
 	config := &conf.Config{
-		Server: conf.ServerConfig{DataDir: dataDir},
 		Sessions: conf.SessionsConfig{
 			Harness: conf.SessionHarnessConfig{
 				Defaults: conf.SessionHarnessDefaultsConfig{Selected: conf.HarnessOpenCode},
@@ -387,7 +386,7 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 }
 
 func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) {
-	system, backend, _, _ := newRemoteTestSystem(t)
+	system, backend, dataDir, _ := newRemoteTestSystem(t)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     "old-stream",
@@ -423,7 +422,7 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 		t.Fatalf("expected old reused session delete to run once, got %d", backend.deleteCalls)
 	}
 
-	eventTypes := loadEventTypes(t, system.config.Server.DataDir, "old-stream")
+	eventTypes := loadEventTypes(t, dataDir, "old-stream")
 	assertEventOrder(t, eventTypes,
 		eventTypeSessionDeletionRequested,
 		eventTypeSessionDeletionStarted,

@@ -13,7 +13,7 @@ import (
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	backenddb "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/pressly/goose/v3"
 )
 
@@ -26,11 +26,11 @@ type migrationTarget struct {
 
 func main() {
 	ctx := context.Background()
-	cfg := conf.GetConfig()
+	runtimeEnv := env.Get()
 
 	fs := flag.NewFlagSet("dronerd-migrate", flag.ExitOnError)
 	target := fs.String("target", "all", "migration target: main, sessionslog, or all")
-	dataDir := fs.String("data-dir", cfg.Server.DataDir, "droner data directory")
+	dataDir := fs.String("data-dir", runtimeEnv.DATA_DIR, "droner data directory")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [--target main|sessionslog|all] [--data-dir path] <up|down|status|version>\n", os.Args[0])
 		fs.PrintDefaults()

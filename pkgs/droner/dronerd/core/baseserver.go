@@ -3,7 +3,6 @@ package core
 import (
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -21,13 +20,8 @@ type BaseServer struct {
 func New() *BaseServer {
 	env := env.Get()
 	config := conf.GetConfig()
-	dataDir := config.Server.DataDir
-	if dataDir != "" {
-		dataDir = filepath.Clean(dataDir)
-		config.Server.DataDir = dataDir
-	}
 
-	logger, logFile := InitLogger(config)
+	logger, logFile := InitLogger(env)
 	base := &BaseServer{
 		Config:  config,
 		Env:     env,

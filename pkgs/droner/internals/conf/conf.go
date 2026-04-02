@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/version"
 
 	z "github.com/Oudwins/zog"
@@ -17,7 +18,6 @@ import (
 type Config struct {
 	Version   string          `json:"-"`
 	Providers ProvidersConfig `json:"providers"`
-	Server    ServerConfig    `json:"server"`
 	Sessions  SessionsConfig  `json:"sessions"`
 	TUI       TUIConfig       `json:"tui" zog:"tui"`
 }
@@ -31,10 +31,6 @@ type GitHubConfig struct {
 	PollInterval int `json:"pollInterval"`
 }
 
-type ServerConfig struct {
-	DataDir string `json:"data_dir"`
-}
-
 var gitHubSchema = z.Struct(z.Shape{
 	"PollInterval": z.Int().DefaultFunc(func() int {
 		return int(10 * time.Second)
@@ -45,13 +41,8 @@ var providersSchema = z.Struct(z.Shape{
 	"github": gitHubSchema,
 })
 
-var serverSchema = z.Struct(z.Shape{
-	"DataDir": z.String().Default("~/.droner").Transform(expandPathTransform),
-})
-
 var ConfigSchema = z.Struct(z.Shape{
 	"Providers": providersSchema,
-	"Server":    serverSchema,
 	"Sessions":  SessionsConfigSchema,
 	"TUI":       TUIConfigSchema,
 })
@@ -66,12 +57,7 @@ func GetConfig() *Config {
 		}
 		defaults.Version = version.Version()
 
-		dataDir, err := expandPath(defaults.Server.DataDir)
-		if err != nil {
-			log.Fatal("[Droner] Failed to expand config data dir", err)
-		}
-
-		configPath := filepath.Join(filepath.Clean(dataDir), "droner.json")
+		configPath := filepath.Join(filepath.Clean(env.Get().DATA_DIR), "droner.json")
 		data, err := os.ReadFile(configPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {

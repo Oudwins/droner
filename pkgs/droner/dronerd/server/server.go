@@ -28,7 +28,7 @@ func New() *Server {
 		Base:     base,
 		canceler: func() {},
 		events: func() *sessionevents.System {
-			system, err := sessionevents.Open(base.Config.Server.DataDir, base.Logger, base.Config, base.BackendStore)
+			system, err := sessionevents.Open(base.Env.DATA_DIR, base.Logger, base.Config, base.BackendStore)
 			assert.AssertNil(err, "[SERVER] Failed to initialize event-sourced create system")
 			return system
 		}(),

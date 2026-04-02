@@ -9,11 +9,11 @@ import (
 	"syscall"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
+	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 )
 
 func main() {
-	defaultDBPath := sessionslog.DBPath(conf.GetConfig().Server.DataDir)
+	defaultDBPath := sessionslog.DBPath(env.Get().DATA_DIR)
 
 	addr := flag.String("addr", "localhost:57877", "listen address")
 	dbPath := flag.String("db", defaultDBPath, "path to sqlite database")
