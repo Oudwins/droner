@@ -144,6 +144,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 	result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
 		StreamID:        sessionID.String(),
+		Harness:         request.Harness,
 		Branch:          request.Branch.String(),
 		BackendID:       request.BackendID,
 		RepoPath:        request.Path,
@@ -159,6 +160,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	res := schemas.SessionCreateResponse{
 		ID:           sessionID.String(),
+		Harness:      request.Harness,
 		Branch:       request.Branch,
 		BackendID:    request.BackendID,
 		WorktreePath: worktreePath,

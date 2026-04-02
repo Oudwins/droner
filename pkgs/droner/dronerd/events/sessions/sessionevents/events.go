@@ -42,6 +42,7 @@ const (
 
 type queuedPayload struct {
 	StreamID        string `json:"streamId"`
+	Harness         string `json:"harness"`
 	Branch          string `json:"branch"`
 	BackendID       string `json:"backendId"`
 	RepoPath        string `json:"repoPath"`
@@ -75,6 +76,7 @@ type remoteObservationPayload struct {
 func newQueuedPayload(input CreateSessionInput) queuedPayload {
 	return queuedPayload{
 		StreamID:        input.StreamID,
+		Harness:         input.Harness.String(),
 		Branch:          input.Branch,
 		BackendID:       input.BackendID.String(),
 		RepoPath:        input.RepoPath,

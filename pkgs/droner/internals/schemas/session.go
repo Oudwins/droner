@@ -38,6 +38,7 @@ type SessionAgentConfig struct {
 
 type SessionCreateRequest struct {
 	Path        string              `json:"path"`
+	Harness     conf.HarnessID      `json:"harness,omitempty" zog:"harness"`
 	Branch      SBranch             `json:"branch,omitempty" zog:"branch"`
 	BackendID   conf.BackendID      `json:"backendId,omitempty" zog:"backendId"`
 	AgentConfig *SessionAgentConfig `json:"agentConfig,omitempty"`
@@ -46,6 +47,7 @@ type SessionCreateRequest struct {
 func (r SessionCreateRequest) LogValue() slog.Value {
 	attrs := []slog.Attr{
 		slog.String("path", r.Path),
+		slog.String("harness", r.Harness.String()),
 		slog.String("branch", r.Branch.String()),
 		slog.String("backendId", string(r.BackendID)),
 	}
@@ -78,10 +80,11 @@ var multiupleSlashes = regexp.MustCompile(`//+`)
 
 var SessionCreateSchema = z.Struct(z.Shape{
 	"Path":      z.String().Required().Trim().Transform(cleanPathTransform),
+	"Harness":   conf.HarnessIDSchema,
 	"Branch":    branch().Optional().Trim().Match(branchRegex).Not().Match(multiupleSlashes),
 	"BackendID": conf.BackendIDSchema,
 	"AgentConfig": z.Ptr(z.Struct(z.Shape{
-		"Model":     z.String().Default(conf.GetConfig().Sessions.Agent.DefaultModel).Trim(),
+		"Model":     z.String().Default(conf.GetConfig().Sessions.Harness.DefaultModel()).Trim(),
 		"AgentName": z.String().Optional().Trim(),
 		"Message":   z.Ptr(messages.MessageSchema),
 	})),
@@ -89,6 +92,7 @@ var SessionCreateSchema = z.Struct(z.Shape{
 
 type SessionCreateResponse struct {
 	ID           string         `json:"id"`
+	Harness      conf.HarnessID `json:"harness"`
 	Branch       SBranch        `json:"branch"`
 	BackendID    conf.BackendID `json:"backendId"`
 	WorktreePath string         `json:"worktreePath"`

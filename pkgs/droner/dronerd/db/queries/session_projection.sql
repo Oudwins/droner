@@ -1,6 +1,7 @@
 -- name: UpsertSessionProjection :exec
 INSERT INTO session_projection (
   stream_id,
+  harness,
   branch,
   backend_id,
   repo_path,
@@ -24,9 +25,11 @@ INSERT INTO session_projection (
   ?,
   ?,
   ?,
+  ?,
   ?
 )
 ON CONFLICT(stream_id) DO UPDATE SET
+  harness = excluded.harness,
   branch = excluded.branch,
   backend_id = excluded.backend_id,
   repo_path = excluded.repo_path,

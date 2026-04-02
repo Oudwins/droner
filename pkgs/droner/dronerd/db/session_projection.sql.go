@@ -11,7 +11,7 @@ import (
 )
 
 const getSessionProjectionByBranch = `-- name: GetSessionProjectionByBranch :one
-SELECT stream_id, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE branch = ?
 `
@@ -21,6 +21,7 @@ func (q *Queries) GetSessionProjectionByBranch(ctx context.Context, branch strin
 	var i SessionProjection
 	err := row.Scan(
 		&i.StreamID,
+		&i.Harness,
 		&i.Branch,
 		&i.BackendID,
 		&i.RepoPath,
@@ -37,7 +38,7 @@ func (q *Queries) GetSessionProjectionByBranch(ctx context.Context, branch strin
 }
 
 const getSessionProjectionByStreamID = `-- name: GetSessionProjectionByStreamID :one
-SELECT stream_id, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE stream_id = ?
 `
@@ -47,6 +48,7 @@ func (q *Queries) GetSessionProjectionByStreamID(ctx context.Context, streamID s
 	var i SessionProjection
 	err := row.Scan(
 		&i.StreamID,
+		&i.Harness,
 		&i.Branch,
 		&i.BackendID,
 		&i.RepoPath,
@@ -63,7 +65,7 @@ func (q *Queries) GetSessionProjectionByStreamID(ctx context.Context, streamID s
 }
 
 const listActiveSessionProjectionRefs = `-- name: ListActiveSessionProjectionRefs :many
-SELECT stream_id, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE public_state IN ('queued', 'running')
 ORDER BY updated_at DESC
@@ -80,6 +82,7 @@ func (q *Queries) ListActiveSessionProjectionRefs(ctx context.Context) ([]Sessio
 		var i SessionProjection
 		if err := rows.Scan(
 			&i.StreamID,
+			&i.Harness,
 			&i.Branch,
 			&i.BackendID,
 			&i.RepoPath,
@@ -150,7 +153,7 @@ func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllS
 }
 
 const listHydratableSessionProjectionRefs = `-- name: ListHydratableSessionProjectionRefs :many
-SELECT stream_id, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE public_state IN ('queued', 'running', 'completing', 'deleting')
 ORDER BY updated_at DESC
@@ -167,6 +170,7 @@ func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]Se
 		var i SessionProjection
 		if err := rows.Scan(
 			&i.StreamID,
+			&i.Harness,
 			&i.Branch,
 			&i.BackendID,
 			&i.RepoPath,
@@ -193,7 +197,7 @@ func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]Se
 }
 
 const listReusableSessionProjectionRefs = `-- name: ListReusableSessionProjectionRefs :many
-SELECT stream_id, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE public_state = 'completed'
   AND repo_path = ?
@@ -217,6 +221,7 @@ func (q *Queries) ListReusableSessionProjectionRefs(ctx context.Context, arg Lis
 		var i SessionProjection
 		if err := rows.Scan(
 			&i.StreamID,
+			&i.Harness,
 			&i.Branch,
 			&i.BackendID,
 			&i.RepoPath,
@@ -318,6 +323,7 @@ func (q *Queries) PatchSessionProjection(ctx context.Context, arg PatchSessionPr
 const upsertSessionProjection = `-- name: UpsertSessionProjection :exec
 INSERT INTO session_projection (
   stream_id,
+  harness,
   branch,
   backend_id,
   repo_path,
@@ -341,9 +347,11 @@ INSERT INTO session_projection (
   ?,
   ?,
   ?,
+  ?,
   ?
 )
 ON CONFLICT(stream_id) DO UPDATE SET
+  harness = excluded.harness,
   branch = excluded.branch,
   backend_id = excluded.backend_id,
   repo_path = excluded.repo_path,
@@ -358,6 +366,7 @@ ON CONFLICT(stream_id) DO UPDATE SET
 
 type UpsertSessionProjectionParams struct {
 	StreamID       string
+	Harness        string
 	Branch         string
 	BackendID      string
 	RepoPath       string
@@ -374,6 +383,7 @@ type UpsertSessionProjectionParams struct {
 func (q *Queries) UpsertSessionProjection(ctx context.Context, arg UpsertSessionProjectionParams) error {
 	_, err := q.db.ExecContext(ctx, upsertSessionProjection,
 		arg.StreamID,
+		arg.Harness,
 		arg.Branch,
 		arg.BackendID,
 		arg.RepoPath,

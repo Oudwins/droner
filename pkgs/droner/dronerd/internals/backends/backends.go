@@ -29,6 +29,7 @@ type Store struct {
 }
 
 type AgentConfig struct {
+	Harness   conf.HarnessID
 	Model     string
 	AgentName string
 	Message   *messages.Message

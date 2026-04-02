@@ -21,20 +21,25 @@ func (b BackendID) String() string {
 }
 
 const (
-	AgentProviderOpenCode AgentProviderID = "opencode"
+	HarnessOpenCode HarnessID = "opencode"
 )
 
-type AgentProviderID string
+type HarnessID string
 
-var AgentProviderIDSchema = z.StringLike[AgentProviderID]().OneOf([]AgentProviderID{AgentProviderOpenCode})
+var configHarnessIDSchema = z.StringLike[HarnessID]().OneOf([]HarnessID{HarnessOpenCode}).Default(HarnessOpenCode)
 
-func (b AgentProviderID) String() string {
-	return string(b)
+var HarnessIDSchema = z.StringLike[HarnessID]().OneOf([]HarnessID{HarnessOpenCode}).DefaultFunc(func() HarnessID {
+	return GetConfig().Sessions.Harness.Defaults.Selected
+})
+
+func (h HarnessID) String() string {
+	return string(h)
 }
 
 type OpenCodeConfig struct {
-	Hostname string
-	Port     int
+	DefaultModel string
+	Hostname     string
+	Port         int
 }
 
 type SessionNamingStrategy string
@@ -53,14 +58,26 @@ type LocalBackendConfig struct {
 	WorktreeDir string
 }
 
-type AgentProvidersConfig struct {
+type SessionHarnessProvidersConfig struct {
 	OpenCode OpenCodeConfig
 }
 
-type AgentConfig struct {
-	DefaultProvider AgentProviderID
-	DefaultModel    string
-	Providers       AgentProvidersConfig
+type SessionHarnessDefaultsConfig struct {
+	Selected HarnessID
+}
+
+type SessionHarnessConfig struct {
+	Defaults  SessionHarnessDefaultsConfig
+	Providers SessionHarnessProvidersConfig
+}
+
+func (c SessionHarnessConfig) DefaultModel() string {
+	switch c.Defaults.Selected {
+	case "", HarnessOpenCode:
+		return c.Providers.OpenCode.DefaultModel
+	default:
+		return ""
+	}
 }
 
 type BackendsConfig struct {
@@ -70,7 +87,7 @@ type BackendsConfig struct {
 
 type SessionsConfig struct {
 	Backends BackendsConfig
-	Agent    AgentConfig
+	Harness  SessionHarnessConfig
 	Naming   SessionNamingConfig
 }
 
@@ -83,13 +100,15 @@ var SessionsConfigSchema = z.Struct(z.Shape{
 			}),
 		},
 	),
-	"Agent": z.Struct(z.Shape{
-		"DefaultProvider": AgentProviderIDSchema,
-		"DefaultModel":    z.String(),
+	"Harness": z.Struct(z.Shape{
+		"Defaults": z.Struct(z.Shape{
+			"Selected": configHarnessIDSchema,
+		}),
 		"Providers": z.Struct(z.Shape{
 			"OpenCode": z.Struct(z.Shape{
-				"Hostname": z.String().Default("127.0.0.1"),
-				"Port":     z.Int().Default(4096),
+				"DefaultModel": z.String().Default("openai/gpt-5-mini").Trim(),
+				"Hostname":     z.String().Default("127.0.0.1"),
+				"Port":         z.Int().Default(4096),
 			}),
 		}),
 	}),

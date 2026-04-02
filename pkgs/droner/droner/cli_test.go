@@ -73,7 +73,7 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 					t.Fatalf("decode create request: %v", err)
 				}
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-new", Branch: schemas.NewSBranch("simple-new"), TaskID: "task-new"})
+				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-new", Harness: conf.HarnessOpenCode, Branch: schemas.NewSBranch("simple-new"), TaskID: "task-new"})
 				return
 			}
 			if r.Method == http.MethodDelete {
@@ -101,7 +101,7 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run new: %v", err)
 	}
-	if !strings.Contains(output, "branch: simple-new") || !strings.Contains(output, "id: stream-new") {
+	if !strings.Contains(output, "harness: opencode") || !strings.Contains(output, "branch: simple-new") || !strings.Contains(output, "id: stream-new") {
 		t.Fatalf("unexpected new output: %s", output)
 	}
 	if createRequest.AgentConfig == nil {

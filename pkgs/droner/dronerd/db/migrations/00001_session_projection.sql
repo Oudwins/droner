@@ -1,6 +1,7 @@
 -- +goose Up
 CREATE TABLE IF NOT EXISTS session_projection (
   stream_id TEXT PRIMARY KEY,
+  harness TEXT NOT NULL,
   branch TEXT NOT NULL UNIQUE,
   backend_id TEXT NOT NULL,
   repo_path TEXT NOT NULL,

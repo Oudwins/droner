@@ -72,11 +72,10 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 	config := &conf.Config{
 		Server: conf.ServerConfig{DataDir: dataDir},
 		Sessions: conf.SessionsConfig{
-			Agent: conf.AgentConfig{
-				DefaultModel:    "default-model",
-				DefaultProvider: conf.AgentProviderOpenCode,
-				Providers: conf.AgentProvidersConfig{
-					OpenCode: conf.OpenCodeConfig{Hostname: "127.0.0.1", Port: 4096},
+			Harness: conf.SessionHarnessConfig{
+				Defaults: conf.SessionHarnessDefaultsConfig{Selected: conf.HarnessOpenCode},
+				Providers: conf.SessionHarnessProvidersConfig{
+					OpenCode: conf.OpenCodeConfig{DefaultModel: "default-model", Hostname: "127.0.0.1", Port: 4096},
 				},
 			},
 			Backends: conf.BackendsConfig{
@@ -286,7 +285,13 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	if response.TaskID == "" {
 		t.Fatal("expected event task id")
 	}
+	if response.Harness != conf.HarnessOpenCode {
+		t.Fatalf("response harness = %q, want %q", response.Harness, conf.HarnessOpenCode)
+	}
 	projection := waitForProjection(t, projectionQueries, "evented-session")
+	if projection.Harness != conf.HarnessOpenCode.String() {
+		t.Fatalf("projection harness = %q, want %q", projection.Harness, conf.HarnessOpenCode)
+	}
 	if projection.Branch != "evented-session" {
 		t.Fatalf("projection branch = %q, want evented-session", projection.Branch)
 	}

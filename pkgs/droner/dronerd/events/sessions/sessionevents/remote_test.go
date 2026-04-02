@@ -169,11 +169,10 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 	config := &conf.Config{
 		Server: conf.ServerConfig{DataDir: dataDir},
 		Sessions: conf.SessionsConfig{
-			Agent: conf.AgentConfig{
-				DefaultModel:    "default-model",
-				DefaultProvider: conf.AgentProviderOpenCode,
-				Providers: conf.AgentProvidersConfig{
-					OpenCode: conf.OpenCodeConfig{Hostname: "127.0.0.1", Port: 4096},
+			Harness: conf.SessionHarnessConfig{
+				Defaults: conf.SessionHarnessDefaultsConfig{Selected: conf.HarnessOpenCode},
+				Providers: conf.SessionHarnessProvidersConfig{
+					OpenCode: conf.OpenCodeConfig{DefaultModel: "default-model", Hostname: "127.0.0.1", Port: 4096},
 				},
 			},
 			Backends: conf.BackendsConfig{
@@ -270,6 +269,7 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     streamID,
+		Harness:      conf.HarnessOpenCode,
 		Branch:       branch,
 		BackendID:    conf.BackendLocal,
 		RepoPath:     repoPath,
@@ -328,6 +328,7 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     streamID,
+		Harness:      conf.HarnessOpenCode,
 		Branch:       branch,
 		BackendID:    conf.BackendLocal,
 		RepoPath:     "/tmp/repo",
@@ -408,6 +409,7 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:     "new-stream",
+		Harness:      conf.HarnessOpenCode,
 		Branch:       "new-branch",
 		BackendID:    conf.BackendLocal,
 		RepoPath:     "/tmp/repo",

@@ -10,6 +10,7 @@ import (
 
 type SessionProjection struct {
 	StreamID       string
+	Harness        string
 	Branch         string
 	BackendID      string
 	RepoPath       string

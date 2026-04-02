@@ -75,7 +75,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 		return err
 	}
 
-	agentConfig, err := s.agentConfigFromJSON(projection.AgentConfig)
+	agentConfig, err := s.agentConfigFromJSON(conf.HarnessID(projection.Harness), projection.AgentConfig)
 	if err != nil {
 		return s.appendProvisioningFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
 	}
@@ -88,6 +88,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 	if payload.Mode == provisioningModeRestart {
 		result, hydrateErr := backend.HydrateSession(ctx, coredb.Session{
 			ID:           projection.StreamID,
+			Harness:      projection.Harness,
 			Branch:       projection.Branch,
 			Status:       coredb.SessionStatusRunning,
 			BackendID:    projection.BackendID,

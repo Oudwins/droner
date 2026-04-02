@@ -7,6 +7,7 @@ import (
 
 type Session struct {
 	ID           string
+	Harness      string
 	Branch       string
 	Status       SessionStatus
 	BackendID    string

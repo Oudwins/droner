@@ -2,17 +2,19 @@ package sessionevents
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
 
-func (s *System) agentConfigFromJSON(raw string) (backends.AgentConfig, error) {
-	agentConfig := backends.AgentConfig{
-		Model:    s.config.Sessions.Agent.DefaultModel,
-		Opencode: s.config.Sessions.Agent.Providers.OpenCode,
+func (s *System) agentConfigFromJSON(harness conf.HarnessID, raw string) (backends.AgentConfig, error) {
+	agentConfig, err := s.defaultAgentConfig(harness)
+	if err != nil {
+		return backends.AgentConfig{}, err
 	}
 	if strings.TrimSpace(raw) == "" {
 		return agentConfig, nil
@@ -20,7 +22,7 @@ func (s *System) agentConfigFromJSON(raw string) (backends.AgentConfig, error) {
 
 	var persisted schemas.SessionAgentConfig
 	if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
-		return agentConfig, err
+		return backends.AgentConfig{}, err
 	}
 	if strings.TrimSpace(persisted.Model) != "" {
 		agentConfig.Model = persisted.Model
@@ -31,6 +33,19 @@ func (s *System) agentConfigFromJSON(raw string) (backends.AgentConfig, error) {
 		agentConfig.Message = nil
 	}
 	return agentConfig, nil
+}
+
+func (s *System) defaultAgentConfig(harness conf.HarnessID) (backends.AgentConfig, error) {
+	switch harness {
+	case "", conf.HarnessOpenCode:
+		return backends.AgentConfig{
+			Harness:  conf.HarnessOpenCode,
+			Model:    s.config.Sessions.Harness.Providers.OpenCode.DefaultModel,
+			Opencode: s.config.Sessions.Harness.Providers.OpenCode,
+		}, nil
+	default:
+		return backends.AgentConfig{}, fmt.Errorf("unsupported harness %q", harness)
+	}
 }
 
 func messageHasContent(msg *messages.Message) bool {

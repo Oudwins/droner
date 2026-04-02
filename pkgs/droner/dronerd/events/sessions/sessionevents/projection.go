@@ -10,6 +10,7 @@ import (
 
 type sessionProjection struct {
 	StreamID       string
+	Harness        string
 	Branch         string
 	BackendID      string
 	RepoPath       string
@@ -25,6 +26,7 @@ type sessionProjection struct {
 
 type projectionMutation struct {
 	StreamID       string
+	Harness        string
 	Branch         string
 	BackendID      string
 	RepoPath       string
@@ -46,6 +48,7 @@ func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope
 		}
 		return s.upsertProjection(ctx, projectionMutation{
 			StreamID:       string(evt.StreamID),
+			Harness:        payload.Harness,
 			Branch:         payload.Branch,
 			BackendID:      payload.BackendID,
 			RepoPath:       payload.RepoPath,
@@ -100,6 +103,7 @@ func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope
 func (s *System) upsertProjection(ctx context.Context, m projectionMutation) error {
 	return s.queries.UpsertSessionProjection(ctx, coredb.UpsertSessionProjectionParams{
 		StreamID:       m.StreamID,
+		Harness:        m.Harness,
 		Branch:         m.Branch,
 		BackendID:      m.BackendID,
 		RepoPath:       m.RepoPath,
@@ -182,6 +186,7 @@ func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string
 func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 	return sessionProjection{
 		StreamID:       row.StreamID,
+		Harness:        row.Harness,
 		Branch:         row.Branch,
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,
@@ -199,6 +204,7 @@ func projectionFromRow(row coredb.SessionProjection) sessionProjection {
 func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
 	return SessionRef{
 		StreamID:       row.StreamID,
+		Harness:        row.Harness,
 		Branch:         row.Branch,
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,

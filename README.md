@@ -144,6 +144,7 @@ curl -sS -X POST http://localhost:57876/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "path":"/path/to/repo",
+    "harness":"opencode",
     "branch":"review/api-cleanup",
     "agentConfig":{
       "model":"openai/gpt-5-mini",
@@ -194,11 +195,13 @@ Example:
         "worktreeDir": "~/.droner/worktrees"
       }
     },
-    "agent": {
-      "defaultProvider": "opencode",
-      "defaultModel": "openai/gpt-5-mini",
+    "harness": {
+      "defaults": {
+        "selected": "opencode"
+      },
       "providers": {
         "openCode": {
+          "defaultModel": "openai/gpt-5-mini",
           "hostname": "127.0.0.1",
           "port": 4096
         }

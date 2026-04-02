@@ -42,6 +42,7 @@ type System struct {
 
 type CreateSessionInput struct {
 	StreamID        string
+	Harness         conf.HarnessID
 	Branch          string
 	BackendID       conf.BackendID
 	RepoPath        string
@@ -72,6 +73,7 @@ type ListItem struct {
 
 type SessionRef struct {
 	StreamID       string
+	Harness        string
 	Branch         string
 	BackendID      string
 	RepoPath       string
