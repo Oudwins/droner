@@ -15,19 +15,12 @@ kill:
 
 dev: kill
     cd ./pkgs/droner && go run ./dronerd/cmd/dronerd
-
-serve:
-    cd ./pkgs/droner && go run ./dronerd/cmd/dronerd
-
 eventdebug:
     cd ./pkgs/droner && go run ./dronerd/cmd/eventdebug
 
 build:
     mkdir -p {{bin_dir}}
     cd ./pkgs/droner && go build -o ../../{{droner_bin}} ./droner
-
-build-all: build
-    cd ./pkgs/droner && go build -o ../../{{dronerd_bin}} ./dronerd/cmd/dronerd
 
 test *args:
     cd ./pkgs/droner && go test ./... {{args}}
@@ -36,19 +29,17 @@ test *args:
 cli *args: build
     {{droner_bin}} "$@"
 
-gen-sqlc:
+db-generate:
     cd ./pkgs/droner && sqlc generate
 
-migrate-up target="all":
+db-migrate-up target="all":
     cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} up
 
-migrate-down target="all":
+db-migrate-down target="all":
     cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} down
 
-migrate-status target="all":
+db-migrate-status target="all":
     cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} status
 
-migrate-version target="all":
+db-migrate-version target="all":
     cd ./pkgs/droner && go run ./dronerd/cmd/migrate --target {{target}} version
-
-gen: gen-sqlc

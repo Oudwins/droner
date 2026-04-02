@@ -114,10 +114,10 @@ Notes:
 Use the repo-owned migration command through `just`:
 
 ```bash
-just migrate-up
-just migrate-status
-just migrate-down target=main
-just migrate-version target=sessionslog
+just db-migrate-up
+just db-migrate-status
+just db-migrate-down target=main
+just db-migrate-version target=sessionslog
 ```
 
 Targets:
