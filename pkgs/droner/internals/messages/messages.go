@@ -190,6 +190,12 @@ type Message struct {
 	Meta  MessageMeta   // TODO: Actually store some info in here
 }
 
+type CommandInvocation struct {
+	Name      string        `json:"name"`
+	Arguments string        `json:"arguments,omitempty"`
+	Parts     []MessagePart `json:"parts,omitempty"`
+}
+
 func (m Message) LogValue() slog.Value {
 	attrs := []slog.Attr{
 		slog.String("id", m.ID),
@@ -295,6 +301,41 @@ func ToRawText(m *Message) string {
 	return strings.Join(parts, "\n")
 }
 
+func (c *CommandInvocation) InvocationText() string {
+	if c == nil {
+		return ""
+	}
+	name := strings.TrimSpace(c.Name)
+	if name == "" {
+		return ""
+	}
+	arguments := strings.TrimSpace(c.Arguments)
+	if arguments == "" {
+		return "/" + name
+	}
+	return "/" + name + " " + arguments
+}
+
+func (c *CommandInvocation) HasContent() bool {
+	if c == nil {
+		return false
+	}
+	if strings.TrimSpace(c.Name) != "" {
+		return true
+	}
+	for _, part := range c.Parts {
+		switch part.Type {
+		case PartTypeText:
+			if strings.TrimSpace(part.Text) != "" {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func CloneMessage(message *Message) *Message {
 	if message == nil {
 		return nil
@@ -302,6 +343,20 @@ func CloneMessage(message *Message) *Message {
 	clone := *message
 	if len(message.Parts) > 0 {
 		clone.Parts = append([]MessagePart(nil), message.Parts...)
+		for i := range clone.Parts {
+			clone.Parts[i] = clone.Parts[i].clone()
+		}
+	}
+	return &clone
+}
+
+func CloneCommand(command *CommandInvocation) *CommandInvocation {
+	if command == nil {
+		return nil
+	}
+	clone := *command
+	if len(command.Parts) > 0 {
+		clone.Parts = append([]MessagePart(nil), command.Parts...)
 		for i := range clone.Parts {
 			clone.Parts[i] = clone.Parts[i].clone()
 		}
@@ -335,3 +390,12 @@ var MessageSchema = z.Struct(z.Shape{
 	"Role":  z.StringLike[MessageRole]().OneOf([]MessageRole{MessageRoleUser, MessageRoleAgent}).Default(MessageRoleUser),
 	"Parts": z.Slice(MessagePartSchema).Min(1).Required(),
 })
+
+var CommandInvocationSchema = z.Struct(z.Shape{
+	"Name":      z.String().Required().Trim(),
+	"Arguments": z.String(),
+	"Parts":     z.Slice(MessagePartSchema).Optional(),
+}).TestFunc(func(valPtr any, ctx z.Ctx) bool {
+	command := valPtr.(*CommandInvocation)
+	return command.HasContent()
+}, z.Message("Invalid command invocation"))

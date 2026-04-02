@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +17,7 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 			messages.NewTextPart("first line\n\nsecond line\n"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "plan", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "plan", "first line\n\nsecond line\n", prompt, nil)
 
 	if request.Path != "/tmp/repo" {
 		t.Fatalf("expected path to be preserved, got %q", request.Path)
@@ -49,7 +51,7 @@ func TestBuildSessionCreateRequestPreservesFileParts(t *testing.T) {
 			messages.NewFilePart("pkgs/droner/tui/tui.go"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "build", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "build", "inspect @pkgs/droner/tui/tui.go", prompt, nil)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -73,7 +75,7 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 			messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "build", prompt)
+	request := buildSessionCreateRequest("/tmp/repo", "build", "[Image 1]", prompt, nil)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -91,10 +93,10 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 }
 
 func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
-	request := buildSessionCreateRequest("/tmp/repo", "plan", &messages.Message{
+	request := buildSessionCreateRequest("/tmp/repo", "plan", "  \n\t  ", &messages.Message{
 		Role:  messages.MessageRoleUser,
 		Parts: []messages.MessagePart{messages.NewTextPart("  \n\t  ")},
-	})
+	}, nil)
 
 	if request.AgentConfig != nil {
 		t.Fatal("expected agent config to be omitted for empty prompt")
@@ -117,7 +119,7 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	if finalModel.cancelled {
 		t.Fatal("did not expect composer to cancel")
 	}
-	prompt, agentName, submitted, err := extractComposerResult(finalModel)
+	prompt, rawInput, agentName, submitted, err := extractComposerResult(finalModel)
 	if err != nil {
 		t.Fatalf("unexpected error extracting result: %v", err)
 	}
@@ -129,6 +131,9 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	}
 	if agentName != "build" {
 		t.Fatalf("expected selected agent to be returned, got %q", agentName)
+	}
+	if rawInput != "first line\nsecond line\n" {
+		t.Fatalf("expected raw input to be preserved, got %q", rawInput)
 	}
 	if prompt.Role != messages.MessageRoleUser {
 		t.Fatalf("expected user role, got %q", prompt.Role)
@@ -184,12 +189,125 @@ func TestSessionComposerEscCancels(t *testing.T) {
 	if finalModel.submitted {
 		t.Fatal("did not expect cancelled composer to submit")
 	}
-	_, _, submitted, err := extractComposerResult(finalModel)
+	_, _, _, submitted, err := extractComposerResult(finalModel)
 	if err != nil {
 		t.Fatalf("unexpected error extracting cancelled result: %v", err)
 	}
 	if submitted {
 		t.Fatal("expected cancelled result to be unsubmitted")
+	}
+}
+
+func TestBuildSessionCreateRequestUsesKnownSlashCommands(t *testing.T) {
+	prompt := &messages.Message{
+		Role: messages.MessageRoleUser,
+		Parts: []messages.MessagePart{
+			messages.NewTextPart("/review check this "),
+			messages.NewFilePart("README.md"),
+			messages.NewDataURLFilePart("image/png", "shot.png", "data:image/png;base64,ZmFrZQ=="),
+		},
+	}
+	request := buildSessionCreateRequest("/tmp/repo", "plan", "/review check this @README.md [Image 1]", prompt, []slashCommand{{Name: "review", Description: "Review a change"}})
+
+	if request.AgentConfig == nil {
+		t.Fatal("expected agent config")
+	}
+	if request.AgentConfig.Command == nil {
+		t.Fatal("expected command payload")
+	}
+	if request.AgentConfig.Message != nil {
+		t.Fatalf("expected message payload to be omitted for command, got %#v", request.AgentConfig.Message)
+	}
+	if request.AgentConfig.Command.Name != "review" {
+		t.Fatalf("command name = %q, want review", request.AgentConfig.Command.Name)
+	}
+	if request.AgentConfig.Command.Arguments != "check this @README.md [Image 1]" {
+		t.Fatalf("arguments = %q", request.AgentConfig.Command.Arguments)
+	}
+	if len(request.AgentConfig.Command.Parts) != 2 {
+		t.Fatalf("parts = %#v, want two file parts", request.AgentConfig.Command.Parts)
+	}
+	if request.AgentConfig.Command.Parts[0].Type != messages.PartTypeFile {
+		t.Fatalf("expected file part, got %#v", request.AgentConfig.Command.Parts[0])
+	}
+}
+
+func TestBuildSessionCreateRequestLeavesUnknownSlashAsMessage(t *testing.T) {
+	prompt := &messages.Message{Role: messages.MessageRoleUser, Parts: []messages.MessagePart{messages.NewTextPart("/unknown do not special case")}}
+	request := buildSessionCreateRequest("/tmp/repo", "plan", "/unknown do not special case", prompt, []slashCommand{{Name: "review"}})
+
+	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
+		t.Fatal("expected normal message payload")
+	}
+	if request.AgentConfig.Command != nil {
+		t.Fatalf("expected no command payload, got %#v", request.AgentConfig.Command)
+	}
+	if got := messages.ToRawText(request.AgentConfig.Message); got != "/unknown do not special case" {
+		t.Fatalf("message text = %q", got)
+	}
+}
+
+func TestSessionComposerShowsSlashCommandAutocompleteAtStart(t *testing.T) {
+	model := newSessionComposerModelWithCommands("", nil, []slashCommand{{Name: "review", Description: "Review change"}, {Name: "rename"}}, []string{"build", "plan"})
+	model.input.SetValue("/re")
+	model.syncPromptFromInput()
+	model.refreshAutocomplete()
+
+	if !model.autocompleteActive {
+		t.Fatal("expected autocomplete to be active")
+	}
+	if model.autocompleteQuery.Mode != autocompleteModeCommand {
+		t.Fatalf("autocomplete mode = %q, want command", model.autocompleteQuery.Mode)
+	}
+	if len(model.autocompleteResults) != 2 {
+		t.Fatalf("unexpected command suggestions: %#v", model.autocompleteResults)
+	}
+	if model.autocompleteResults[0].Value != "rename" || model.autocompleteResults[1].Value != "review" {
+		t.Fatalf("unexpected command suggestions: %#v", model.autocompleteResults)
+	}
+}
+
+func TestSessionComposerTabAppliesSlashCommandAutocomplete(t *testing.T) {
+	model := newSessionComposerModelWithCommands("", nil, []slashCommand{{Name: "review"}}, []string{"build", "plan"})
+	model.input.SetValue("/re")
+	model.syncPromptFromInput()
+	model.refreshAutocomplete()
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	finalModel := updated.(sessionComposerModel)
+
+	if got := finalModel.input.Value(); got != "/review" {
+		t.Fatalf("input value = %q, want /review", got)
+	}
+	if len(finalModel.prompt.Message().Parts) != 1 || finalModel.prompt.Message().Parts[0].Text != "/review" {
+		t.Fatalf("expected plain text command prompt, got %#v", finalModel.prompt.Message().Parts)
+	}
+}
+
+func TestLoadSlashCommandsFromDirReadsMarkdownCommands(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "review.md"), []byte("---\ndescription: Review a change\n---\nbody"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rename.md"), []byte("# rename"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignore.txt"), []byte("ignore"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	commands, err := loadSlashCommandsFromDir(dir)
+	if err != nil {
+		t.Fatalf("loadSlashCommandsFromDir: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("commands = %#v, want two commands", commands)
+	}
+	if commands[0].Name != "rename" || commands[1].Name != "review" {
+		t.Fatalf("unexpected command names: %#v", commands)
+	}
+	if commands[1].Description != "Review a change" {
+		t.Fatalf("description = %q, want parsed frontmatter", commands[1].Description)
 	}
 }
 

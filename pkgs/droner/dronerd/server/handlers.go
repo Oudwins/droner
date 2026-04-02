@@ -14,7 +14,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/repo"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
-	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/zog/zhttp"
 	"github.com/google/uuid"
@@ -85,15 +84,15 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	// LOGIC
 	// NOTE: Parallel requests with the same ID are allowed by this behaviour. Can fix this later. Its safe because create session should fail at db level
 	if request.Branch == "" {
-		var msg *messages.Message
+		description := ""
 		if request.AgentConfig != nil {
-			msg = request.AgentConfig.Message
+			description = request.AgentConfig.ToDescription()
 		}
 
 		generatedID, err := sessionids.NewForCreateSession(r.Context(), sessionids.CreateSessionIDOptions{
 			RepoPath:    request.Path,
 			Naming:      s.Base.Config.Sessions.Naming,
-			Message:     msg,
+			Description: description,
 			MaxAttempts: 100,
 			IsValid: func(id string) error {
 				return backend.ValidateSessionID(request.Path, id)
@@ -283,7 +282,7 @@ func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter,
 }
 
 func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	// Use zog schema to parse and validate query params (limit/offset/status)
+	// Use zog schema to parse and validate query params.
 	var q schemas.SessionListQuery
 	if errs := schemas.SessionListQuerySchema.Parse(zhttp.Request(r), &q); errs != nil {
 		flattened := z.Issues.FlattenAndCollect(errs)
@@ -316,7 +315,7 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		statuses = []string{"queued", "running", "completing"}
 	}
 
-	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Cursor)
+	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Cursor, string(q.Direction))
 	if err != nil {
 		logger.Error("Failed to list session projections", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))

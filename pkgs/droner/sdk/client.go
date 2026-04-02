@@ -270,7 +270,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 
 // ListSessionsWithParams requests sessions with optional statuses and pagination.
 // If statuses is nil or empty, no status filter is applied.
-func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, cursor string) (*schemas.SessionListResponse, error) {
+func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, cursor string, direction string) (*schemas.SessionListResponse, error) {
 	path := "/sessions"
 	q := make([]string, 0)
 	if len(statuses) > 0 {
@@ -283,6 +283,9 @@ func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, 
 	}
 	if cursor != "" {
 		q = append(q, "cursor="+url.QueryEscape(cursor))
+	}
+	if direction != "" {
+		q = append(q, "direction="+url.QueryEscape(direction))
 	}
 	if len(q) > 0 {
 		path = path + "?" + strings.Join(q, "&")

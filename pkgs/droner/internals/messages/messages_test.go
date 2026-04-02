@@ -131,6 +131,43 @@ func TestCloneMessageCopiesInlineFileParts(t *testing.T) {
 	}
 }
 
+func TestCommandInvocationText(t *testing.T) {
+	t.Parallel()
+
+	command := &CommandInvocation{Name: "review", Arguments: "src/app.ts"}
+	if got := command.InvocationText(); got != "/review src/app.ts" {
+		t.Fatalf("InvocationText() = %q, want %q", got, "/review src/app.ts")
+	}
+
+	command.Arguments = ""
+	if got := command.InvocationText(); got != "/review" {
+		t.Fatalf("InvocationText() without arguments = %q, want %q", got, "/review")
+	}
+}
+
+func TestCloneCommandCopiesPartsSlice(t *testing.T) {
+	t.Parallel()
+
+	original := &CommandInvocation{
+		Name:      "review",
+		Arguments: "README.md",
+		Parts: []MessagePart{
+			NewFilePart("README.md"),
+			NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
+		},
+	}
+	clone := CloneCommand(original)
+	clone.Parts[0].File.Source.Path = "other.md"
+	*clone.Parts[1].File.URL = "data:image/png;base64,Y2hhbmdlZA=="
+
+	if original.Parts[0].File.Source.Path != "README.md" {
+		t.Fatalf("original file path mutated to %q", original.Parts[0].File.Source.Path)
+	}
+	if got := *original.Parts[1].File.URL; got != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("original inline file url mutated to %q", got)
+	}
+}
+
 func TestNewFilePartMarshalsNullURL(t *testing.T) {
 	t.Parallel()
 

@@ -10,10 +10,23 @@ import (
 
 const maxAutocompleteResults = 8
 
-type fileAutocompleteQuery struct {
+type autocompleteMode string
+
+const (
+	autocompleteModeFile    autocompleteMode = "file"
+	autocompleteModeCommand autocompleteMode = "command"
+)
+
+type autocompleteQuery struct {
+	Mode  autocompleteMode
 	Start int
 	End   int
 	Text  string
+}
+
+type autocompleteResult struct {
+	Value       string
+	Description string
 }
 
 func textareaCursorIndex(input textarea.Model) int {
@@ -44,29 +57,67 @@ func textareaCursorIndex(input textarea.Model) int {
 	return index
 }
 
-func detectFileAutocompleteQuery(text string, cursor int) (fileAutocompleteQuery, bool) {
+func detectAutocompleteQuery(text string, cursor int) (autocompleteQuery, bool) {
+	if query, ok := detectCommandAutocompleteQuery(text, cursor); ok {
+		return query, true
+	}
+	return detectFileAutocompleteQuery(text, cursor)
+}
+
+func detectCommandAutocompleteQuery(text string, cursor int) (autocompleteQuery, bool) {
+	runes := []rune(text)
+	if len(runes) == 0 || runes[0] != '/' || cursor < 0 || cursor > len(runes) {
+		return autocompleteQuery{}, false
+	}
+	if cursor == 0 {
+		return autocompleteQuery{Mode: autocompleteModeCommand, Start: 0, End: 1, Text: ""}, true
+	}
+	tokenEnd := 1
+	for tokenEnd < len(runes) && !isCommandBoundaryRune(runes[tokenEnd]) {
+		tokenEnd++
+	}
+	if cursor > tokenEnd {
+		return autocompleteQuery{}, false
+	}
+	if cursor < len(runes) && !isCommandBoundaryRune(runes[cursor]) {
+		return autocompleteQuery{}, false
+	}
+	return autocompleteQuery{
+		Mode:  autocompleteModeCommand,
+		Start: 0,
+		End:   cursor,
+		Text:  string(runes[1:cursor]),
+	}, true
+}
+
+func detectFileAutocompleteQuery(text string, cursor int) (autocompleteQuery, bool) {
 	runes := []rune(text)
 	if cursor < 0 || cursor > len(runes) {
-		return fileAutocompleteQuery{}, false
+		return autocompleteQuery{}, false
 	}
 	if cursor < len(runes) && isFileRefQueryRune(runes[cursor]) {
-		return fileAutocompleteQuery{}, false
+		return autocompleteQuery{}, false
 	}
 	idx := cursor - 1
 	for idx >= 0 && isFileRefQueryRune(runes[idx]) {
 		idx--
 	}
 	if idx < 0 || runes[idx] != '@' {
-		return fileAutocompleteQuery{}, false
+		return autocompleteQuery{}, false
 	}
 	if idx > 0 && !isFileRefBoundaryRune(runes[idx-1]) {
-		return fileAutocompleteQuery{}, false
+		return autocompleteQuery{}, false
 	}
-	return fileAutocompleteQuery{
+	return autocompleteQuery{
+		Mode:  autocompleteModeFile,
 		Start: idx,
 		End:   cursor,
 		Text:  string(runes[idx+1 : cursor]),
 	}, true
+}
+
+func isCommandBoundaryRune(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n'
 }
 
 func isFileRefQueryRune(r rune) bool {
@@ -77,7 +128,58 @@ func isFileRefBoundaryRune(r rune) bool {
 	return !isFileRefQueryRune(r) && r != '@'
 }
 
-func rankFileSearchResults(candidates []string, query string, limit int) []string {
+func rankCommandSearchResults(commands []slashCommand, query string, limit int) []autocompleteResult {
+	if limit <= 0 {
+		limit = maxAutocompleteResults
+	}
+	type scoredResult struct {
+		command autocompleteResult
+		score   int
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	results := make([]scoredResult, 0, len(commands))
+	for _, command := range commands {
+		score, ok := commandSearchScore(command.Name, query)
+		if !ok {
+			continue
+		}
+		results = append(results, scoredResult{command: autocompleteResult{Value: command.Name, Description: command.Description}, score: score})
+	}
+	sort.Slice(results, func(i int, j int) bool {
+		if results[i].score != results[j].score {
+			return results[i].score < results[j].score
+		}
+		if len(results[i].command.Value) != len(results[j].command.Value) {
+			return len(results[i].command.Value) < len(results[j].command.Value)
+		}
+		return results[i].command.Value < results[j].command.Value
+	})
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	items := make([]autocompleteResult, 0, len(results))
+	for _, result := range results {
+		items = append(items, result.command)
+	}
+	return items
+}
+
+func commandSearchScore(candidate string, query string) (int, bool) {
+	lowerCandidate := strings.ToLower(candidate)
+	if query == "" {
+		return 1, true
+	}
+	switch {
+	case strings.HasPrefix(lowerCandidate, query):
+		return 0, true
+	case strings.Contains(lowerCandidate, query):
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+func rankFileSearchResults(candidates []string, query string, limit int) []autocompleteResult {
 	if limit <= 0 {
 		limit = maxAutocompleteResults
 	}
@@ -106,9 +208,9 @@ func rankFileSearchResults(candidates []string, query string, limit int) []strin
 	if len(results) > limit {
 		results = results[:limit]
 	}
-	paths := make([]string, 0, len(results))
+	paths := make([]autocompleteResult, 0, len(results))
 	for _, result := range results {
-		paths = append(paths, result.path)
+		paths = append(paths, autocompleteResult{Value: result.path})
 	}
 	return paths
 }

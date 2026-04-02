@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,52 @@ func TestClientErrorMapping(t *testing.T) {
 	_, err = client.Version(ctx)
 	if err == nil || err != ErrAuthRequired {
 		t.Fatalf("expected ErrAuthRequired")
+	}
+}
+
+func TestClientListSessionsWithParamsIncludesDirection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sessions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		query := r.URL.Query()
+		assertQueryValues(t, query, "status", []string{"queued", "running"})
+		if got := query.Get("limit"); got != "25" {
+			t.Fatalf("limit = %q, want 25", got)
+		}
+		if got := query.Get("cursor"); got != "cursor-123" {
+			t.Fatalf("cursor = %q, want cursor-123", got)
+		}
+		if got := query.Get("direction"); got != "before" {
+			t.Fatalf("direction = %q, want before", got)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(&schemas.SessionListResponse{})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL), WithHTTPClient(server.Client()))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if _, err := client.ListSessionsWithParams(ctx, []string{"queued", "running"}, 25, "cursor-123", "before"); err != nil {
+		t.Fatalf("ListSessionsWithParams: %v", err)
+	}
+}
+
+func assertQueryValues(t *testing.T, query url.Values, key string, want []string) {
+	t.Helper()
+
+	got := query[key]
+	if len(got) != len(want) {
+		t.Fatalf("%s values = %#v, want %#v", key, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s values = %#v, want %#v", key, got, want)
+		}
 	}
 }

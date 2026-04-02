@@ -117,11 +117,12 @@ type sessionComposerModel struct {
 	prompt              composerPrompt
 	repoRoot            string
 	fileCandidates      []string
+	slashCommands       []slashCommand
 	agentNames          []string
 	selectedAgentIndex  int
 	autocompleteActive  bool
-	autocompleteQuery   fileAutocompleteQuery
-	autocompleteResults []string
+	autocompleteQuery   autocompleteQuery
+	autocompleteResults []autocompleteResult
 	autocompleteIndex   int
 	width               int
 	height              int
@@ -144,8 +145,12 @@ func Run(client *sdk.Client) error {
 	if err != nil {
 		return err
 	}
+	slashCommands, err := loadGlobalOpencodeSlashCommands()
+	if err != nil {
+		return err
+	}
 	agentNames := conf.GetConfig().TUI.AgentNames
-	prompt, agentName, submitted, err := runSessionComposer(path, fileCandidates, agentNames)
+	prompt, rawInput, agentName, submitted, err := runSessionComposer(path, fileCandidates, slashCommands, agentNames)
 	if err != nil {
 		return err
 	}
@@ -155,7 +160,7 @@ func Run(client *sdk.Client) error {
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
 	}
-	request := buildSessionCreateRequest(path, agentName, prompt)
+	request := buildSessionCreateRequest(path, agentName, rawInput, prompt, slashCommands)
 	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
@@ -166,40 +171,52 @@ func Run(client *sdk.Client) error {
 	return nil
 }
 
-func runSessionComposer(repoRoot string, fileCandidates []string, agentNames []string) (*messages.Message, string, bool, error) {
-	model := newSessionComposerModel(repoRoot, fileCandidates, agentNames)
+func runSessionComposer(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string) (*messages.Message, string, string, bool, error) {
+	model := newSessionComposerModelWithCommands(repoRoot, fileCandidates, slashCommands, agentNames)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := program.Run()
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", "", false, err
 	}
 	finalModel, ok := result.(sessionComposerModel)
 	if !ok {
-		return nil, "", false, nil
+		return nil, "", "", false, nil
 	}
 	return extractComposerResult(finalModel)
 }
 
-func buildSessionCreateRequest(path string, agentName string, prompt *messages.Message) schemas.SessionCreateRequest {
+func buildSessionCreateRequest(path string, agentName string, rawInput string, prompt *messages.Message, slashCommands []slashCommand) schemas.SessionCreateRequest {
 	request := schemas.SessionCreateRequest{Path: path}
-	if !messageHasContent(prompt) {
+	command := commandInvocationFromPrompt(rawInput, prompt, slashCommands)
+	if !messageHasContent(prompt) && (command == nil || !command.HasContent()) {
 		return request
 	}
+	config := &schemas.SessionAgentConfig{AgentName: strings.TrimSpace(agentName)}
+	if command != nil {
+		config.Command = messages.CloneCommand(command)
+	} else {
+		config.Message = messages.CloneMessage(prompt)
+	}
 	request.AgentConfig = &schemas.SessionAgentConfig{
-		AgentName: strings.TrimSpace(agentName),
-		Message:   messages.CloneMessage(prompt),
+		AgentName: config.AgentName,
+		Message:   config.Message,
+		Command:   config.Command,
 	}
 	return request
 }
 
-func extractComposerResult(model sessionComposerModel) (*messages.Message, string, bool, error) {
+func extractComposerResult(model sessionComposerModel) (*messages.Message, string, string, bool, error) {
 	if model.cancelled || !model.submitted {
-		return nil, "", false, nil
+		return nil, "", "", false, nil
 	}
-	return model.prompt.Message(), model.selectedAgentName(), true, nil
+	return model.prompt.Message(), model.prompt.PlainText(), model.selectedAgentName(), true, nil
 }
 
 func newSessionComposerModel(repoRoot string, fileCandidates []string, agentNames []string) sessionComposerModel {
+	return newSessionComposerModelWithCommands(repoRoot, fileCandidates, nil, agentNames)
+}
+
+func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string) sessionComposerModel {
 	focusedStyle, blurredStyle := textarea.DefaultStyles()
 	focusedStyle.Base = lipgloss.NewStyle().Foreground(textColor)
 	focusedStyle.Text = lipgloss.NewStyle().Foreground(textColor)
@@ -233,6 +250,7 @@ func newSessionComposerModel(repoRoot string, fileCandidates []string, agentName
 		prompt:             newComposerPrompt(),
 		repoRoot:           repoRoot,
 		fileCandidates:     append([]string(nil), fileCandidates...),
+		slashCommands:      append([]slashCommand(nil), slashCommands...),
 		agentNames:         append([]string(nil), agentNames...),
 		width:              defaultPanelWidth,
 		height:             composerTextareaRows + 8,
@@ -390,13 +408,19 @@ func (m sessionComposerModel) selectedAgentName() string {
 }
 
 func (m *sessionComposerModel) refreshAutocomplete() {
-	query, ok := detectFileAutocompleteQuery(m.input.Value(), textareaCursorIndex(m.input))
+	query, ok := detectAutocompleteQuery(m.input.Value(), textareaCursorIndex(m.input))
 	if !ok {
 		m.clearAutocomplete()
 		return
 	}
-	results := rankFileSearchResults(m.fileCandidates, query.Text, maxAutocompleteResults)
-	if !m.autocompleteActive || m.autocompleteQuery.Start != query.Start || m.autocompleteQuery.End != query.End || m.autocompleteQuery.Text != query.Text {
+	var results []autocompleteResult
+	switch query.Mode {
+	case autocompleteModeCommand:
+		results = rankCommandSearchResults(m.slashCommands, query.Text, maxAutocompleteResults)
+	default:
+		results = rankFileSearchResults(m.fileCandidates, query.Text, maxAutocompleteResults)
+	}
+	if !m.autocompleteActive || m.autocompleteQuery.Mode != query.Mode || m.autocompleteQuery.Start != query.Start || m.autocompleteQuery.End != query.End || m.autocompleteQuery.Text != query.Text {
 		m.autocompleteIndex = 0
 	}
 	m.autocompleteActive = true
@@ -413,7 +437,7 @@ func (m *sessionComposerModel) refreshAutocomplete() {
 
 func (m *sessionComposerModel) clearAutocomplete() {
 	m.autocompleteActive = false
-	m.autocompleteQuery = fileAutocompleteQuery{}
+	m.autocompleteQuery = autocompleteQuery{}
 	m.autocompleteResults = nil
 	m.autocompleteIndex = 0
 }
@@ -430,7 +454,10 @@ func (m *sessionComposerModel) applyAutocompleteSelection() bool {
 		return false
 	}
 	selected := m.autocompleteResults[m.autocompleteIndex]
-	replacement := fileRefToken(selected)
+	replacement := fileRefToken(selected.Value)
+	if m.autocompleteQuery.Mode == autocompleteModeCommand {
+		replacement = "/" + selected.Value
+	}
 	for i := 0; i < m.autocompleteQuery.End-m.autocompleteQuery.Start; i++ {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(tea.KeyMsg{Type: tea.KeyBackspace})
@@ -438,7 +465,9 @@ func (m *sessionComposerModel) applyAutocompleteSelection() bool {
 	}
 	m.input.InsertString(replacement)
 	m.syncPromptFromInput()
-	m.prompt.AddFileRef(m.autocompleteQuery.Start, m.autocompleteQuery.Start+len([]rune(replacement)), selected)
+	if m.autocompleteQuery.Mode == autocompleteModeFile {
+		m.prompt.AddFileRef(m.autocompleteQuery.Start, m.autocompleteQuery.Start+len([]rune(replacement)), selected.Value)
+	}
 	m.validationMessage = ""
 	m.clearAutocomplete()
 	return true
@@ -598,10 +627,16 @@ func (m sessionComposerModel) autocompleteView(width int) string {
 		return ""
 	}
 	if len(m.autocompleteResults) == 0 {
+		title := "Files"
+		empty := "No matching files"
+		if m.autocompleteQuery.Mode == autocompleteModeCommand {
+			title = "Commands"
+			empty = "No matching commands"
+		}
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
-			sectionTitleStyle.Width(width).Render("Files"),
-			sectionShellStyle.Width(width).Render(helpStyle.Render("No matching files")),
+			sectionTitleStyle.Width(width).Render(title),
+			sectionShellStyle.Width(width).Render(helpStyle.Render(empty)),
 		)
 	}
 	lines := make([]string, 0, len(m.autocompleteResults)+1)
@@ -612,11 +647,15 @@ func (m sessionComposerModel) autocompleteView(width int) string {
 			prefix = "> "
 			style = selectionStyle
 		}
-		lines = append(lines, style.Width(width).Render(prefix+result))
+		lines = append(lines, style.Width(width).Render(prefix+result.Value))
+	}
+	title := "Files"
+	if m.autocompleteQuery.Mode == autocompleteModeCommand {
+		title = "Commands"
 	}
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		sectionTitleStyle.Width(width).Render("Files"),
+		sectionTitleStyle.Width(width).Render(title),
 		sectionShellStyle.Width(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...)),
 	)
 }
@@ -624,6 +663,7 @@ func (m sessionComposerModel) autocompleteView(width int) string {
 func (m sessionComposerModel) helpView(width int) string {
 	items := []string{
 		shortcutKeyStyle.Render("Tab") + " " + shortcutLabelStyle.Render("agent"),
+		shortcutKeyStyle.Render("/") + " " + shortcutLabelStyle.Render("command"),
 		shortcutKeyStyle.Render("@") + " " + shortcutLabelStyle.Render("file ref"),
 		shortcutKeyStyle.Render("ctrl+v") + " " + shortcutLabelStyle.Render("paste"),
 		shortcutKeyStyle.Render("enter") + " " + shortcutLabelStyle.Render("submit"),

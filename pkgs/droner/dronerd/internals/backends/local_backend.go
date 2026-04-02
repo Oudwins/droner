@@ -20,7 +20,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 	opencode "github.com/sst/opencode-sdk-go"
-	"github.com/sst/opencode-sdk-go/option"
 )
 
 type commandFunc func(name string, args ...string) *exec.Cmd
@@ -169,7 +168,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	}
 	opencodeSessionID := ""
 	var err error
-	if opencodeMessageHasContent(agentConfig.Message) {
+	if opencodeInputHasContent(agentConfig) {
 		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
 		if err != nil {
 			return err
@@ -179,17 +178,18 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
-	if opencodeMessageHasContent(agentConfig.Message) {
+	if opencodeInputHasContent(agentConfig) {
 		cfg := opencodeConfig
 		session := opencodeSessionID
 		dir := worktreePath
 		model := agentConfig.Model
 		agentName := agentConfig.AgentName
 		message := agentConfig.Message
+		command := messages.CloneCommand(agentConfig.Command)
 		go func() {
 			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
 			defer cancel()
-			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, agentName, message); err != nil {
+			if err := l.sendOpencodeInitialInput(promptCtx, cfg, session, dir, model, agentName, message, command); err != nil {
 				slog.Warn(
 					"failed to autorun opencode prompt",
 					slog.String("sessionID", sessionID),
@@ -406,6 +406,13 @@ func opencodeMessageHasContent(message *messages.Message) bool {
 	return false
 }
 
+func opencodeInputHasContent(agentConfig AgentConfig) bool {
+	if opencodeMessageHasContent(agentConfig.Message) {
+		return true
+	}
+	return agentConfig.Command != nil && agentConfig.Command.HasContent()
+}
+
 func (l LocalBackend) createTmuxTerminalWindow(sessionName string, worktreePath string) error {
 	newTerminal := execCommand("tmux", "new-window", "-t", sessionName, "-n", "terminal", "-c", worktreePath)
 	if output, err := newTerminal.CombinedOutput(); err != nil {
@@ -436,7 +443,7 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 		return err
 	}
 	shouldAutorun := false
-	if opencodeSessionID == "" && opencodeMessageHasContent(agentConfig.Message) {
+	if opencodeSessionID == "" && opencodeInputHasContent(agentConfig) {
 		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
 		if err != nil {
 			return err
@@ -456,10 +463,11 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 		model := agentConfig.Model
 		agentName := agentConfig.AgentName
 		message := agentConfig.Message
+		command := messages.CloneCommand(agentConfig.Command)
 		go func() {
 			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
 			defer cancel()
-			if err := l.sendOpencodeMessage(promptCtx, cfg, session, dir, model, agentName, message); err != nil {
+			if err := l.sendOpencodeInitialInput(promptCtx, cfg, session, dir, model, agentName, message, command); err != nil {
 				slog.Warn(
 					"failed to autorun opencode prompt during hydration",
 					slog.String("sessionName", sessionName),
@@ -565,11 +573,6 @@ func (l LocalBackend) waitForOpencode(ctx context.Context, config conf.OpenCodeC
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for opencode server at %s:%d", config.Hostname, config.Port)
-}
-
-func newOpencodeClient(config conf.OpenCodeConfig) *opencode.Client {
-	baseURL := fmt.Sprintf("http://%s:%d", config.Hostname, config.Port)
-	return opencode.NewClient(option.WithBaseURL(baseURL))
 }
 
 func opencodePartsFromMessage(message *messages.Message, worktreePath string) ([]opencode.SessionPromptParamsPartUnion, error) {
@@ -688,116 +691,30 @@ func localFileURL(path string) (string, error) {
 }
 
 func (l LocalBackend) createOpencodeSession(ctx context.Context, config conf.OpenCodeConfig, worktreePath string) (string, error) {
-	client := newOpencodeClient(config)
-	params := opencode.SessionNewParams{}
-	if strings.TrimSpace(worktreePath) != "" {
-		params.Directory = opencode.F(worktreePath)
-	}
-	session, err := client.Session.New(ctx, params, option.WithRequestTimeout(timeouts.SecondLong))
-	if err != nil {
-		return "", err
-	}
-	if session == nil || strings.TrimSpace(session.ID) == "" {
-		return "", errors.New("opencode session id missing from response")
-	}
-	return session.ID, nil
+	return newOpencodeClient(config).CreateSession(ctx, worktreePath)
 }
 
 func (l LocalBackend) latestOpencodeSessionID(ctx context.Context, config conf.OpenCodeConfig, worktreePath string) (string, error) {
-	client := newOpencodeClient(config)
-	params := opencode.SessionListParams{}
-	if strings.TrimSpace(worktreePath) != "" {
-		params.Directory = opencode.F(worktreePath)
-	}
-	sessions, err := client.Session.List(ctx, params, option.WithRequestTimeout(timeouts.SecondLong))
-	if err != nil {
-		return "", err
-	}
-	if sessions == nil || len(*sessions) == 0 {
-		return "", nil
-	}
-	return strings.TrimSpace((*sessions)[0].ID), nil
+	return newOpencodeClient(config).LatestSessionID(ctx, worktreePath)
 }
 
 func (l LocalBackend) seedOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message) error {
-	if message == nil || len(message.Parts) == 0 {
-		return nil
-	}
-	client := newOpencodeClient(config)
-
-	parts, err := opencodePartsFromMessage(message, directory)
-	if err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return nil
-	}
-
-	params := opencode.SessionPromptParams{
-		Parts:   opencode.F(parts),
-		NoReply: opencode.F(true),
-	}
-	if strings.TrimSpace(directory) != "" {
-		params.Directory = opencode.F(directory)
-	}
-	if strings.TrimSpace(agentName) != "" {
-		params.Agent = opencode.F(strings.TrimSpace(agentName))
-	}
-	if providerID, modelID, ok := parseOpencodeModel(model); ok {
-		params.Model = opencode.F(opencode.SessionPromptParamsModel{
-			ProviderID: opencode.F(providerID),
-			ModelID:    opencode.F(modelID),
-		})
-	}
-
-	if strings.TrimSpace(sessionID) == "" {
-		id, err := l.createOpencodeSession(ctx, config, "")
-		if err != nil {
-			return err
-		}
-		sessionID = id
-	}
-	_, err = client.Session.Prompt(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
-	return err
+	return newOpencodeClient(config).SendPrompt(ctx, sessionID, directory, model, agentName, message, true)
 }
 
 func (l LocalBackend) sendOpencodeMessage(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message) error {
-	if message == nil || len(message.Parts) == 0 {
-		return nil
-	}
-	client := newOpencodeClient(config)
+	return newOpencodeClient(config).SendPrompt(ctx, sessionID, directory, model, agentName, message, false)
+}
 
-	parts, err := opencodePartsFromMessage(message, directory)
-	if err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return nil
-	}
+func (l LocalBackend) sendOpencodeCommand(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, command *messages.CommandInvocation) error {
+	return newOpencodeClient(config).SendCommand(ctx, sessionID, directory, model, agentName, command)
+}
 
-	params := opencode.SessionPromptParams{Parts: opencode.F(parts)}
-	if strings.TrimSpace(directory) != "" {
-		params.Directory = opencode.F(directory)
+func (l LocalBackend) sendOpencodeInitialInput(ctx context.Context, config conf.OpenCodeConfig, sessionID string, directory string, model string, agentName string, message *messages.Message, command *messages.CommandInvocation) error {
+	if command != nil && command.HasContent() {
+		return l.sendOpencodeCommand(ctx, config, sessionID, directory, model, agentName, command)
 	}
-	if strings.TrimSpace(agentName) != "" {
-		params.Agent = opencode.F(strings.TrimSpace(agentName))
-	}
-	if providerID, modelID, ok := parseOpencodeModel(model); ok {
-		params.Model = opencode.F(opencode.SessionPromptParamsModel{
-			ProviderID: opencode.F(providerID),
-			ModelID:    opencode.F(modelID),
-		})
-	}
-
-	if strings.TrimSpace(sessionID) == "" {
-		id, err := l.createOpencodeSession(ctx, config, "")
-		if err != nil {
-			return err
-		}
-		sessionID = id
-	}
-	_, err = client.Session.Prompt(ctx, sessionID, params)
-	return err
+	return l.sendOpencodeMessage(ctx, config, sessionID, directory, model, agentName, message)
 }
 
 func parseOpencodeModel(raw string) (providerID string, modelID string, ok bool) {

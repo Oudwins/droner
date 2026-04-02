@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,8 @@ const (
 	consumerDeleteProcess      = "session_delete_process"
 	consumerRemoteSubscription = "session_remote_subscription"
 	consumerRemoteObservation  = "session_remote_observation"
+	listDirectionBefore        = "before"
+	listDirectionAfter         = "after"
 )
 
 type System struct {
@@ -264,19 +267,52 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 }
 
 // ListSessionProjections reads directly from the session_projection table.
-// If status is empty it returns all rows (respecting limit/offset). If status
-// is provided it filters on public_state = status. Limit/offset are applied
-// as provided.
-func (s *System) ListSessionProjections(ctx context.Context, statuses []string, limit int, cursor string) ([]ListItem, error) {
-	// Use sqlc-backed query that accepts a comma-separated list of statuses
-	// and an optional cursor (stream_id) for pagination. The query returns
-	// items older than the cursor (stream_id < cursor) ordered by stream_id
-	// descending. If cursor is empty, it returns the most recent items.
+// Cursor pagination is relative to the current newest-first ordering:
+// "after" returns older rows that appear after the anchor, while "before"
+// returns newer rows that appear before it.
+func (s *System) ListSessionProjections(ctx context.Context, statuses []string, limit int, cursor string, direction string) ([]ListItem, error) {
 	statusesArg := ""
 	if len(statuses) > 0 {
 		statusesArg = strings.Join(statuses, ",")
 	}
-	rows, err := s.queries.ListSessionProjectionItemsByStatuses(ctx, statusesArg, statusesArg, cursor, cursor, limit)
+	statusesValue := sql.NullString{String: statusesArg, Valid: statusesArg != ""}
+
+	if strings.TrimSpace(direction) == "" {
+		direction = listDirectionAfter
+	}
+
+	var (
+		items []ListItem
+		err   error
+	)
+
+	switch {
+	case cursor == "":
+		items, err = s.listSessionProjectionItemsAfterCursor(ctx, statusesArg, statusesValue, "", limit)
+	case direction == listDirectionAfter:
+		items, err = s.listSessionProjectionItemsAfterCursor(ctx, statusesArg, statusesValue, cursor, limit)
+	case direction == listDirectionBefore:
+		items, err = s.listSessionProjectionItemsBeforeCursor(ctx, statusesArg, statusesValue, cursor, limit)
+	default:
+		return nil, fmt.Errorf("invalid list direction %q", direction)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cursor != "" && direction == listDirectionBefore {
+		reverseListItems(items)
+	}
+	return items, nil
+}
+
+func (s *System) listSessionProjectionItemsAfterCursor(ctx context.Context, statusesArg string, statusesValue sql.NullString, cursor string, limit int) ([]ListItem, error) {
+	rows, err := s.queries.ListSessionProjectionItemsAfterCursorByStatuses(ctx, coredb.ListSessionProjectionItemsAfterCursorByStatusesParams{
+		Column1:  statusesArg,
+		Column2:  statusesValue,
+		Column3:  cursor,
+		StreamID: cursor,
+		Limit:    int64(limit),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +321,30 @@ func (s *System) ListSessionProjections(ctx context.Context, statuses []string, 
 		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
 	}
 	return items, nil
+}
+
+func (s *System) listSessionProjectionItemsBeforeCursor(ctx context.Context, statusesArg string, statusesValue sql.NullString, cursor string, limit int) ([]ListItem, error) {
+	rows, err := s.queries.ListSessionProjectionItemsBeforeCursorByStatuses(ctx, coredb.ListSessionProjectionItemsBeforeCursorByStatusesParams{
+		Column1:  statusesArg,
+		Column2:  statusesValue,
+		Column3:  cursor,
+		StreamID: cursor,
+		Limit:    int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+	}
+	return items, nil
+}
+
+func reverseListItems(items []ListItem) {
+	for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {
+		items[left], items[right] = items[right], items[left]
+	}
 }
 
 func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {

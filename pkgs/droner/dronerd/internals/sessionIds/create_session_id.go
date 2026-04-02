@@ -9,14 +9,13 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/naming"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
-	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
 )
 
 type CreateSessionIDOptions struct {
 	RepoPath      string
 	Naming        conf.SessionNamingConfig
-	Message       *messages.Message
+	Description   string
 	MaxAttempts   int
 	IsValid       func(id string) error
 	OnNamingError func(err error)
@@ -30,7 +29,7 @@ func NewForCreateSession(ctx context.Context, opts CreateSessionIDOptions) (stri
 		return "", fmt.Errorf("missing IsValid")
 	}
 
-	promptText := strings.TrimSpace(messages.ToRawText(opts.Message))
+	promptText := strings.TrimSpace(opts.Description)
 	prefix := ""
 
 	if opts.Naming.Strategy == conf.SessionNamingStrategyOpenCodePrompt && promptText != "" {

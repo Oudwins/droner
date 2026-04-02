@@ -31,9 +31,10 @@ func (b SBranch) String() string {
 }
 
 type SessionAgentConfig struct {
-	Model     string            `json:"model" zog:"model"`
-	AgentName string            `json:"agentName,omitempty" zog:"agentName"`
-	Message   *messages.Message `json:"message,omitempty"`
+	Model     string                      `json:"model" zog:"model"`
+	AgentName string                      `json:"agentName,omitempty" zog:"agentName"`
+	Message   *messages.Message           `json:"message,omitempty"`
+	Command   *messages.CommandInvocation `json:"command,omitempty"`
 }
 
 type SessionCreateRequest struct {
@@ -71,8 +72,18 @@ func (c SessionAgentConfig) LogValue() slog.Value {
 	if c.Message != nil {
 		attrs = append(attrs, slog.Any("message", c.Message))
 	}
+	if c.Command != nil {
+		attrs = append(attrs, slog.Any("command", c.Command))
+	}
 
 	return slog.GroupValue(attrs...)
+}
+
+func (c SessionAgentConfig) ToDescription() string {
+	if c.Command != nil {
+		return c.Command.InvocationText()
+	}
+	return messages.ToRawText(c.Message)
 }
 
 var branchRegex = regexp.MustCompile(`^[A-Za-z0-9/\-]+$`)
@@ -87,6 +98,7 @@ var SessionCreateSchema = z.Struct(z.Shape{
 		"Model":     z.String().Default(conf.GetConfig().Sessions.Harness.DefaultModel()).Trim(),
 		"AgentName": z.String().Optional().Trim(),
 		"Message":   z.Ptr(messages.MessageSchema),
+		"Command":   z.Ptr(messages.CommandInvocationSchema),
 	})),
 })
 
@@ -115,6 +127,13 @@ type SessionListResponse struct {
 	Sessions []SessionListItem `json:"sessions"`
 }
 
+type SessionListDirection string
+
+const (
+	SessionListDirectionBefore SessionListDirection = "before"
+	SessionListDirectionAfter  SessionListDirection = "after"
+)
+
 var SessionDeleteSchema = z.Struct(z.Shape{
 	"Branch": branch().Required().Trim(),
 })
@@ -129,15 +148,17 @@ var SessionCompleteSchema = z.Struct(z.Shape{
 
 // SessionListQuery represents query parameters accepted by GET /sessions.
 type SessionListQuery struct {
-	Status []string `zog:"status"`
-	Limit  int      `zog:"limit"`
-	Cursor string   `zog:"cursor"`
+	Status    []string             `zog:"status"`
+	Limit     int                  `zog:"limit"`
+	Cursor    string               `zog:"cursor"`
+	Direction SessionListDirection `zog:"direction"`
 }
 
 var SessionListQuerySchema = z.Struct(z.Shape{
-	"Status": z.Slice(z.String().Min(1).Required()).Optional(),
-	"Limit":  z.Int().Default(100).GTE(1),
-	"Cursor": z.String().Optional(),
+	"Status":    z.Slice(z.String().Min(1).Required()).Optional(),
+	"Limit":     z.Int().Default(100).GTE(1),
+	"Cursor":    z.String().Optional(),
+	"Direction": z.StringLike[SessionListDirection]().OneOf([]SessionListDirection{SessionListDirectionBefore, SessionListDirectionAfter}).Default(SessionListDirectionAfter),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {

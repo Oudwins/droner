@@ -72,12 +72,20 @@ FROM session_projection
 ORDER BY updated_at DESC
 LIMIT 100;
 
--- name: ListSessionProjectionItemsByStatuses :many
+-- name: ListSessionProjectionItemsAfterCursorByStatuses :many
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
-WHERE (? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%'
+WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
   AND (? = '' OR stream_id < ?)
 ORDER BY stream_id DESC
+LIMIT ?;
+
+-- name: ListSessionProjectionItemsBeforeCursorByStatuses :many
+SELECT stream_id, repo_path, remote_url, branch, public_state
+FROM session_projection
+WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
+  AND (? = '' OR stream_id > ?)
+ORDER BY stream_id ASC
 LIMIT ?;
 
 -- name: ListActiveSessionProjectionRefs :many

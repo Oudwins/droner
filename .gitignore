@@ -9,3 +9,4 @@ result-*
 bin/
 .env
 thoughts/
+README_COPY.md # for testing

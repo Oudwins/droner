@@ -42,6 +42,11 @@ func writePromptOK(w http.ResponseWriter, sessionID string) {
 	})
 }
 
+func writeCommandOK(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
 func opencodeConfigFromServer(t *testing.T, srv *httptest.Server) conf.OpenCodeConfig {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
@@ -220,6 +225,82 @@ func TestSendOpencodeMessage_ForwardsInlineImagePartsUnchanged(t *testing.T) {
 	msg := &messages.Message{Parts: []messages.MessagePart{inlinePart}}
 	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "", "", msg); err != nil {
 		t.Fatalf("sendOpencodeMessage: %v", err)
+	}
+}
+
+func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
+	worktreeDir := t.TempDir()
+	readmePath := filepath.Join(worktreeDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# droner\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	inlinePart := messages.NewDataURLFilePart("image/png", "shot.png", "data:image/png;base64,ZmFrZQ==")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/session/abc/command", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["command"] != "review" {
+			t.Fatalf("command = %v, want review", body["command"])
+		}
+		if body["arguments"] != "README.md [Image 1]" {
+			t.Fatalf("arguments = %v", body["arguments"])
+		}
+		if body["agent"] != "plan" {
+			t.Fatalf("agent = %v, want plan", body["agent"])
+		}
+		model, ok := body["model"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing model")
+		}
+		if model["providerID"] != "openai" || model["modelID"] != "gpt-5-mini" {
+			t.Fatalf("model = %#v", model)
+		}
+		parts, ok := body["parts"].([]any)
+		if !ok || len(parts) != 2 {
+			t.Fatalf("parts = %#v, want two parts", body["parts"])
+		}
+		filePart, ok := parts[0].(map[string]any)
+		if !ok {
+			t.Fatalf("file part = %#v", parts[0])
+		}
+		if filePart["type"] != "file" || filePart["filename"] != "README.md" {
+			t.Fatalf("file part = %#v", filePart)
+		}
+		source, ok := filePart["source"].(map[string]any)
+		if !ok || source["path"] != "README.md" {
+			t.Fatalf("source = %#v", filePart["source"])
+		}
+		imagePart, ok := parts[1].(map[string]any)
+		if !ok {
+			t.Fatalf("image part = %#v", parts[1])
+		}
+		if imagePart["url"] != *inlinePart.File.URL {
+			t.Fatalf("image url = %v, want %v", imagePart["url"], *inlinePart.File.URL)
+		}
+		if _, exists := imagePart["source"]; exists {
+			t.Fatalf("expected inline image source to be omitted, got %#v", imagePart["source"])
+		}
+		writeCommandOK(w)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	backend := LocalBackend{}
+	command := &messages.CommandInvocation{
+		Name:      "review",
+		Arguments: "README.md [Image 1]",
+		Parts: []messages.MessagePart{
+			messages.NewFilePart("README.md"),
+			inlinePart,
+		},
+	}
+	if err := backend.sendOpencodeCommand(context.Background(), opencodeConfigFromServer(t, srv), "abc", worktreeDir, "openai/gpt-5-mini", "plan", command); err != nil {
+		t.Fatalf("sendOpencodeCommand: %v", err)
 	}
 }
 

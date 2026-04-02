@@ -33,7 +33,15 @@ type AgentConfig struct {
 	Model     string
 	AgentName string
 	Message   *messages.Message
+	Command   *messages.CommandInvocation
 	Opencode  conf.OpenCodeConfig
+}
+
+func (c AgentConfig) ToDescription() string {
+	if c.Command != nil {
+		return c.Command.InvocationText()
+	}
+	return messages.ToRawText(c.Message)
 }
 
 type ReusableWorktreeCandidate struct {

@@ -27,6 +27,7 @@
 - Both SQLite databases are Goose-managed in-process on startup. Use `just db-migrate-up|down|status|version` for explicit migration commands, and `sqlc` reads main DB DDL from `dronerd/db/migrations`.
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
 - Root config lives at `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
+- TUI startup now discovers OpenCode custom slash commands from `~/.config/opencode/commands/*.md`; recognized leading `/command` input is sent as a first-class command payload while unknown slash input remains a normal prompt.
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.
 
 ## Build and run

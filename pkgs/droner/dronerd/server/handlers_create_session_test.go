@@ -436,6 +436,61 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 	}
 }
 
+func TestHandlerListSessionsSupportsCursorDirections(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	branches := []string{"cursor-a", "cursor-b", "cursor-c", "cursor-d"}
+	for _, branch := range branches {
+		createEventSourcedSession(t, server, repoDir, branch)
+		waitForSessionState(t, server, branch, "running")
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	fullResponse := listSessions(t, server, "/sessions?limit=10")
+	if len(fullResponse.Sessions) != len(branches) {
+		t.Fatalf("listed %d sessions, want %d", len(fullResponse.Sessions), len(branches))
+	}
+
+	anchorBefore := fullResponse.Sessions[2]
+	beforeResponse := listSessions(t, server, "/sessions?limit=1&cursor="+anchorBefore.ID+"&direction=before")
+	if len(beforeResponse.Sessions) != 1 {
+		t.Fatalf("before listed %d sessions, want 1", len(beforeResponse.Sessions))
+	}
+	if got, want := beforeResponse.Sessions[0].ID, fullResponse.Sessions[1].ID; got != want {
+		t.Fatalf("before id = %q, want %q", got, want)
+	}
+
+	anchorAfter := fullResponse.Sessions[1]
+	afterResponse := listSessions(t, server, "/sessions?limit=1&cursor="+anchorAfter.ID+"&direction=after")
+	if len(afterResponse.Sessions) != 1 {
+		t.Fatalf("after listed %d sessions, want 1", len(afterResponse.Sessions))
+	}
+	if got, want := afterResponse.Sessions[0].ID, fullResponse.Sessions[2].ID; got != want {
+		t.Fatalf("after id = %q, want %q", got, want)
+	}
+
+	defaultResponse := listSessions(t, server, "/sessions?limit=1&cursor="+anchorAfter.ID)
+	if len(defaultResponse.Sessions) != 1 {
+		t.Fatalf("default listed %d sessions, want 1", len(defaultResponse.Sessions))
+	}
+	if got, want := defaultResponse.Sessions[0].ID, fullResponse.Sessions[2].ID; got != want {
+		t.Fatalf("default direction id = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerListSessionsRejectsInvalidDirection(t *testing.T) {
+	server, _, _, _ := newEventSourcedCreateSessionTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/sessions?direction=sideways", nil)
+	rec := httptest.NewRecorder()
+
+	server.HandlerListSessions(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
 func createEventSourcedSession(t *testing.T, server *Server, repoDir, branch string) schemas.SessionCreateResponse {
 	t.Helper()
 
@@ -458,6 +513,23 @@ func createEventSourcedSession(t *testing.T, server *Server, repoDir, branch str
 	var response schemas.SessionCreateResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("json.Unmarshal create response: %v", err)
+	}
+	return response
+}
+
+func listSessions(t *testing.T, server *Server, target string) schemas.SessionListResponse {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	rec := httptest.NewRecorder()
+	server.HandlerListSessions(server.Base.Logger, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response schemas.SessionListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal list response: %v", err)
 	}
 	return response
 }

@@ -29,8 +29,12 @@ func (s *System) agentConfigFromJSON(harness conf.HarnessID, raw string) (backen
 	}
 	agentConfig.AgentName = persisted.AgentName
 	agentConfig.Message = persisted.Message
+	agentConfig.Command = persisted.Command
 	if !messageHasContent(agentConfig.Message) {
 		agentConfig.Message = nil
+	}
+	if !commandHasContent(agentConfig.Command) {
+		agentConfig.Command = nil
 	}
 	return agentConfig, nil
 }
@@ -61,4 +65,8 @@ func messageHasContent(msg *messages.Message) bool {
 		}
 	}
 	return false
+}
+
+func commandHasContent(command *messages.CommandInvocation) bool {
+	return command != nil && command.HasContent()
 }
