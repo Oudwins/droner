@@ -290,7 +290,7 @@ func newSessionsCmd() *cobra.Command {
 				response, err = client.ListSessionsWithParams(ctx, nil, 0, "")
 			} else {
 				// Default to listing running sessions in the CLI
-				response, err = client.ListSessionsWithParams(ctx, []string{"running"}, 0, "")
+				response, err = client.ListSessionsWithParams(ctx, []string{string(sdk.SessionStatusQueued), string(sdk.SessionStatusRunning)}, 0, "")
 			}
 			if err != nil {
 				return err

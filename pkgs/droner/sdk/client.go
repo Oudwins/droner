@@ -22,6 +22,17 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// SessionStatus represents the public lifecycle state of a session.
+type SessionStatus string
+
+const (
+	SessionStatusQueued     SessionStatus = "queued"
+	SessionStatusRunning    SessionStatus = "running"
+	SessionStatusCompleting SessionStatus = "completing"
+	SessionStatusDeleted    SessionStatus = "deleted"
+	SessionStatusCompleted  SessionStatus = "completed"
+)
+
 var ErrAuthRequired = errors.New("auth required")
 var ErrShutdownUnsupported = errors.New("shutdown unsupported")
 
