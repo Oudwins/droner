@@ -156,12 +156,13 @@ const listSessionProjectionItemsByStatuses = `-- name: ListSessionProjectionItem
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
 WHERE (? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%'
-ORDER BY updated_at DESC
-LIMIT ? OFFSET ?;
+  AND (? = '' OR stream_id < ?)
+ORDER BY stream_id DESC
+LIMIT ?;
 `
 
-func (q *Queries) ListSessionProjectionItemsByStatuses(ctx context.Context, statuses string, statuses2 string, limit int, offset int) ([]ListAllSessionProjectionItemsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSessionProjectionItemsByStatuses, statuses, statuses2, limit, offset)
+func (q *Queries) ListSessionProjectionItemsByStatuses(ctx context.Context, statuses string, statuses2 string, cursor string, cursor2 string, limit int) ([]ListAllSessionProjectionItemsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionProjectionItemsByStatuses, statuses, statuses2, cursor, cursor2, limit)
 	if err != nil {
 		return nil, err
 	}

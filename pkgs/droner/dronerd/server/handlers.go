@@ -292,9 +292,9 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		return
 	}
 
-	// Ensure non-negative values just in case
-	if q.Limit < 0 || q.Offset < 0 {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "limit and offset must be non-negative", nil), Render.Status(http.StatusBadRequest))
+	// Ensure non-negative limit
+	if q.Limit < 0 {
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "limit must be non-negative", nil), Render.Status(http.StatusBadRequest))
 		return
 	}
 
@@ -316,7 +316,7 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		statuses = []string{"queued", "running", "completing"}
 	}
 
-	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Offset)
+	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Cursor)
 	if err != nil {
 		logger.Error("Failed to list session projections", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))

@@ -131,13 +131,13 @@ var SessionCompleteSchema = z.Struct(z.Shape{
 type SessionListQuery struct {
 	Status []string `zog:"status"`
 	Limit  int      `zog:"limit"`
-	Offset int      `zog:"offset"`
+	Cursor string   `zog:"cursor"`
 }
 
 var SessionListQuerySchema = z.Struct(z.Shape{
 	"Status": z.Slice(z.String()).Optional(),
 	"Limit":  z.Int().Default(100),
-	"Offset": z.Int().Default(0),
+	"Cursor": z.String().Optional(),
 })
 
 func cleanPathTransform(valPtr *string, c z.Ctx) error {

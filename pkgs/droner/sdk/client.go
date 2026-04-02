@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -258,22 +259,22 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 
 // ListSessionsWithParams requests sessions with optional statuses and pagination.
 // If statuses is nil or empty, no status filter is applied.
-func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, offset int) (*schemas.SessionListResponse, error) {
+func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, cursor string) (*schemas.SessionListResponse, error) {
 	path := "/sessions"
-	if len(statuses) > 0 || limit > 0 || offset > 0 {
-		q := make([]string, 0)
+	q := make([]string, 0)
+	if len(statuses) > 0 {
 		for _, s := range statuses {
-			q = append(q, "status="+s)
+			q = append(q, "status="+url.QueryEscape(s))
 		}
-		if limit > 0 {
-			q = append(q, "limit="+strconv.Itoa(limit))
-		}
-		if offset > 0 {
-			q = append(q, "offset="+strconv.Itoa(offset))
-		}
-		if len(q) > 0 {
-			path = path + "?" + strings.Join(q, "&")
-		}
+	}
+	if limit > 0 {
+		q = append(q, "limit="+strconv.Itoa(limit))
+	}
+	if cursor != "" {
+		q = append(q, "cursor="+url.QueryEscape(cursor))
+	}
+	if len(q) > 0 {
+		path = path + "?" + strings.Join(q, "&")
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
