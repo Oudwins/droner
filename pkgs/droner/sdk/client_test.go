@@ -124,7 +124,7 @@ func TestClientListSessionsWithParamsIncludesDirection(t *testing.T) {
 		}
 
 		query := r.URL.Query()
-		assertQueryValues(t, query, "status", []string{"queued", "running"})
+		assertQueryValues(t, query, "status", []string{"queued", "active.idle"})
 		if got := query.Get("limit"); got != "25" {
 			t.Fatalf("limit = %q, want 25", got)
 		}
@@ -144,7 +144,7 @@ func TestClientListSessionsWithParamsIncludesDirection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if _, err := client.ListSessionsWithParams(ctx, []string{"queued", "running"}, 25, "cursor-123", "before"); err != nil {
+	if _, err := client.ListSessionsWithParams(ctx, []SessionStatus{SessionStatusQueued, SessionStatusActiveIdle}, 25, "cursor-123", "before"); err != nil {
 		t.Fatalf("ListSessionsWithParams: %v", err)
 	}
 }

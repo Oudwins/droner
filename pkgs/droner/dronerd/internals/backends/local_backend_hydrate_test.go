@@ -40,8 +40,8 @@ func TestLocalBackendHydrateSessionReturnsRunningWhenTmuxSessionAlreadyExists(t 
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
 	}
-	if result.Status != db.SessionStatusRunning {
-		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusRunning)
+	if result.Status != db.SessionStatusActiveIdle {
+		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusActiveIdle)
 	}
 	if len(calls) != 1 || !strings.Contains(calls[0], "tmux has-session") {
 		t.Fatalf("expected only tmux has-session call, got %v", calls)
@@ -175,8 +175,8 @@ func TestLocalBackendHydrateSessionReusesLatestSessionForDirectory(t *testing.T)
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
 	}
-	if result.Status != db.SessionStatusRunning {
-		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusRunning)
+	if result.Status != db.SessionStatusActiveIdle {
+		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusActiveIdle)
 	}
 	if createCalled {
 		t.Fatalf("expected hydration not to create a new opencode session")
@@ -276,8 +276,8 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
 	}
-	if result.Status != db.SessionStatusRunning {
-		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusRunning)
+	if result.Status != db.SessionStatusActiveIdle {
+		t.Fatalf("status = %s, want %s", result.Status, db.SessionStatusActiveIdle)
 	}
 	select {
 	case <-messageStarted:

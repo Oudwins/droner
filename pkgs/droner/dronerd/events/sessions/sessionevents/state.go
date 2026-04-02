@@ -18,8 +18,8 @@ type sessionState struct {
 	WorktreePath   string
 	RemoteURL      string
 	AgentConfig    string
-	LifecycleState string
-	PublicState    string
+	LifecycleState LifecycleState
+	PublicState    PublicState
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -81,7 +81,7 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.WorktreePath = payload.WorktreePath
 		s.RemoteURL = payload.RemoteURL
 		s.AgentConfig = payload.AgentConfigJSON
-		s.transition(string(eventTypeSessionQueued), "queued", "", evt.OccurredAt)
+		s.transition(LifecycleStateQueued, PublicStateQueued, "", evt.OccurredAt)
 		if s.CreatedAt.IsZero() {
 			s.CreatedAt = evt.OccurredAt.UTC()
 		}
@@ -89,52 +89,56 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 	case eventTypeSessionHydrationRequested:
 		return false, nil
 	case eventTypeSessionEnvironmentProvisioningStarted:
-		s.transition(string(eventTypeSessionEnvironmentProvisioningStarted), "queued", "", evt.OccurredAt)
+		s.transition(LifecycleStateEnvironmentProvisioningStarted, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionEnvironmentProvisioningSuccess:
-		s.transition(string(eventTypeSessionEnvironmentProvisioningSuccess), "queued", "", evt.OccurredAt)
+		s.transition(LifecycleStateEnvironmentProvisioningSuccess, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionReady:
-		s.transition(string(eventTypeSessionReady), "running", "", evt.OccurredAt)
+		s.transition(LifecycleStateReady, PublicStateActiveIdle, "", evt.OccurredAt)
 		return true, nil
+	case eventTypeSessionAgentBusy:
+		return s.applyAgentState(PublicStateActiveBusy, evt.OccurredAt), nil
+	case eventTypeSessionAgentIdle:
+		return s.applyAgentState(PublicStateActiveIdle, evt.OccurredAt), nil
 	case eventTypeSessionEnvironmentProvisioningFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
-		s.transition(string(eventTypeSessionEnvironmentProvisioningFailed), "failed", payload.Error, evt.OccurredAt)
+		s.transition(LifecycleStateEnvironmentProvisioningFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionCompletionRequested:
-		s.transition(string(eventTypeSessionCompletionRequested), "running", "", evt.OccurredAt)
+		s.transition(LifecycleStateCompletionRequested, s.publicStateForCompletionRequest(), "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionCompletionStarted:
-		s.transition(string(eventTypeSessionCompletionStarted), "completing", "", evt.OccurredAt)
+		s.transition(LifecycleStateCompletionStarted, PublicStateCompleting, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionCompletionSuccess:
-		s.transition(string(eventTypeSessionCompletionSuccess), "completed", "", evt.OccurredAt)
+		s.transition(LifecycleStateCompletionSuccess, PublicStateCompleted, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionCompletionFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
-		s.transition(string(eventTypeSessionCompletionFailed), "failed", payload.Error, evt.OccurredAt)
+		s.transition(LifecycleStateCompletionFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionDeletionRequested:
-		s.transition(string(eventTypeSessionDeletionRequested), "deleting", "", evt.OccurredAt)
+		s.transition(LifecycleStateDeletionRequested, PublicStateDeleting, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionDeletionStarted:
-		s.transition(string(eventTypeSessionDeletionStarted), "deleting", "", evt.OccurredAt)
+		s.transition(LifecycleStateDeletionStarted, PublicStateDeleting, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionDeletionSuccess:
-		s.transition(string(eventTypeSessionDeletionSuccess), "deleted", "", evt.OccurredAt)
+		s.transition(LifecycleStateDeletionSuccess, PublicStateDeleted, "", evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionDeletionFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
-		s.transition(string(eventTypeSessionDeletionFailed), "failed", payload.Error, evt.OccurredAt)
+		s.transition(LifecycleStateDeletionFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
 	case eventTypeRemotePRClosed, eventTypeRemotePRMerged, eventTypeRemoteBranchDeleted:
 		return false, nil
@@ -143,7 +147,27 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 	}
 }
 
-func (s *sessionState) transition(lifecycleState, publicState, lastError string, occurredAt time.Time) {
+func (s *sessionState) publicStateForCompletionRequest() PublicState {
+	if s.PublicState.IsActive() {
+		return s.PublicState
+	}
+	return PublicStateActiveIdle
+}
+
+func (s *sessionState) applyAgentState(publicState PublicState, occurredAt time.Time) bool {
+	if !s.LifecycleState.AllowsAgentRuntime() || s.PublicState.IsTerminal() || s.PublicState == publicState {
+		return false
+	}
+	s.PublicState = publicState
+	s.LastError = ""
+	s.UpdatedAt = occurredAt.UTC()
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = s.UpdatedAt
+	}
+	return true
+}
+
+func (s *sessionState) transition(lifecycleState LifecycleState, publicState PublicState, lastError string, occurredAt time.Time) {
 	s.LifecycleState = lifecycleState
 	s.PublicState = publicState
 	s.LastError = lastError
@@ -163,8 +187,8 @@ func stateFromProjection(row coredb.SessionProjection) sessionState {
 		WorktreePath:   row.WorktreePath,
 		RemoteURL:      row.RemoteUrl,
 		AgentConfig:    row.AgentConfig,
-		LifecycleState: row.LifecycleState,
-		PublicState:    row.PublicState,
+		LifecycleState: LifecycleState(row.LifecycleState),
+		PublicState:    PublicState(row.PublicState),
 		LastError:      row.LastError,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
@@ -181,8 +205,8 @@ func (s sessionState) projectionMutation() projectionMutation {
 		WorktreePath:   s.WorktreePath,
 		RemoteURL:      s.RemoteURL,
 		AgentConfig:    s.AgentConfig,
-		LifecycleState: s.LifecycleState,
-		PublicState:    s.PublicState,
+		LifecycleState: s.LifecycleState.String(),
+		PublicState:    s.PublicState.String(),
 		LastError:      s.LastError,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,

@@ -59,18 +59,23 @@ SELECT *
 FROM session_projection
 WHERE branch = ?;
 
+-- name: GetSessionProjectionByWorktreePath :one
+SELECT *
+FROM session_projection
+WHERE worktree_path = ?;
+
 -- name: GetLatestNavigationSessionProjectionByBranch :one
 SELECT *
 FROM session_projection
 WHERE branch = ?
-  AND public_state IN ('running', 'completed')
+  AND public_state IN ('active.idle', 'active.busy', 'completed')
 ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: ListVisibleSessionProjectionItems :many
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
-WHERE public_state IN ('queued', 'running', 'completing')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing')
 ORDER BY updated_at DESC
 LIMIT 100;
 
@@ -99,13 +104,13 @@ LIMIT ?;
 -- name: ListActiveSessionProjectionRefs :many
 SELECT *
 FROM session_projection
-WHERE public_state IN ('queued', 'running')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy')
 ORDER BY updated_at DESC;
 
 -- name: ListHydratableSessionProjectionRefs :many
 SELECT *
 FROM session_projection
-WHERE public_state IN ('queued', 'running', 'completing', 'deleting')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing', 'deleting')
 ORDER BY updated_at DESC;
 
 -- name: ListReusableSessionProjectionRefs :many

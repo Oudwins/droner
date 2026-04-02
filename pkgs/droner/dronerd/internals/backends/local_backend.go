@@ -75,7 +75,7 @@ func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, ag
 		return HydrationResult{Status: db.SessionStatusFailed, Error: fmt.Sprintf("failed to inspect tmux session: %v", err)}, nil
 	}
 	if exists {
-		return HydrationResult{Status: db.SessionStatusRunning}, nil
+		return HydrationResult{Status: db.SessionStatusActiveIdle}, nil
 	}
 
 	info, err := os.Stat(session.WorktreePath)
@@ -93,7 +93,7 @@ func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, ag
 		return HydrationResult{Status: db.SessionStatusFailed, Error: err.Error()}, nil
 	}
 
-	return HydrationResult{Status: db.SessionStatusRunning}, nil
+	return HydrationResult{Status: db.SessionStatusActiveIdle}, nil
 }
 
 func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig, opts ...CreateSessionOptions) (retErr error) {

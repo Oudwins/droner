@@ -47,7 +47,7 @@ func (b *createSessionBackend) CreateSession(ctx context.Context, repoPath strin
 }
 
 func (b *createSessionBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
-	return backends.HydrationResult{Status: db.SessionStatusRunning}, nil
+	return backends.HydrationResult{Status: db.SessionStatusActiveIdle}, nil
 }
 
 func (b *createSessionBackend) CompleteSession(ctx context.Context, worktreePath string, sessionID string) error {
@@ -310,14 +310,14 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	if sessionsTableCount != 0 {
 		t.Fatalf("sessions table count = %d, want 0", sessionsTableCount)
 	}
-	waitForSessionState(t, server, "evented-session", "running")
+	waitForSessionState(t, server, "evented-session", sessionevents.PublicStateActiveIdle)
 }
 
 func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
-	waitForSessionState(t, server, "complete-me", "running")
+	waitForSessionState(t, server, "complete-me", sessionevents.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("complete-me")})
 	if err != nil {
@@ -356,7 +356,7 @@ func TestHandlerListSessionsWithoutStatusFilterIncludesCompleted(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "completed-visible")
-	waitForSessionState(t, server, "completed-visible", "running")
+	waitForSessionState(t, server, "completed-visible", sessionevents.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("completed-visible")})
 	if err != nil {
@@ -391,7 +391,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
-	waitForSessionState(t, server, "delete-me", "running")
+	waitForSessionState(t, server, "delete-me", sessionevents.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionDeleteRequest{Branch: schemas.NewSBranch("delete-me")})
 	if err != nil {
@@ -431,8 +431,8 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 
 	createEventSourcedSession(t, server, repoDir, "nuke-a")
 	createEventSourcedSession(t, server, repoDir, "nuke-b")
-	waitForSessionState(t, server, "nuke-a", "running")
-	waitForSessionState(t, server, "nuke-b", "running")
+	waitForSessionState(t, server, "nuke-a", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "nuke-b", sessionevents.PublicStateActiveIdle)
 
 	req := httptest.NewRequest(http.MethodPost, "/sessions/nuke", bytes.NewReader([]byte("{}")))
 	rec := httptest.NewRecorder()
@@ -456,7 +456,7 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 	waitForSessionState(t, server, "nuke-a", "deleted")
 	waitForSessionState(t, server, "nuke-b", "deleted")
 
-	listReq := httptest.NewRequest(http.MethodGet, "/sessions?status=queued&status=running", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/sessions?status=queued&status=active.idle", nil)
 	listRec := httptest.NewRecorder()
 	server.HandlerListSessions(server.Base.Logger, listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -467,7 +467,7 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 		t.Fatalf("json.Unmarshal list response: %v", err)
 	}
 	if len(listResponse.Sessions) != 0 {
-		t.Fatalf("expected no queued or running sessions after nuke, got %#v", listResponse.Sessions)
+		t.Fatalf("expected no queued or active sessions after nuke, got %#v", listResponse.Sessions)
 	}
 }
 
@@ -477,7 +477,7 @@ func TestHandlerListSessionsSupportsCursorDirections(t *testing.T) {
 	branches := []string{"cursor-a", "cursor-b", "cursor-c", "cursor-d"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, "running")
+		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -519,11 +519,11 @@ func TestHandlerSessionNavigationWithoutParamsReturnsFirstRunningSession(t *test
 	branches := []string{"nav-a", "nav-b", "nav-c"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, "running")
+		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
-	expected := listSessions(t, server, "/sessions?status=running&limit=1")
+	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1")
 	if len(expected.Sessions) != 1 {
 		t.Fatalf("expected list returned %d sessions, want 1", len(expected.Sessions))
 	}
@@ -551,21 +551,21 @@ func TestHandlerSessionNavigationByIDMatchesSessionListing(t *testing.T) {
 	branches := []string{"nav-id-a", "nav-id-b", "nav-id-c", "nav-id-d"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, "running")
+		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
-	fullResponse := listSessions(t, server, "/sessions?status=running&limit=10")
+	fullResponse := listSessions(t, server, "/sessions?status=active.idle&limit=10")
 	anchorID := fullResponse.Sessions[1].ID
 
 	nextResponse := navigateSession(t, server, "/_session/next?id="+anchorID)
-	expectedNext := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=after")
+	expectedNext := listSessions(t, server, "/sessions?status=active.idle&limit=1&cursor="+anchorID+"&direction=after")
 	if got, want := nextResponse, expectedNext; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
 		t.Fatalf("next response = %#v, want %#v", got, want)
 	}
 
 	prevResponse := navigateSession(t, server, "/_session/prev?id="+anchorID)
-	expectedPrev := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=before")
+	expectedPrev := listSessions(t, server, "/sessions?status=active.idle&limit=1&cursor="+anchorID+"&direction=before")
 	if got, want := prevResponse, expectedPrev; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
 		t.Fatalf("prev response = %#v, want %#v", got, want)
 	}
@@ -577,15 +577,15 @@ func TestHandlerSessionNavigationIDTakesPrecedenceOverTmuxSession(t *testing.T) 
 	branches := []string{"nav-priority-a", "nav-priority-b", "nav-priority-c"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, "running")
+		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
-	fullResponse := listSessions(t, server, "/sessions?status=running&limit=10")
+	fullResponse := listSessions(t, server, "/sessions?status=active.idle&limit=10")
 	anchorID := fullResponse.Sessions[0].ID
 
 	response := navigateSession(t, server, "/_session/next?id="+anchorID+"&tmuxsession=workspace#nav-priority-c")
-	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+anchorID+"&direction=after")
+	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1&cursor="+anchorID+"&direction=after")
 	if got, want := response, expected; len(got.Sessions) != len(want.Sessions) || got.Sessions[0].ID != want.Sessions[0].ID {
 		t.Fatalf("response = %#v, want %#v", got, want)
 	}
@@ -597,16 +597,16 @@ func TestHandlerSessionNavigationByTmuxSessionResolvesCompletedSessionID(t *test
 	createEventSourcedSession(t, server, repoDir, "branch-nav-a")
 	createEventSourcedSession(t, server, repoDir, "branch-nav-b")
 	createEventSourcedSession(t, server, repoDir, "branch-nav-c")
-	waitForSessionState(t, server, "branch-nav-a", "running")
-	completedRef := waitForSessionState(t, server, "branch-nav-b", "running")
-	waitForSessionState(t, server, "branch-nav-c", "running")
+	waitForSessionState(t, server, "branch-nav-a", sessionevents.PublicStateActiveIdle)
+	completedRef := waitForSessionState(t, server, "branch-nav-b", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "branch-nav-c", sessionevents.PublicStateActiveIdle)
 	time.Sleep(2 * time.Millisecond)
 
 	completeSession(t, server, "branch-nav-b")
 	completedRef = waitForSessionState(t, server, "branch-nav-b", "completed")
 
 	response := navigateSession(t, server, "/_session/next?tmuxsession=workspace#branch-nav-b")
-	expected := listSessions(t, server, "/sessions?status=running&limit=1&cursor="+completedRef.StreamID+"&direction=after")
+	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1&cursor="+completedRef.StreamID+"&direction=after")
 	if len(expected.Sessions) == 0 {
 		t.Fatalf("expected navigation target for completed branch")
 	}
@@ -619,14 +619,14 @@ func TestHandlerSessionNavigationReturnsEmptyWhenNoMatches(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nav-empty")
-	ref := waitForSessionState(t, server, "nav-empty", "running")
+	ref := waitForSessionState(t, server, "nav-empty", sessionevents.PublicStateActiveIdle)
 
 	response := navigateSession(t, server, "/_session/next?id="+ref.StreamID)
 	if len(response.Sessions) != 0 {
 		t.Fatalf("next listed %d sessions, want 0", len(response.Sessions))
 	}
 
-	expected := listSessions(t, server, "/sessions?status=running&limit=1")
+	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1")
 	if len(expected.Sessions) != 1 {
 		t.Fatalf("expected list returned %d sessions, want 1", len(expected.Sessions))
 	}
@@ -745,7 +745,7 @@ func completeSession(t *testing.T, server *Server, branch string) {
 	}
 }
 
-func waitForSessionState(t *testing.T, server *Server, branch, wantState string) sessionevents.SessionRef {
+func waitForSessionState(t *testing.T, server *Server, branch string, wantState sessionevents.PublicState) sessionevents.SessionRef {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)

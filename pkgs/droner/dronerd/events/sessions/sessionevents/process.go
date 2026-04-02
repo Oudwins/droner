@@ -19,7 +19,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 	}
 	if err == nil {
 		switch state.LifecycleState {
-		case string(eventTypeSessionReady), string(eventTypeSessionEnvironmentProvisioningStarted), string(eventTypeSessionEnvironmentProvisioningSuccess):
+		case LifecycleStateReady, LifecycleStateEnvironmentProvisioningStarted, LifecycleStateEnvironmentProvisioningSuccess:
 			return nil
 		}
 	}
@@ -42,19 +42,19 @@ func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Enve
 	var nextType eventlog.EventType
 	var nextPayload any
 	switch state.LifecycleState {
-	case string(eventTypeSessionQueued):
+	case LifecycleStateQueued:
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
-	case string(eventTypeSessionEnvironmentProvisioningStarted):
+	case LifecycleStateEnvironmentProvisioningStarted:
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
-	case string(eventTypeSessionReady):
+	case LifecycleStateReady:
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeRestart)
-	case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted):
+	case LifecycleStateCompletionRequested, LifecycleStateCompletionStarted:
 		nextType = eventTypeSessionCompletionStarted
 		nextPayload = requestStepPayload(state.Branch)
-	case string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted):
+	case LifecycleStateDeletionRequested, LifecycleStateDeletionStarted:
 		nextType = eventTypeSessionDeletionStarted
 		nextPayload = requestStepPayload(state.Branch)
 	default:
@@ -90,7 +90,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 			ID:           state.StreamID,
 			Harness:      state.Harness,
 			Branch:       state.Branch,
-			Status:       coredb.SessionStatusRunning,
+			Status:       coredb.SessionStatusActiveIdle,
 			BackendID:    state.BackendID,
 			RepoPath:     state.RepoPath,
 			RemoteUrl:    sql.NullString{String: state.RemoteURL, Valid: state.RemoteURL != ""},
@@ -100,7 +100,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 		if hydrateErr != nil {
 			return s.appendProvisioningFailure(ctx, evt, hydrateErr)
 		}
-		if result.Status != coredb.SessionStatusRunning {
+		if result.Status != coredb.SessionStatusActiveIdle {
 			message := result.Error
 			if message == "" {
 				message = fmt.Sprintf("hydration returned %s", result.Status)
@@ -162,7 +162,7 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == string(eventTypeSessionCompletionStarted) || state.LifecycleState == string(eventTypeSessionCompletionSuccess) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == LifecycleStateCompletionStarted || state.LifecycleState == LifecycleStateCompletionSuccess || state.LifecycleState == LifecycleStateDeletionSuccess {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -178,7 +178,7 @@ func (s *System) handleCompletionStarted(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == string(eventTypeSessionCompletionSuccess) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == LifecycleStateCompletionSuccess || state.LifecycleState == LifecycleStateDeletionSuccess {
 		return nil
 	}
 	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
@@ -197,7 +197,7 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == string(eventTypeSessionDeletionStarted) || state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == LifecycleStateDeletionStarted || state.LifecycleState == LifecycleStateDeletionSuccess {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -213,7 +213,7 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if state.LifecycleState == LifecycleStateDeletionSuccess {
 		return nil
 	}
 	backend, err := s.backends.Get(conf.BackendID(state.BackendID))

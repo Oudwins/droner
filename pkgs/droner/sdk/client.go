@@ -26,11 +26,13 @@ type Client struct {
 type SessionStatus string
 
 const (
-	SessionStatusQueued     SessionStatus = "queued"
-	SessionStatusRunning    SessionStatus = "running"
-	SessionStatusCompleting SessionStatus = "completing"
-	SessionStatusDeleted    SessionStatus = "deleted"
-	SessionStatusCompleted  SessionStatus = "completed"
+	SessionStatusQueued     SessionStatus = SessionStatus(schemas.SessionPublicStateQueued)
+	SessionStatusActiveIdle SessionStatus = SessionStatus(schemas.SessionPublicStateActiveIdle)
+	SessionStatusActiveBusy SessionStatus = SessionStatus(schemas.SessionPublicStateActiveBusy)
+	SessionStatusCompleting SessionStatus = SessionStatus(schemas.SessionPublicStateCompleting)
+	SessionStatusDeleted    SessionStatus = SessionStatus(schemas.SessionPublicStateDeleted)
+	SessionStatusCompleted  SessionStatus = SessionStatus(schemas.SessionPublicStateCompleted)
+	SessionStatusFailed     SessionStatus = SessionStatus(schemas.SessionPublicStateFailed)
 )
 
 var ErrAuthRequired = errors.New("auth required")
@@ -270,12 +272,12 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 
 // ListSessionsWithParams requests sessions with optional statuses and pagination.
 // If statuses is nil or empty, no status filter is applied.
-func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []string, limit int, cursor string, direction string) (*schemas.SessionListResponse, error) {
+func (c *Client) ListSessionsWithParams(ctx context.Context, statuses []SessionStatus, limit int, cursor string, direction string) (*schemas.SessionListResponse, error) {
 	path := "/sessions"
 	q := make([]string, 0)
 	if len(statuses) > 0 {
 		for _, s := range statuses {
-			q = append(q, "status="+url.QueryEscape(s))
+			q = append(q, "status="+url.QueryEscape(string(s)))
 		}
 	}
 	if limit > 0 {

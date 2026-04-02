@@ -12,6 +12,7 @@ import (
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -33,13 +34,14 @@ const (
 )
 
 type System struct {
-	db         *sql.DB
-	queries    *coredb.Queries
-	log        eventlog.EventLog
-	logger     *slog.Logger
-	config     *conf.Config
-	backends   *backends.Store
-	remoteSubs *remoteSubscriptionState
+	db             *sql.DB
+	queries        *coredb.Queries
+	log            eventlog.EventLog
+	logger         *slog.Logger
+	config         *conf.Config
+	backends       *backends.Store
+	remoteSubs     *remoteSubscriptionState
+	runAgentEvents func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
 
 	startOnce sync.Once
 }
@@ -72,7 +74,7 @@ type ListItem struct {
 	Repo      string
 	RemoteURL string
 	Branch    string
-	State     string
+	State     PublicState
 }
 
 type SessionRef struct {
@@ -83,8 +85,8 @@ type SessionRef struct {
 	RepoPath       string
 	WorktreePath   string
 	RemoteURL      string
-	LifecycleState string
-	PublicState    string
+	LifecycleState LifecycleState
+	PublicState    PublicState
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -109,7 +111,7 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = log.Close()
 		}
 	}()
-	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState()}, nil
+	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}, nil
 }
 
 func (s *System) Close() error {
@@ -134,6 +136,7 @@ func (s *System) Start(ctx context.Context) {
 	}
 	s.startOnce.Do(func() {
 		go s.enqueueHydrationRequests(ctx)
+		go s.runAgentEventBridge(ctx)
 		go s.runSubscription(ctx, consumerProjection, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerProjection),
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
@@ -252,7 +255,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 			return nil, err
 		}
 		for _, row := range rows {
-			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
 		}
 		return items, nil
 	}
@@ -261,7 +264,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 		return nil, err
 	}
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -318,7 +321,7 @@ func (s *System) listSessionProjectionItemsAfterCursor(ctx context.Context, stat
 	}
 	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -336,7 +339,7 @@ func (s *System) listSessionProjectionItemsBeforeCursor(ctx context.Context, sta
 	}
 	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, row.PublicState))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -364,7 +367,7 @@ func (s *System) RequestCompletion(ctx context.Context, branch string) (Operatio
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if ref.LifecycleState == string(eventTypeSessionCompletionSuccess) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if ref.LifecycleState == LifecycleStateCompletionSuccess || ref.LifecycleState == LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
 	}
 	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionCompletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -378,7 +381,7 @@ func (s *System) RequestDeletion(ctx context.Context, branch string) (OperationR
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+	if ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
 	}
 	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -394,7 +397,7 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 	}
 	requested := 0
 	for _, ref := range refs {
-		if ref.LifecycleState == string(eventTypeSessionDeletionRequested) || ref.LifecycleState == string(eventTypeSessionDeletionStarted) || ref.LifecycleState == string(eventTypeSessionDeletionSuccess) {
+		if ref.LifecycleState == LifecycleStateDeletionRequested || ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
 			continue
 		}
 		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -405,12 +408,54 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 	return NukeResult{Requested: requested}, nil
 }
 
-func newListItem(id, repoPath, remoteURL, branch, state string) ListItem {
+func newListItem(id, repoPath, remoteURL, branch string, state PublicState) ListItem {
 	repo := filepath.Base(filepath.Clean(repoPath))
 	if repo == "." || repo == string(filepath.Separator) {
 		repo = ""
 	}
 	return ListItem{ID: id, Repo: repo, RemoteURL: remoteURL, Branch: branch, State: state}
+}
+
+func (s *System) runAgentEventBridge(ctx context.Context) {
+	if s == nil || s.runAgentEvents == nil || s.config == nil {
+		return
+	}
+	if err := s.runAgentEvents(ctx, s.logger, s.config.Sessions.Harness.Providers.OpenCode, s.handleAgentEvent); err != nil && !errors.Is(err, context.Canceled) {
+		s.logger.Error("agent event bridge stopped", "error", err)
+	}
+}
+
+func (s *System) handleAgentEvent(ctx context.Context, evt agentevents.Event) error {
+	ref, err := s.loadProjectionByWorktreePath(ctx, evt.WorktreePath)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if ref.Harness != conf.HarnessOpenCode.String() || !ref.LifecycleState.AllowsAgentRuntime() || ref.PublicState.IsTerminal() {
+		return nil
+	}
+
+	var (
+		eventType   eventlog.EventType
+		publicState PublicState
+	)
+	switch evt.State {
+	case agentevents.StateBusy:
+		eventType = eventTypeSessionAgentBusy
+		publicState = PublicStateActiveBusy
+	case agentevents.StateIdle:
+		eventType = eventTypeSessionAgentIdle
+		publicState = PublicStateActiveIdle
+	default:
+		return nil
+	}
+	if ref.PublicState == publicState {
+		return nil
+	}
+	_, err = s.appendEvent(ctx, ref.StreamID, eventType, requestStepPayload(ref.Branch), "", ref.StreamID)
+	return err
 }
 
 func (s *System) runSubscription(ctx context.Context, consumerName string, sub eventlog.Subscription) {

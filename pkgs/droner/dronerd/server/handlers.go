@@ -242,9 +242,9 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		return
 	}
 
-	if ref.PublicState != "running" && ref.PublicState != "completed" && ref.PublicState != "deleted" {
-		logger.Error("Complete requested for non-running session", slog.String("status", ref.PublicState), slog.String("branch", payload.Branch.String()))
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not running (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
+	if !ref.PublicState.IsActive() && ref.PublicState != sessionevents.PublicStateCompleted && ref.PublicState != sessionevents.PublicStateDeleted {
+		logger.Error("Complete requested for non-active session", slog.String("status", ref.PublicState.String()), slog.String("branch", payload.Branch.String()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not active (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
 		return
 	}
 
@@ -298,7 +298,12 @@ func (s *Server) HandlerListSessions(logger *slog.Logger, w http.ResponseWriter,
 		return
 	}
 
-	items, err := s.events.ListSessionProjections(r.Context(), q.Status, q.Limit, q.Cursor, string(q.Direction))
+	statuses := make([]string, 0, len(q.Status))
+	for _, status := range q.Status {
+		statuses = append(statuses, string(status))
+	}
+
+	items, err := s.events.ListSessionProjections(r.Context(), statuses, q.Limit, q.Cursor, string(q.Direction))
 	if err != nil {
 		logger.Error("Failed to list session projections", slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to list sessions", nil), Render.Status(http.StatusInternalServerError))
@@ -341,7 +346,7 @@ func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWri
 		}
 	}
 
-	items, err := s.events.ListSessionProjections(r.Context(), []string{"running"}, 1, cursor, direction)
+	items, err := s.events.ListSessionProjections(r.Context(), []string{string(schemas.SessionPublicStateActiveIdle)}, 1, cursor, direction)
 	if err != nil {
 		logger.Error("Failed to navigate session projections", slog.String("direction", direction), slog.String("error", err.Error()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to navigate sessions", nil), Render.Status(http.StatusInternalServerError))
@@ -373,7 +378,7 @@ func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []s
 			RemoteURL:   item.RemoteURL,
 			TmuxSession: tmuxSession,
 			Branch:      schemas.NewSBranch(item.Branch),
-			State:       item.State,
+			State:       schemas.SessionPublicState(item.State),
 		})
 	}
 	RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})

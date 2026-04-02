@@ -79,6 +79,14 @@ func (s *System) loadProjectionByBranch(ctx context.Context, branch string) (Ses
 	return sessionRefFromRow(row), nil
 }
 
+func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
+	row, err := s.queries.GetSessionProjectionByWorktreePath(ctx, worktreePath)
+	if err != nil {
+		return SessionRef{}, err
+	}
+	return sessionRefFromRow(row), nil
+}
+
 func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
 	row, err := s.queries.GetLatestNavigationSessionProjectionByBranch(ctx, branch)
 	if err != nil {
@@ -135,8 +143,8 @@ func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
 		RepoPath:       row.RepoPath,
 		WorktreePath:   row.WorktreePath,
 		RemoteURL:      row.RemoteUrl,
-		LifecycleState: row.LifecycleState,
-		PublicState:    row.PublicState,
+		LifecycleState: LifecycleState(row.LifecycleState),
+		PublicState:    PublicState(row.PublicState),
 		LastError:      row.LastError,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,

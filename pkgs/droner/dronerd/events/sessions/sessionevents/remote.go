@@ -159,7 +159,7 @@ func (s *System) handleRemoteObservationEvent(ctx context.Context, evt eventlog.
 	}
 
 	switch state.LifecycleState {
-	case string(eventTypeSessionCompletionRequested), string(eventTypeSessionCompletionStarted), string(eventTypeSessionCompletionSuccess), string(eventTypeSessionCompletionFailed), string(eventTypeSessionDeletionRequested), string(eventTypeSessionDeletionStarted), string(eventTypeSessionDeletionSuccess), string(eventTypeSessionDeletionFailed):
+	case LifecycleStateCompletionRequested, LifecycleStateCompletionStarted, LifecycleStateCompletionSuccess, LifecycleStateCompletionFailed, LifecycleStateDeletionRequested, LifecycleStateDeletionStarted, LifecycleStateDeletionSuccess, LifecycleStateDeletionFailed:
 		return nil
 	}
 

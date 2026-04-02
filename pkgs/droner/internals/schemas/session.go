@@ -116,12 +116,12 @@ type SessionDeleteRequest struct {
 }
 
 type SessionListItem struct {
-	ID          string  `json:"id"`
-	Repo        string  `json:"repo"`
-	RemoteURL   string  `json:"remoteUrl"`
-	TmuxSession string  `json:"tmuxSession"`
-	Branch      SBranch `json:"branch"`
-	State       string  `json:"state"`
+	ID          string             `json:"id"`
+	Repo        string             `json:"repo"`
+	RemoteURL   string             `json:"remoteUrl"`
+	TmuxSession string             `json:"tmuxSession"`
+	Branch      SBranch            `json:"branch"`
+	State       SessionPublicState `json:"state"`
 }
 
 type SessionListResponse struct {
@@ -130,10 +130,32 @@ type SessionListResponse struct {
 
 type SessionListDirection string
 
+type SessionPublicState string
+
 const (
 	SessionListDirectionBefore SessionListDirection = "before"
 	SessionListDirectionAfter  SessionListDirection = "after"
+
+	SessionPublicStateQueued     SessionPublicState = "queued"
+	SessionPublicStateActiveIdle SessionPublicState = "active.idle"
+	SessionPublicStateActiveBusy SessionPublicState = "active.busy"
+	SessionPublicStateCompleting SessionPublicState = "completing"
+	SessionPublicStateCompleted  SessionPublicState = "completed"
+	SessionPublicStateFailed     SessionPublicState = "failed"
+	SessionPublicStateDeleted    SessionPublicState = "deleted"
 )
+
+func SessionPublicStates() []SessionPublicState {
+	return []SessionPublicState{
+		SessionPublicStateQueued,
+		SessionPublicStateActiveIdle,
+		SessionPublicStateActiveBusy,
+		SessionPublicStateCompleting,
+		SessionPublicStateCompleted,
+		SessionPublicStateFailed,
+		SessionPublicStateDeleted,
+	}
+}
 
 var SessionDeleteSchema = z.Struct(z.Shape{
 	"Branch": branch().Required().Trim(),
@@ -149,7 +171,7 @@ var SessionCompleteSchema = z.Struct(z.Shape{
 
 // SessionListQuery represents query parameters accepted by GET /sessions.
 type SessionListQuery struct {
-	Status    []string             `zog:"status"`
+	Status    []SessionPublicState `zog:"status"`
 	Limit     int                  `zog:"limit"`
 	Cursor    string               `zog:"cursor"`
 	Direction SessionListDirection `zog:"direction"`
@@ -161,7 +183,7 @@ type SessionNavigationQuery struct {
 }
 
 var SessionListQuerySchema = z.Struct(z.Shape{
-	"Status":    z.Slice(z.String().Min(1).Required()).Optional(),
+	"Status":    z.Slice(z.StringLike[SessionPublicState]().OneOf(SessionPublicStates()).Required()).Optional(),
 	"Limit":     z.Int().Default(100).GTE(1),
 	"Cursor":    z.String().Optional(),
 	"Direction": z.StringLike[SessionListDirection]().OneOf([]SessionListDirection{SessionListDirectionBefore, SessionListDirectionAfter}).Default(SessionListDirectionAfter),

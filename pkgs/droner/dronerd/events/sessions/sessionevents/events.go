@@ -27,6 +27,8 @@ const (
 	eventTypeSessionEnvironmentProvisioningSuccess = eventlog.EventType("session.environment_provisioning.success")
 	eventTypeSessionEnvironmentProvisioningFailed  = eventlog.EventType("session.environment_provisioning.failed")
 	eventTypeSessionReady                          = eventlog.EventType("session.ready")
+	eventTypeSessionAgentBusy                      = eventlog.EventType("session.agent.busy")
+	eventTypeSessionAgentIdle                      = eventlog.EventType("session.agent.idle")
 	eventTypeSessionCompletionRequested            = eventlog.EventType("session.completion.requested")
 	eventTypeSessionCompletionStarted              = eventlog.EventType("session.completion.started")
 	eventTypeSessionCompletionSuccess              = eventlog.EventType("session.completion.success")

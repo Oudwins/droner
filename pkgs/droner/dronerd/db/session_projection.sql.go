@@ -15,7 +15,7 @@ const getLatestNavigationSessionProjectionByBranch = `-- name: GetLatestNavigati
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE branch = ?
-  AND public_state IN ('running', 'completed')
+  AND public_state IN ('active.idle', 'active.busy', 'completed')
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -95,10 +95,37 @@ func (q *Queries) GetSessionProjectionByStreamID(ctx context.Context, streamID s
 	return i, err
 }
 
+const getSessionProjectionByWorktreePath = `-- name: GetSessionProjectionByWorktreePath :one
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+FROM session_projection
+WHERE worktree_path = ?
+`
+
+func (q *Queries) GetSessionProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getSessionProjectionByWorktreePath, worktreePath)
+	var i SessionProjection
+	err := row.Scan(
+		&i.StreamID,
+		&i.Harness,
+		&i.Branch,
+		&i.BackendID,
+		&i.RepoPath,
+		&i.WorktreePath,
+		&i.RemoteUrl,
+		&i.AgentConfig,
+		&i.LifecycleState,
+		&i.PublicState,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listActiveSessionProjectionRefs = `-- name: ListActiveSessionProjectionRefs :many
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
-WHERE public_state IN ('queued', 'running')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy')
 ORDER BY updated_at DESC
 `
 
@@ -186,7 +213,7 @@ func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllS
 const listHydratableSessionProjectionRefs = `-- name: ListHydratableSessionProjectionRefs :many
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
-WHERE public_state IN ('queued', 'running', 'completing', 'deleting')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing', 'deleting')
 ORDER BY updated_at DESC
 `
 
@@ -401,7 +428,7 @@ func (q *Queries) ListSessionProjectionItemsBeforeCursorByStatuses(ctx context.C
 const listVisibleSessionProjectionItems = `-- name: ListVisibleSessionProjectionItems :many
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection
-WHERE public_state IN ('queued', 'running', 'completing')
+WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing')
 ORDER BY updated_at DESC
 LIMIT 100
 `
