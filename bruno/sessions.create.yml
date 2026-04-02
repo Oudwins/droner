@@ -1,8 +1,43 @@
-method: POST
-path: /sessions
-description: Create a new session. Expects JSON body conforming to SessionCreateRequest
-example_body:
-  path: ";/path/to/repo"
-  backendID: "local"
-  harness: "local"
-  agentConfig: null
+info:
+  name: Create Session
+  type: http
+  seq: 10
+  tags:
+    - sessions
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "path": "{{dronerRepoPath}}"
+      }
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        bru.setVar("sessionBranch", res.getBody().branch);
+
+    - type: tests
+      code: |-
+        test("returns accepted", function() {
+          expect(res.status).to.equal(202);
+        });
+
+        test("returns identifiers", function() {
+          expect(res.getBody()).to.have.property("id");
+          expect(res.getBody()).to.have.property("taskId");
+          expect(res.getBody()).to.have.property("worktreePath");
+        });
+
+docs: |-
+  Creates a session against the local droner server.
+  Set DRONER_REPO_PATH to an absolute path to a git repository before running.
+settings:
+  encodeUrl: true

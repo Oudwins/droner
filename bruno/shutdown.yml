@@ -1,3 +1,25 @@
-method: POST
-path: /shutdown
-description: Requests the server to shut down (async)
+info:
+  name: Shutdown Server
+  type: http
+  seq: 99
+  tags:
+    - dangerous
+
+http:
+  method: POST
+  url: "{{baseUrl}}/shutdown"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns accepted", function() {
+          expect(res.status).to.equal(202);
+        });
+
+        test("returns shutdown text", function() {
+          expect(res.getBody()).to.equal("Shutting down");
+        });
+
+settings:
+  encodeUrl: true

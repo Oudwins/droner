@@ -1,7 +1,36 @@
-method: GET
-path: /sessions
-description: List sessions. Supports query params: limit, cursor, status
-example_query:
-  limit: 10
-  cursor: ""
-  status: [queued, running]
+info:
+  name: List Sessions
+  type: http
+  seq: 11
+  tags:
+    - sessions
+
+http:
+  method: GET
+  url: "{{baseUrl}}/sessions"
+  params:
+    - name: limit
+      value: "10"
+      type: query
+    - name: status
+      value: queued
+      type: query
+    - name: status
+      value: running
+      type: query
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns a 200", function() {
+          expect(res.status).to.equal(200);
+        });
+
+        test("returns sessions array", function() {
+          expect(res.getBody()).to.have.property("sessions");
+          expect(res.getBody().sessions).to.be.an("array");
+        });
+
+settings:
+  encodeUrl: true

@@ -1,5 +1,35 @@
-method: POST
-path: /sessions/complete
-description: Mark a session complete. Expects JSON body { branch: string }
-example_body:
-  branch: "feature/my-session"
+info:
+  name: Complete Session
+  type: http
+  seq: 12
+  tags:
+    - sessions
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions/complete"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "branch": "{{sessionBranch}}"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns accepted", function() {
+          expect(res.status).to.equal(202);
+        });
+
+        test("returns a completion task", function() {
+          expect(res.getBody()).to.have.property("task_id");
+          expect(res.getBody().type).to.equal("session_complete");
+        });
+
+settings:
+  encodeUrl: true

@@ -1,3 +1,34 @@
-method: POST
-path: /sessions/nuke
-description: Remove all sessions (administrative). No body required
+info:
+  name: Nuke Sessions
+  type: http
+  seq: 14
+  tags:
+    - sessions
+    - dangerous
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions/nuke"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns accepted", function() {
+          expect(res.status).to.equal(202);
+        });
+
+        test("returns a nuke task", function() {
+          expect(res.getBody()).to.have.property("task_id");
+          expect(res.getBody().type).to.equal("session_nuke");
+        });
+
+settings:
+  encodeUrl: true

@@ -1,3 +1,24 @@
-method: GET
-path: /version
-description: Returns server version string
+info:
+  name: Version
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/version"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns a 200", function() {
+          expect(res.status).to.equal(200);
+        });
+
+        test("returns a non-empty version string", function() {
+          expect(res.getBody()).to.be.a("string");
+          expect(res.getBody().trim()).to.not.equal("");
+        });
+
+settings:
+  encodeUrl: true
