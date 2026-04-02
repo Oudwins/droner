@@ -1,0 +1,22 @@
+info:
+  name: Complete Session
+  type: http
+  seq: 12
+  tags:
+    - sessions
+
+http:
+  method: POST
+  url: "{{baseUrl}}/sessions/complete"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "branch": "{{sessionBranch}}"
+      }
+
+settings:
+  encodeUrl: true

@@ -1,3 +1,17 @@
-name: droner
-type: collection
-version: "1"
+opencollection: 1.0.0
+
+info:
+  name: droner
+config:
+  proxy:
+    inherit: true
+    config:
+      protocol: http
+      hostname: ""
+      port: ""
+      auth:
+        username: ""
+        password: ""
+      bypassProxy: ""
+bundled: false
+extensions: {}
