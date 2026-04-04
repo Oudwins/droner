@@ -190,6 +190,18 @@ func TestLocalBackendHydrateSessionReusesLatestSessionForDirectory(t *testing.T)
 	if !containsHydrationCall(calls, "tmux new-window") {
 		t.Fatalf("expected tmux new-window calls, got %v", calls)
 	}
+	if !containsHydrationCallWithArgs(calls, []string{"new-session", "-d", "-s", "repo#sid", "-n", "opencode", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create opencode as the first tmux window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"new-window", "-t", "repo#sid", "-n", "terminal", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create a terminal window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"new-window", "-t", "repo#sid", "-n", "terminal-split", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create a split terminal window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"split-window", "-h", "-t", "repo#sid:terminal-split", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to split the terminal window side-by-side, got %v", calls)
+	}
 	opencodeURL := fmt.Sprintf("http://%s:%d", opencodeCfg.Hostname, opencodeCfg.Port)
 	if !containsHydrationCallWithArgs(calls, []string{"opencode", "attach", opencodeURL, "--session", "latest", "--dir", worktreePath}) {
 		t.Fatalf("expected opencode window to attach latest session, got %v", calls)
@@ -290,6 +302,18 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 		t.Fatalf("timed out waiting for hydration autorun request to finish")
 	}
 	opencodeURL := fmt.Sprintf("http://%s:%d", opencodeCfg.Hostname, opencodeCfg.Port)
+	if !containsHydrationCallWithArgs(calls, []string{"new-session", "-d", "-s", "repo#sid", "-n", "opencode", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create opencode as the first tmux window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"new-window", "-t", "repo#sid", "-n", "terminal", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create a terminal window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"new-window", "-t", "repo#sid", "-n", "terminal-split", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to create a split terminal window, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"split-window", "-h", "-t", "repo#sid:terminal-split", "-c", worktreePath}) {
+		t.Fatalf("expected hydration to split the terminal window side-by-side, got %v", calls)
+	}
 	if !containsHydrationCallWithArgs(calls, []string{"opencode", "attach", opencodeURL, "--session", "created", "--dir", worktreePath}) {
 		t.Fatalf("expected opencode window to attach created session, got %v", calls)
 	}

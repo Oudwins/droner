@@ -19,7 +19,7 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 	opencodeAutorunTimeout = 250 * time.Millisecond
 	t.Cleanup(func() { opencodeAutorunTimeout = origTimeout })
 
-	// Stub execCommand so we don't require tmux/git/nvim.
+	// Stub execCommand so we don't require tmux/git/opencode.
 	origExec := execCommand
 	execCommand = func(_ string, _ ...string) *exec.Cmd {
 		return exec.Command("sh", "-c", "exit 0")

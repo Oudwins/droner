@@ -159,9 +159,6 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := l.runCursorWorktreeSetup(repoPath, worktreePath, sessionID); err != nil {
 		return err
 	}
-	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
-		return err
-	}
 	opencodeConfig := agentConfig.Opencode
 	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
 		return err
@@ -175,7 +172,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		}
 	}
 	agentConfig.Opencode = opencodeConfig
-	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
+	if err := l.createTmuxOpencodeSession(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
 	if opencodeInputHasContent(agentConfig) {
@@ -200,6 +197,9 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		}()
 	}
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
+		return err
+	}
+	if err := l.createTmuxTerminalSplitWindow(sessionName, worktreePath); err != nil {
 		return err
 	}
 	return nil
@@ -367,24 +367,16 @@ func (l LocalBackend) deleteGitBranch(commonGitDir string, sessionID string) err
 	return nil
 }
 
-func (l LocalBackend) createTmuxBaseSession(sessionName string, worktreePath string) error {
-	newSession := execCommand("tmux", "new-session", "-d", "-s", sessionName, "-n", "nvim", "-c", worktreePath, "nvim")
-	if output, err := newSession.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create tmux session: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func (l LocalBackend) createTmuxOpencodeWindow(sessionName string, worktreePath string, agentConfig AgentConfig, opencodeSessionID string) error {
+func (l LocalBackend) createTmuxOpencodeSession(sessionName string, worktreePath string, agentConfig AgentConfig, opencodeSessionID string) error {
 	opencodeURL := fmt.Sprintf("http://%s:%d", agentConfig.Opencode.Hostname, agentConfig.Opencode.Port)
-	opencodeArgs := []string{"new-window", "-t", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL}
+	opencodeArgs := []string{"new-session", "-d", "-s", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL}
 	if strings.TrimSpace(opencodeSessionID) != "" {
 		opencodeArgs = append(opencodeArgs, "--session", opencodeSessionID)
 	}
 	opencodeArgs = append(opencodeArgs, "--dir", worktreePath)
-	newOpencode := execCommand("tmux", opencodeArgs...)
-	if output, err := newOpencode.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create tmux opencode window: %s", strings.TrimSpace(string(output)))
+	newSession := execCommand("tmux", opencodeArgs...)
+	if output, err := newSession.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create tmux opencode session: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -421,6 +413,22 @@ func (l LocalBackend) createTmuxTerminalWindow(sessionName string, worktreePath 
 	return nil
 }
 
+func (l LocalBackend) createTmuxTerminalSplitWindow(sessionName string, worktreePath string) error {
+	const windowName = "terminal-split"
+
+	newTerminal := execCommand("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", worktreePath)
+	if output, err := newTerminal.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create tmux split terminal window: %s", strings.TrimSpace(string(output)))
+	}
+
+	splitTerminal := execCommand("tmux", "split-window", "-h", "-t", sessionName+":"+windowName, "-c", worktreePath)
+	if output, err := splitTerminal.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to split tmux terminal window: %s", strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
 func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName string, worktreePath string, agentConfig AgentConfig) (retErr error) {
 	defer func() {
 		if retErr == nil {
@@ -428,10 +436,6 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 		}
 		_ = l.killTmuxSession(sessionName)
 	}()
-
-	if err := l.createTmuxBaseSession(sessionName, worktreePath); err != nil {
-		return err
-	}
 
 	opencodeConfig := agentConfig.Opencode
 	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
@@ -452,7 +456,7 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 	}
 
 	agentConfig.Opencode = opencodeConfig
-	if err := l.createTmuxOpencodeWindow(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
+	if err := l.createTmuxOpencodeSession(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
 
@@ -479,6 +483,10 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 	}
 
 	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
+		return err
+	}
+
+	if err := l.createTmuxTerminalSplitWindow(sessionName, worktreePath); err != nil {
 		return err
 	}
 
