@@ -13,6 +13,7 @@ const (
 	taskIDPrefixCreate   = "session-create:"
 	taskIDPrefixComplete = "session-complete:"
 	taskIDPrefixDelete   = "session-delete:"
+	taskIDPrefixReset    = "session-reset:"
 )
 
 const (

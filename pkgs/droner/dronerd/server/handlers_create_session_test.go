@@ -20,9 +20,11 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
+	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 )
@@ -475,6 +477,79 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 	}
 	if len(listResponse.Sessions) != 0 {
 		t.Fatalf("expected no queued or active sessions after nuke, got %#v", listResponse.Sessions)
+	}
+}
+
+func TestHandlerResetSessionResetsStreamToSelectedEvent(t *testing.T) {
+	server, queries, repoDir, dataDir := newEventSourcedCreateSessionTestServer(t)
+
+	created := createEventSourcedSession(t, server, repoDir, "reset-me")
+	waitForSessionState(t, server, "reset-me", sessionevents.PublicStateActiveIdle)
+
+	log, err := sessionslog.Open(dataDir)
+	if err != nil {
+		t.Fatalf("sessionslog.Open: %v", err)
+	}
+	defer func() { _ = log.Close() }()
+
+	before, err := log.LoadStream(context.Background(), eventlog.StreamID(created.ID), eventlog.LoadStreamOptions{})
+	if err != nil {
+		t.Fatalf("LoadStream before reset: %v", err)
+	}
+	if len(before) < 2 {
+		t.Fatalf("stream length = %d, want at least 2", len(before))
+	}
+
+	payload, err := json.Marshal(schemas.SessionResetRequest{StreamID: created.ID, EventID: string(before[0].ID)})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sessions/reset", bytesReader(payload))
+	rec := httptest.NewRecorder()
+	server.HandlerResetSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	var response schemas.TaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal reset response: %v", err)
+	}
+	if response.TaskID == "" || !strings.HasPrefix(response.TaskID, "session-reset:") {
+		t.Fatalf("task id = %q, want session-reset prefix", response.TaskID)
+	}
+	if response.Type != "session_reset" {
+		t.Fatalf("task type = %q, want session_reset", response.Type)
+	}
+
+	waitForSessionState(t, server, "reset-me", sessionevents.PublicStateActiveIdle)
+	projection := waitForProjection(t, queries, "reset-me")
+	if got, want := projection.StreamID, created.ID; got != want {
+		t.Fatalf("projection stream = %q, want %q", got, want)
+	}
+
+	after, err := log.LoadStream(context.Background(), eventlog.StreamID(created.ID), eventlog.LoadStreamOptions{})
+	if err != nil {
+		t.Fatalf("LoadStream after reset: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("stream length after reset = %d, want %d", len(after), len(before))
+	}
+	if got, want := after[0].Type, before[0].Type; got != want {
+		t.Fatalf("first event type after reset = %q, want %q", got, want)
+	}
+	if after[0].ID == before[0].ID {
+		t.Fatalf("first event id was not regenerated: %q", after[0].ID)
+	}
+	if got, want := after[0].StreamVersion, int64(1); got != want {
+		t.Fatalf("first event version after reset = %d, want %d", got, want)
+	}
+	for _, evt := range after {
+		if evt.ID == before[len(before)-1].ID {
+			t.Fatalf("found deleted tail event id %q after reset", evt.ID)
+		}
 	}
 }
 

@@ -3,8 +3,10 @@ package eventdebug
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +142,59 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	}
 	if !strings.Contains(body, "took 1200ms") {
 		t.Fatalf("expected rounded elapsed time in header, body=%s", body)
+	}
+	if !strings.Contains(body, "Reset To Here") {
+		t.Fatalf("expected reset button to render, body=%s", body)
+	}
+}
+
+func TestServerResetProxyForwardsToMainServer(t *testing.T) {
+	var (
+		called  bool
+		gotBody []byte
+	)
+	mainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/sessions/reset" {
+			t.Fatalf("path = %q, want /sessions/reset", r.URL.Path)
+		}
+		var err error
+		gotBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		called = true
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer mainServer.Close()
+
+	server := NewServer(memoryStore{}, ServerOptions{MainServerURL: mainServer.URL})
+	form := url.Values{
+		"stream_id":    {"session/a"},
+		"event_id":     {"evt-1"},
+		"q":            {"session"},
+		"limit":        {"12"},
+		"stream_limit": {"34"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if !called {
+		t.Fatal("expected reset proxy to call main server")
+	}
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusSeeOther, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Location"), "/?limit=12&q=session&stream=session%2Fa&stream_limit=34"; got != want {
+		t.Fatalf("redirect location = %q, want %q", got, want)
+	}
+	if got := string(gotBody); got != `{"eventId":"evt-1","streamId":"session/a"}` {
+		t.Fatalf("forwarded body = %s", got)
 	}
 }
 

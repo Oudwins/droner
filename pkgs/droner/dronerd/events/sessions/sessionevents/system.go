@@ -12,6 +12,7 @@ import (
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	sqlite3eventlog "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
@@ -34,14 +35,15 @@ const (
 )
 
 type System struct {
-	db             *sql.DB
-	queries        *coredb.Queries
-	log            eventlog.EventLog
-	logger         *slog.Logger
-	config         *conf.Config
-	backends       *backends.Store
-	remoteSubs     *remoteSubscriptionState
-	runAgentEvents func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
+	db              *sql.DB
+	queries         *coredb.Queries
+	log             eventlog.EventLog
+	sessionsBackend *sqlite3eventlog.Backend
+	logger          *slog.Logger
+	config          *conf.Config
+	backends        *backends.Store
+	remoteSubs      *remoteSubscriptionState
+	runAgentEvents  func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
 
 	startOnce sync.Once
 }
@@ -101,16 +103,20 @@ func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore
 			_ = conn.Close()
 		}
 	}()
-	log, err := sessionslog.Open(dataDir)
+	backend, err := sessionslog.OpenBackend(dataDir)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err != nil && log != nil {
-			_ = log.Close()
+		if err != nil && backend != nil {
+			_ = backend.Close()
 		}
 	}()
-	return &System{db: conn, queries: coredb.New(conn), log: log, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}, nil
+	log, err := eventlog.New(eventlog.Config{Topic: sessionslog.Topic}, backend)
+	if err != nil {
+		return nil, err
+	}
+	return &System{db: conn, queries: coredb.New(conn), log: log, sessionsBackend: backend, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}, nil
 }
 
 func (s *System) Close() error {
@@ -418,12 +424,46 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 	return NukeResult{Requested: requested}, nil
 }
 
+func (s *System) ResetToEvent(ctx context.Context, streamID string, eventID string) (OperationResult, error) {
+	streamID = strings.TrimSpace(streamID)
+	eventID = strings.TrimSpace(eventID)
+	if streamID == "" || eventID == "" {
+		return OperationResult{}, sql.ErrNoRows
+	}
+	if s.sessionsBackend == nil {
+		return OperationResult{}, errors.New("sessions backend unavailable")
+	}
+
+	if err := s.queries.DeleteSessionProjection(ctx, streamID); err != nil {
+		return OperationResult{}, err
+	}
+	if _, err := s.sessionsBackend.ResetStreamToEvent(ctx, sessionslog.Topic, eventlog.StreamID(streamID), eventlog.EventID(eventID)); err != nil {
+		if rebuildErr := s.rebuildProjection(ctx, streamID); rebuildErr != nil {
+			s.logger.Error("failed to rebuild session projection after reset error", "stream_id", streamID, "error", rebuildErr)
+		}
+		return OperationResult{}, err
+	}
+
+	return OperationResult{TaskID: taskIDPrefixReset + streamID}, nil
+}
+
 func newListItem(id, repoPath, remoteURL, branch string, state PublicState) ListItem {
 	repo := filepath.Base(filepath.Clean(repoPath))
 	if repo == "." || repo == string(filepath.Separator) {
 		repo = ""
 	}
 	return ListItem{ID: id, Repo: repo, RemoteURL: remoteURL, Branch: branch, State: state}
+}
+
+func (s *System) rebuildProjection(ctx context.Context, streamID string) error {
+	state, err := s.loadSessionState(ctx, streamID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return s.upsertProjection(ctx, state.projectionMutation())
 }
 
 func (s *System) runAgentEventBridge(ctx context.Context) {

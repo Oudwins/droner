@@ -12,18 +12,20 @@ import (
 const defaultAddr = "localhost:57877"
 
 type Config struct {
-	Addr      string
-	DBPath    string
-	TableName string
-	Title     string
+	Addr          string
+	DBPath        string
+	TableName     string
+	Title         string
+	MainServerURL string
 }
 
 func DefaultConfig() Config {
 	return Config{
-		Addr:      defaultAddr,
-		DBPath:    sessionslog.DBPath(env.Get().DATA_DIR),
-		TableName: defaultTableName,
-		Title:     "Droner Event Debug",
+		Addr:          defaultAddr,
+		DBPath:        sessionslog.DBPath(env.Get().DATA_DIR),
+		TableName:     defaultTableName,
+		Title:         "Droner Event Debug",
+		MainServerURL: "http://localhost:57876",
 	}
 }
 
@@ -36,7 +38,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer store.Close()
 
-	if err := ListenAndServe(ctx, cfg.Addr, store, ServerOptions{Title: cfg.Title}); err != nil && err != context.Canceled {
+	if err := ListenAndServe(ctx, cfg.Addr, store, ServerOptions{Title: cfg.Title, MainServerURL: cfg.MainServerURL}); err != nil && err != context.Canceled {
 		return fmt.Errorf("run event debug server: %w", err)
 	}
 	return nil
@@ -55,6 +57,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if strings.TrimSpace(cfg.Title) == "" {
 		cfg.Title = defaults.Title
+	}
+	if strings.TrimSpace(cfg.MainServerURL) == "" {
+		cfg.MainServerURL = defaults.MainServerURL
 	}
 	return cfg
 }

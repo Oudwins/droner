@@ -169,6 +169,16 @@ var SessionCompleteSchema = z.Struct(z.Shape{
 	"Branch": branch().Required().Trim(),
 })
 
+type SessionResetRequest struct {
+	StreamID string `json:"streamId"`
+	EventID  string `json:"eventId"`
+}
+
+var SessionResetSchema = z.Struct(z.Shape{
+	"StreamID": z.String().Required().Trim(),
+	"EventID":  z.String().Required().Trim(),
+})
+
 // SessionListQuery represents query parameters accepted by GET /sessions.
 type SessionListQuery struct {
 	Status    []SessionPublicState `zog:"status"`

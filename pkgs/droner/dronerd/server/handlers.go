@@ -215,6 +215,42 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 	}, Render.Status(http.StatusAccepted))
 }
 
+func (s *Server) HandlerResetSession(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+	var payload schemas.SessionResetRequest
+	decodeErr := json.NewDecoder(r.Body).Decode(&payload)
+	if decodeErr != nil {
+		logger.Info("Json decoding failed", slog.String("err", decodeErr.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeInvalidJson, "Invalid json", nil), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	validationErrs := schemas.SessionResetSchema.Validate(&payload)
+	if validationErrs != nil {
+		flattened := z.Issues.FlattenAndCollect(validationErrs)
+		logger.Info("Schema validation failed", slog.Any("errors", flattened))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Schema validation failed", flattened), Render.Status(http.StatusBadRequest))
+		return
+	}
+
+	result, err := s.events.ResetToEvent(r.Context(), payload.StreamID, payload.EventID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeNotFound, "Session event not found", nil), Render.Status(http.StatusNotFound))
+			return
+		}
+		logger.Error("Failed to reset session to event", slog.String("stream_id", payload.StreamID), slog.String("event_id", payload.EventID), slog.String("error", err.Error()))
+		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to reset session", nil), Render.Status(http.StatusInternalServerError))
+		return
+	}
+
+	RenderJSON(w, r, schemas.TaskResponse{
+		TaskID: result.TaskID,
+		Type:   "session_reset",
+		Status: schemas.TaskStatusPending,
+		Result: &schemas.TaskResult{Requested: payload.EventID},
+	}, Render.Status(http.StatusAccepted))
+}
+
 func (s *Server) HandlerNukeSessions(logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	result, err := s.events.NukeSessions(r.Context())
 	if err != nil {

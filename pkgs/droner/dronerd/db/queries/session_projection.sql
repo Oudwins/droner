@@ -49,6 +49,10 @@ SET lifecycle_state = ?,
     updated_at = ?
 WHERE stream_id = ?;
 
+-- name: DeleteSessionProjection :exec
+DELETE FROM session_projection
+WHERE stream_id = ?;
+
 -- name: GetSessionProjectionByStreamID :one
 SELECT *
 FROM session_projection

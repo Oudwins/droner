@@ -20,6 +20,7 @@ func (s *Server) Router() http.Handler {
 		r.Post("/sessions", HandlerWithLogger(s.HandlerCreateSession))
 		r.Delete("/sessions", HandlerWithLogger(s.HandlerDeleteSession))
 		r.Post("/sessions/complete", HandlerWithLogger(s.HandlerCompleteSession))
+		r.Post("/sessions/reset", HandlerWithLogger(s.HandlerResetSession))
 		r.Post("/sessions/nuke", HandlerWithLogger(s.HandlerNukeSessions))
 	})
 

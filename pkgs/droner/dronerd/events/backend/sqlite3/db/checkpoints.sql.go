@@ -28,6 +28,19 @@ func (q *Queries) GetCheckpoint(ctx context.Context, arg GetCheckpointParams) (i
 	return last_sequence, err
 }
 
+const getMaxCheckpointSequenceForTopic = `-- name: GetMaxCheckpointSequenceForTopic :one
+SELECT COALESCE(MAX(last_sequence), 0)
+FROM event_log_checkpoints
+WHERE topic = ?
+`
+
+func (q *Queries) GetMaxCheckpointSequenceForTopic(ctx context.Context, topic string) (interface{}, error) {
+	row := q.db.QueryRowContext(ctx, getMaxCheckpointSequenceForTopic, topic)
+	var coalesce interface{}
+	err := row.Scan(&coalesce)
+	return coalesce, err
+}
+
 const upsertCheckpoint = `-- name: UpsertCheckpoint :exec
 INSERT INTO event_log_checkpoints (
   topic,

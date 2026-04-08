@@ -9,6 +9,24 @@ import (
 	"context"
 )
 
+const deleteStreamEventsFromVersion = `-- name: DeleteStreamEventsFromVersion :exec
+DELETE FROM event_log
+WHERE topic = ?
+  AND stream_id = ?
+  AND stream_version >= ?
+`
+
+type DeleteStreamEventsFromVersionParams struct {
+	Topic         string
+	StreamID      string
+	StreamVersion int64
+}
+
+func (q *Queries) DeleteStreamEventsFromVersion(ctx context.Context, arg DeleteStreamEventsFromVersionParams) error {
+	_, err := q.db.ExecContext(ctx, deleteStreamEventsFromVersion, arg.Topic, arg.StreamID, arg.StreamVersion)
+	return err
+}
+
 const getNextStreamVersion = `-- name: GetNextStreamVersion :one
 SELECT COALESCE(MAX(stream_version), 0) + 1
 FROM event_log
@@ -39,6 +57,40 @@ func (q *Queries) GetNextTopicSequence(ctx context.Context, topic string) (int64
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const getStreamEventByID = `-- name: GetStreamEventByID :one
+SELECT topic, sequence, id, stream_id, stream_version, event_type, schema_version, occurred_at, causation_id, correlation_id, payload
+FROM event_log
+WHERE topic = ?
+  AND stream_id = ?
+  AND id = ?
+LIMIT 1
+`
+
+type GetStreamEventByIDParams struct {
+	Topic    string
+	StreamID string
+	ID       string
+}
+
+func (q *Queries) GetStreamEventByID(ctx context.Context, arg GetStreamEventByIDParams) (EventLog, error) {
+	row := q.db.QueryRowContext(ctx, getStreamEventByID, arg.Topic, arg.StreamID, arg.ID)
+	var i EventLog
+	err := row.Scan(
+		&i.Topic,
+		&i.Sequence,
+		&i.ID,
+		&i.StreamID,
+		&i.StreamVersion,
+		&i.EventType,
+		&i.SchemaVersion,
+		&i.OccurredAt,
+		&i.CausationID,
+		&i.CorrelationID,
+		&i.Payload,
+	)
+	return i, err
 }
 
 const insertEvent = `-- name: InsertEvent :exec

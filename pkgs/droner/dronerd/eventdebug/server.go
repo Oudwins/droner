@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,7 @@ type ServerOptions struct {
 	Title              string
 	DefaultListLimit   int
 	DefaultStreamLimit int
+	MainServerURL      string
 }
 
 type Server struct {
@@ -25,6 +27,7 @@ type Server struct {
 	title              string
 	defaultListLimit   int
 	defaultStreamLimit int
+	mainServerURL      string
 	tmpl               *template.Template
 	mux                *http.ServeMux
 }
@@ -48,6 +51,7 @@ func NewServer(store Store, opts ServerOptions) *Server {
 		title:              title,
 		defaultListLimit:   listLimit,
 		defaultStreamLimit: streamLimit,
+		mainServerURL:      strings.TrimRight(strings.TrimSpace(opts.MainServerURL), "/"),
 		tmpl: template.Must(template.New("page").Funcs(template.FuncMap{
 			"pathEscape":              url.PathEscape,
 			"prettyJSON":              prettyJSON,
@@ -94,10 +98,60 @@ func ListenAndServe(ctx context.Context, addr string, store Store, opts ServerOp
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
+	s.mux.HandleFunc("/reset", s.handleReset)
 	s.mux.HandleFunc("/streams/", s.handleStreamPage)
 	s.mux.HandleFunc("/api/streams", s.handleListAPI)
 	s.mux.HandleFunc("/api/streams/", s.handleStreamAPI)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
+}
+
+func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	if s.mainServerURL == "" {
+		http.Error(w, "main server URL is not configured", http.StatusInternalServerError)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	streamID := strings.TrimSpace(r.FormValue("stream_id"))
+	eventID := strings.TrimSpace(r.FormValue("event_id"))
+	if streamID == "" || eventID == "" {
+		http.Error(w, "stream_id and event_id are required", http.StatusBadRequest)
+		return
+	}
+
+	payload := map[string]string{"streamId": streamID, "eventId": eventID}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode reset request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, s.mainServerURL+"/sessions/reset", bytes.NewReader(body))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to build reset request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to reset session: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		http.Error(w, fmt.Sprintf("reset request failed: %s", strings.TrimSpace(string(body))), response.StatusCode)
+		return
+	}
+
+	http.Redirect(w, r, buildSelectedStreamURL(streamID, r.Form), http.StatusSeeOther)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -217,6 +271,17 @@ func parseLimit(r *http.Request, fallback int) int {
 
 func parseStreamLimit(r *http.Request, fallback int) int {
 	return parsePositiveInt(r.URL.Query().Get("stream_limit"), fallback)
+}
+
+func buildSelectedStreamURL(streamID string, values url.Values) string {
+	q := url.Values{}
+	for _, key := range []string{"q", "limit", "stream_limit"} {
+		if value := strings.TrimSpace(values.Get(key)); value != "" {
+			q.Set(key, value)
+		}
+	}
+	q.Set("stream", streamID)
+	return "/?" + q.Encode()
 }
 
 func parsePositiveInt(raw string, fallback int) int {
@@ -523,11 +588,21 @@ const pageTemplate = `<!doctype html>
       text-align: right;
     }
     .event-type { font-weight: 700; }
-    .event-body {
-      padding: 14px;
-      display: grid;
-      gap: 12px;
-    }
+     .event-body {
+       padding: 14px;
+       display: grid;
+       gap: 12px;
+     }
+     .event-actions {
+       display: flex;
+       justify-content: flex-end;
+     }
+     .event-actions form {
+       margin: 0;
+     }
+     .event-actions button {
+       background: #8a3d2b;
+     }
     .kv {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -631,11 +706,21 @@ const pageTemplate = `<!doctype html>
                         </div>
                       </div>
                       <div class="event-body">
-                        <div class="kv">
-                          <div><strong>event id</strong><br>{{$event.ID}}</div>
-                          <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
-                          <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
-                        </div>
+                       <div class="kv">
+                         <div><strong>event id</strong><br>{{$event.ID}}</div>
+                         <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
+                         <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
+                       </div>
+                       <div class="event-actions">
+                         <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
+                           <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
+                           <input type="hidden" name="event_id" value="{{$event.ID}}">
+                           <input type="hidden" name="q" value="{{$.Query}}">
+                           <input type="hidden" name="limit" value="{{$.ListLimit}}">
+                           <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
+                           <button type="submit">Reset To Here</button>
+                         </form>
+                       </div>
                         <pre>{{prettyJSON $event.Payload}}</pre>
                       </div>
                     </article>
@@ -661,6 +746,16 @@ const pageTemplate = `<!doctype html>
                     <div><strong>event id</strong><br>{{$event.ID}}</div>
                     <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
                     <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
+                  </div>
+                  <div class="event-actions">
+                    <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
+                      <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
+                      <input type="hidden" name="event_id" value="{{$event.ID}}">
+                      <input type="hidden" name="q" value="{{$.Query}}">
+                      <input type="hidden" name="limit" value="{{$.ListLimit}}">
+                      <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
+                      <button type="submit">Reset To Here</button>
+                    </form>
                   </div>
                   <pre>{{prettyJSON $event.Payload}}</pre>
                 </div>

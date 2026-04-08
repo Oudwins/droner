@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+const deleteSessionProjection = `-- name: DeleteSessionProjection :exec
+DELETE FROM session_projection
+WHERE stream_id = ?
+`
+
+func (q *Queries) DeleteSessionProjection(ctx context.Context, streamID string) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionProjection, streamID)
+	return err
+}
+
 const getCurrentSessionProjectionByBranch = `-- name: GetCurrentSessionProjectionByBranch :one
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection

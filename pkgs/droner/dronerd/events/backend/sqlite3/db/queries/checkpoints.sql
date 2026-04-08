@@ -4,6 +4,11 @@ FROM event_log_checkpoints
 WHERE topic = ?
   AND subscriber_id = ?;
 
+-- name: GetMaxCheckpointSequenceForTopic :one
+SELECT COALESCE(MAX(last_sequence), 0)
+FROM event_log_checkpoints
+WHERE topic = ?;
+
 -- name: UpsertCheckpoint :exec
 INSERT INTO event_log_checkpoints (
   topic,

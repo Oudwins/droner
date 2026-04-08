@@ -45,6 +45,20 @@ WHERE topic = ?
 ORDER BY stream_version ASC
 LIMIT ?;
 
+-- name: GetStreamEventByID :one
+SELECT *
+FROM event_log
+WHERE topic = ?
+  AND stream_id = ?
+  AND id = ?
+LIMIT 1;
+
+-- name: DeleteStreamEventsFromVersion :exec
+DELETE FROM event_log
+WHERE topic = ?
+  AND stream_id = ?
+  AND stream_version >= ?;
+
 -- name: ReadGlobalEvents :many
 SELECT *
 FROM event_log

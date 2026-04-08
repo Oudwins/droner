@@ -18,6 +18,7 @@ func main() {
 	flag.StringVar(&cfg.DBPath, "db", cfg.DBPath, "path to sqlite database")
 	flag.StringVar(&cfg.TableName, "table", cfg.TableName, "event log table name")
 	flag.StringVar(&cfg.Title, "title", cfg.Title, "page title")
+	flag.StringVar(&cfg.MainServerURL, "server", cfg.MainServerURL, "main dronerd base URL")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
