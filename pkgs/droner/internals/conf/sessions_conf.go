@@ -106,7 +106,7 @@ var SessionsConfigSchema = z.Struct(z.Shape{
 		}),
 		"Providers": z.Struct(z.Shape{
 			"OpenCode": z.Struct(z.Shape{
-				"DefaultModel": z.String().Default("openai/gpt-5-mini").Trim(),
+				"DefaultModel": z.String().Default("openai/gpt-5").Trim(),
 				"Hostname":     z.String().Default("127.0.0.1"),
 				"Port":         z.Int().Default(4096),
 			}),
