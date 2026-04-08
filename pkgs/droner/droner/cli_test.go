@@ -72,8 +72,9 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&createRequest); err != nil {
 					t.Fatalf("decode create request: %v", err)
 				}
+				branch := schemas.NewSBranch("simple-new")
 				w.WriteHeader(http.StatusAccepted)
-				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-new", Harness: conf.HarnessOpenCode, Branch: schemas.NewSBranch("simple-new"), TaskID: "task-new"})
+				_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-new", Harness: conf.HarnessOpenCode, Branch: &branch, TaskID: "task-new"})
 				return
 			}
 			if r.Method == http.MethodDelete {

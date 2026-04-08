@@ -11,7 +11,10 @@ func PrintSessionCreated(response *schemas.SessionCreateResponse) {
 	if harness := strings.TrimSpace(response.Harness.String()); harness != "" {
 		fmt.Printf("harness: %s\n", harness)
 	}
-	branch := strings.TrimSpace(response.Branch.String())
+	branch := ""
+	if response.Branch != nil {
+		branch = strings.TrimSpace(response.Branch.String())
+	}
 	if branch != "" {
 		fmt.Printf("branch: %s\n", branch)
 	}

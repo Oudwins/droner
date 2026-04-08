@@ -5,16 +5,17 @@
 package db
 
 import (
+	"database/sql"
 	"time"
 )
 
 type SessionProjection struct {
 	StreamID       string
 	Harness        string
-	Branch         string
+	Branch         sql.NullString
 	BackendID      string
 	RepoPath       string
-	WorktreePath   string
+	WorktreePath   sql.NullString
 	RemoteUrl      string
 	AgentConfig    string
 	LifecycleState string

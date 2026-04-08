@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
+	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -19,17 +21,86 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 	}
 	if err == nil {
 		switch state.LifecycleState {
-		case LifecycleStateReady, LifecycleStateEnvironmentProvisioningStarted, LifecycleStateEnvironmentProvisioningSuccess:
+		case LifecycleStateEnrichmentRequested, LifecycleStateEnrichmentSucceeded, LifecycleStateReady, LifecycleStateEnvironmentProvisioningStarted, LifecycleStateEnvironmentProvisioningSuccess:
 			return nil
 		}
 	}
 
-	queued, err := decodeQueuedPayload(evt)
+	payload, err := decodeQueuedPayload(evt)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnvironmentProvisioningStarted, provisioningStepPayload(queued.Branch, provisioningModeInitial), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnrichmentRequested, payload, string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Envelope) error {
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
+	if err != nil {
+		return err
+	}
+
+	if state.Branch !== "" {
+		return nil
+	}
+
+	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
+	if err != nil {
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
+	}
+
+	agentConfig, err := s.agentConfigFromJSON(conf.HarnessID(state.Harness), state.AgentConfig)
+	if err != nil {
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
+	}
+
+	branch := strings.TrimSpace(state.RequestedBranch)
+	if branch == "" {
+		branch, err = sessionids.NewForCreateSession(ctx, sessionids.CreateSessionIDOptions{
+			RepoPath:    state.RepoPath,
+			Naming:      s.config.Sessions.Naming,
+			Description: agentConfig.ToDescription(),
+			MaxAttempts: 100,
+			IsValid: func(id string) error {
+				return backend.ValidateSessionID(state.RepoPath, id)
+			},
+			OnNamingError: func(err error) {
+				s.logger.Info("OpenCode naming failed; falling back to random", "stream_id", evt.StreamID, "error", err.Error())
+			},
+		})
+		if err != nil {
+			return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to generate session id: %w", err))
+		}
+		if strings.TrimSpace(branch) == "" {
+			return s.appendEnrichmentFailure(ctx, evt, errors.New("generated ID that was empty"))
+		}
+	} else if err := backend.ValidateSessionID(state.RepoPath, branch); err != nil {
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("branch is not available: %w", err))
+	}
+
+	worktreePath, err := backend.WorktreePath(state.RepoPath, branch)
+	if err != nil {
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve worktree path: %w", err))
+	}
+
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnrichmentSucceeded, newEnrichmentSucceededPayload(branch, worktreePath), string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) handleEnrichmentSucceeded(ctx context.Context, evt eventlog.Envelope) error {
+	state, err := s.loadSessionState(ctx, string(evt.StreamID))
+	if err != nil {
+		return err
+	}
+	if state.LifecycleState == LifecycleStateEnvironmentProvisioningStarted || state.LifecycleState == LifecycleStateEnvironmentProvisioningSuccess || state.LifecycleState == LifecycleStateReady {
+		return nil
+	}
+	payload, err := decodeEnrichmentSucceededPayload(evt)
+	if err != nil {
+		return err
+	}
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnvironmentProvisioningStarted, provisioningStepPayload(payload.Branch, provisioningModeInitial), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -43,6 +114,12 @@ func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Enve
 	var nextPayload any
 	switch state.LifecycleState {
 	case LifecycleStateQueued:
+		nextType = eventTypeSessionEnrichmentRequested
+		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
+	case LifecycleStateEnrichmentRequested:
+		nextType = eventTypeSessionEnrichmentRequested
+		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
+	case LifecycleStateEnrichmentSucceeded:
 		nextType = eventTypeSessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
 	case LifecycleStateEnvironmentProvisioningStarted:
@@ -216,6 +293,10 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 	if state.LifecycleState == LifecycleStateDeletionSuccess {
 		return nil
 	}
+	if strings.TrimSpace(state.WorktreePath) == "" {
+		_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
+		return err
+	}
 	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
 	if err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
@@ -224,6 +305,11 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
 	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
+	return err
+}
+
+func (s *System) appendEnrichmentFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionEnrichmentFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
 

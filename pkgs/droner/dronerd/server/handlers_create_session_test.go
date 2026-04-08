@@ -153,7 +153,7 @@ func TestHandlerCreateSessionHonorsCanceledRequestContext(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	_, err = projectionQueries.GetSessionProjectionByBranch(context.Background(), "cancelled-session")
+	_, err = projectionQueries.GetCurrentSessionProjectionByBranch(context.Background(), sql.NullString{String: "cancelled-session", Valid: true})
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected no projection row, got err=%v", err)
 	}
@@ -286,6 +286,12 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	if response.TaskID == "" {
 		t.Fatal("expected event task id")
 	}
+	if response.Branch != nil {
+		t.Fatalf("response branch = %#v, want nil until enrichment finishes", response.Branch)
+	}
+	if response.WorktreePath != nil {
+		t.Fatalf("response worktree = %#v, want nil until enrichment finishes", response.WorktreePath)
+	}
 	if response.Harness != conf.HarnessOpenCode {
 		t.Fatalf("response harness = %q, want %q", response.Harness, conf.HarnessOpenCode)
 	}
@@ -293,8 +299,8 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	if projection.Harness != conf.HarnessOpenCode.String() {
 		t.Fatalf("projection harness = %q, want %q", projection.Harness, conf.HarnessOpenCode)
 	}
-	if projection.Branch != "evented-session" {
-		t.Fatalf("projection branch = %q, want evented-session", projection.Branch)
+	if !projection.Branch.Valid || projection.Branch.String != "evented-session" {
+		t.Fatalf("projection branch = %#v, want evented-session", projection.Branch)
 	}
 
 	projectionConn, err := sql.Open("sqlite", db.DBPath(dataDir))
@@ -317,8 +323,8 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
-	createResponse := createEventSourcedSession(t, server, repoDir, "complete-me")
-	waitForSessionState(t, server, "complete-me", sessionevents.PublicStateActiveIdle)
+	createEventSourcedSession(t, server, repoDir, "complete-me")
+	ref := waitForSessionState(t, server, "complete-me", sessionevents.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("complete-me")})
 	if err != nil {
@@ -346,7 +352,7 @@ func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	if response.Status != schemas.TaskStatusPending {
 		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
 	}
-	if response.Result == nil || response.Result.Branch != "complete-me" || response.Result.WorktreePath != createResponse.WorktreePath {
+	if response.Result == nil || response.Result.Branch != "complete-me" || response.Result.WorktreePath != ref.WorktreePath {
 		t.Fatalf("unexpected task result: %#v", response.Result)
 	}
 
@@ -391,8 +397,8 @@ func TestHandlerListSessionsWithoutStatusFilterIncludesCompleted(t *testing.T) {
 func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
-	createResponse := createEventSourcedSession(t, server, repoDir, "delete-me")
-	waitForSessionState(t, server, "delete-me", sessionevents.PublicStateActiveIdle)
+	createEventSourcedSession(t, server, repoDir, "delete-me")
+	ref := waitForSessionState(t, server, "delete-me", sessionevents.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionDeleteRequest{Branch: schemas.NewSBranch("delete-me")})
 	if err != nil {
@@ -420,7 +426,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	if response.Status != schemas.TaskStatusPending {
 		t.Fatalf("task status = %q, want %q", response.Status, schemas.TaskStatusPending)
 	}
-	if response.Result == nil || response.Result.Branch != "delete-me" || createResponse.WorktreePath == "" {
+	if response.Result == nil || response.Result.Branch != "delete-me" || ref.WorktreePath == "" {
 		t.Fatalf("unexpected delete task result: %#v", response.Result)
 	}
 
@@ -769,12 +775,12 @@ func waitForProjection(t *testing.T, queries *db.Queries, branch string) db.Sess
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		projection, err := queries.GetSessionProjectionByBranch(context.Background(), branch)
+		projection, err := queries.GetCurrentSessionProjectionByBranch(context.Background(), sql.NullString{String: branch, Valid: true})
 		if err == nil {
 			return projection
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("GetSessionProjectionByBranch(%q): %v", branch, err)
+			t.Fatalf("GetCurrentSessionProjectionByBranch(%q): %v", branch, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

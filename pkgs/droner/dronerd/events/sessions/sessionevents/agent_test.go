@@ -3,7 +3,6 @@ package sessionevents
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,15 +13,18 @@ import (
 
 func TestSessionStateAppliesAgentBusyIdleWithoutChangingLifecycle(t *testing.T) {
 	queuedPayload, err := json.Marshal(newQueuedPayload(CreateSessionInput{
-		StreamID:     "stream-1",
-		Harness:      conf.HarnessOpenCode,
-		Branch:       "agent-branch",
-		BackendID:    conf.BackendLocal,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: "/tmp/repo..agent-branch",
+		StreamID:        "stream-1",
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: "agent-branch",
+		BackendID:       conf.BackendLocal,
+		RepoPath:        "/tmp/repo",
 	}))
 	if err != nil {
 		t.Fatalf("Marshal queued payload: %v", err)
+	}
+	enrichmentPayload, err := json.Marshal(newEnrichmentSucceededPayload("agent-branch", "/tmp/repo..agent-branch"))
+	if err != nil {
+		t.Fatalf("Marshal enrichment payload: %v", err)
 	}
 	requestPayload, err := json.Marshal(requestStepPayload("agent-branch"))
 	if err != nil {
@@ -41,6 +43,7 @@ func TestSessionStateAppliesAgentBusyIdleWithoutChangingLifecycle(t *testing.T) 
 
 	now := time.Now().UTC()
 	apply(eventTypeSessionQueued, queuedPayload, now)
+	apply(eventTypeSessionEnrichmentSucceeded, enrichmentPayload, now.Add(500*time.Millisecond))
 	apply(eventTypeSessionReady, requestPayload, now.Add(time.Second))
 
 	if !apply(eventTypeSessionAgentBusy, requestPayload, now.Add(2*time.Second)) {
@@ -81,12 +84,11 @@ func TestHandleAgentEventResolvesSessionByWorktreePath(t *testing.T) {
 	)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:     streamID,
-		Harness:      conf.HarnessOpenCode,
-		Branch:       branch,
-		BackendID:    conf.BackendLocal,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..agent-events-branch"),
+		StreamID:        streamID,
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: branch,
+		BackendID:       conf.BackendLocal,
+		RepoPath:        "/tmp/repo",
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

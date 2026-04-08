@@ -105,9 +105,9 @@ var SessionCreateSchema = z.Struct(z.Shape{
 type SessionCreateResponse struct {
 	ID           string         `json:"id"`
 	Harness      conf.HarnessID `json:"harness"`
-	Branch       SBranch        `json:"branch"`
+	Branch       *SBranch       `json:"branch,omitempty"`
 	BackendID    conf.BackendID `json:"backendId"`
-	WorktreePath string         `json:"worktreePath"`
+	WorktreePath *string        `json:"worktreePath,omitempty"`
 	TaskID       string         `json:"taskId"`
 }
 
@@ -120,7 +120,7 @@ type SessionListItem struct {
 	Repo        string             `json:"repo"`
 	RemoteURL   string             `json:"remoteUrl"`
 	TmuxSession string             `json:"tmuxSession"`
-	Branch      SBranch            `json:"branch"`
+	Branch      *SBranch           `json:"branch,omitempty"`
 	State       SessionPublicState `json:"state"`
 }
 

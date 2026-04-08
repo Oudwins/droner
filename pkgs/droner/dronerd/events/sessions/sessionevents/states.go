@@ -39,6 +39,9 @@ type LifecycleState string
 
 const (
 	LifecycleStateQueued                         LifecycleState = LifecycleState(eventTypeSessionQueued)
+	LifecycleStateEnrichmentRequested            LifecycleState = LifecycleState(eventTypeSessionEnrichmentRequested)
+	LifecycleStateEnrichmentSucceeded            LifecycleState = LifecycleState(eventTypeSessionEnrichmentSucceeded)
+	LifecycleStateEnrichmentFailed               LifecycleState = LifecycleState(eventTypeSessionEnrichmentFailed)
 	LifecycleStateHydrationRequested             LifecycleState = LifecycleState(eventTypeSessionHydrationRequested)
 	LifecycleStateEnvironmentProvisioningStarted LifecycleState = LifecycleState(eventTypeSessionEnvironmentProvisioningStarted)
 	LifecycleStateEnvironmentProvisioningSuccess LifecycleState = LifecycleState(eventTypeSessionEnvironmentProvisioningSuccess)

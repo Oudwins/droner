@@ -49,10 +49,9 @@ type System struct {
 type CreateSessionInput struct {
 	StreamID        string
 	Harness         conf.HarnessID
-	Branch          string
+	RequestedBranch string
 	BackendID       conf.BackendID
 	RepoPath        string
-	WorktreePath    string
 	RemoteURL       string
 	AgentConfigJSON string
 }
@@ -146,13 +145,24 @@ func (s *System) Start(ctx context.Context) {
 		go s.runSubscription(ctx, consumerCreateProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerCreateProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionQueued || evt.Type == eventTypeSessionEnvironmentProvisioningStarted
+				switch evt.Type {
+				case eventTypeSessionQueued, eventTypeSessionEnrichmentRequested, eventTypeSessionEnrichmentSucceeded, eventTypeSessionEnvironmentProvisioningStarted:
+					return true
+				default:
+					return false
+				}
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				if evt.Type == eventTypeSessionQueued {
+				switch evt.Type {
+				case eventTypeSessionQueued:
 					return s.handleQueuedEvent(ctx, evt)
+				case eventTypeSessionEnrichmentRequested:
+					return s.handleEnrichmentRequested(ctx, evt)
+				case eventTypeSessionEnrichmentSucceeded:
+					return s.handleEnrichmentSucceeded(ctx, evt)
+				default:
+					return s.handleProvisioningStarted(ctx, evt)
 				}
-				return s.handleProvisioningStarted(ctx, evt)
 			},
 		})
 		go s.runSubscription(ctx, consumerHydrationProcess, eventlog.Subscription{
@@ -255,7 +265,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 			return nil, err
 		}
 		for _, row := range rows {
-			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
+			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
 		}
 		return items, nil
 	}
@@ -264,7 +274,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 		return nil, err
 	}
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -321,7 +331,7 @@ func (s *System) listSessionProjectionItemsAfterCursor(ctx context.Context, stat
 	}
 	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -339,7 +349,7 @@ func (s *System) listSessionProjectionItemsBeforeCursor(ctx context.Context, sta
 	}
 	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, row.Branch, PublicState(row.PublicState)))
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
 	}
 	return items, nil
 }
@@ -351,7 +361,7 @@ func reverseListItems(items []ListItem) {
 }
 
 func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
-	return s.loadProjectionByBranch(ctx, branch)
+	return s.loadCurrentProjectionByBranch(ctx, branch)
 }
 
 func (s *System) LookupLatestNavigationSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {

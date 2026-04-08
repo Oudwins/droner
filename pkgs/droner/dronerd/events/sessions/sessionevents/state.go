@@ -10,19 +10,20 @@ import (
 )
 
 type sessionState struct {
-	StreamID       string
-	Harness        string
-	Branch         string
-	BackendID      string
-	RepoPath       string
-	WorktreePath   string
-	RemoteURL      string
-	AgentConfig    string
-	LifecycleState LifecycleState
-	PublicState    PublicState
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	StreamID        string
+	Harness         string
+	RequestedBranch string
+	Branch          string
+	BackendID       string
+	RepoPath        string
+	WorktreePath    string
+	RemoteURL       string
+	AgentConfig     string
+	LifecycleState  LifecycleState
+	PublicState     PublicState
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (s *System) loadSessionState(ctx context.Context, streamID string) (sessionState, error) {
@@ -75,16 +76,36 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		}
 		s.StreamID = string(evt.StreamID)
 		s.Harness = payload.Harness
-		s.Branch = payload.Branch
+		s.RequestedBranch = payload.RequestedBranch
+		s.Branch = ""
 		s.BackendID = payload.BackendID
 		s.RepoPath = payload.RepoPath
-		s.WorktreePath = payload.WorktreePath
+		s.WorktreePath = ""
 		s.RemoteURL = payload.RemoteURL
 		s.AgentConfig = payload.AgentConfigJSON
 		s.transition(LifecycleStateQueued, PublicStateQueued, "", evt.OccurredAt)
 		if s.CreatedAt.IsZero() {
 			s.CreatedAt = evt.OccurredAt.UTC()
 		}
+		return true, nil
+	case eventTypeSessionEnrichmentRequested:
+		s.transition(LifecycleStateEnrichmentRequested, PublicStateQueued, "", evt.OccurredAt)
+		return true, nil
+	case eventTypeSessionEnrichmentSucceeded:
+		payload, err := decodeEnrichmentSucceededPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.Branch = payload.Branch
+		s.WorktreePath = payload.WorktreePath
+		s.transition(LifecycleStateEnrichmentSucceeded, PublicStateQueued, "", evt.OccurredAt)
+		return true, nil
+	case eventTypeSessionEnrichmentFailed:
+		payload, err := decodeFailedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.transition(LifecycleStateEnrichmentFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
 	case eventTypeSessionHydrationRequested:
 		return false, nil
@@ -181,10 +202,10 @@ func stateFromProjection(row coredb.SessionProjection) sessionState {
 	return sessionState{
 		StreamID:       row.StreamID,
 		Harness:        row.Harness,
-		Branch:         row.Branch,
+		Branch:         nullStringValue(row.Branch),
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,
-		WorktreePath:   row.WorktreePath,
+		WorktreePath:   nullStringValue(row.WorktreePath),
 		RemoteURL:      row.RemoteUrl,
 		AgentConfig:    row.AgentConfig,
 		LifecycleState: LifecycleState(row.LifecycleState),

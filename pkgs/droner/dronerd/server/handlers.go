@@ -14,7 +14,6 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/repo"
-	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
 	"github.com/Oudwins/zog/zhttp"
 	"github.com/google/uuid"
@@ -73,7 +72,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 		logger.Warn("Failed to resolve repo remote URL; continuing without subscriptions", slog.String("error", err.Error()))
 		remoteURL = ""
 	}
-	backend, err := s.Base.BackendStore.Get(request.BackendID)
+	_, err = s.Base.BackendStore.Get(request.BackendID)
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Backend '%s' is not registered", request.BackendID), nil), Render.Status(http.StatusBadRequest))
 		return
@@ -81,50 +80,6 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 
 	logger = logger.With(slog.Any("request", request))
 	logger.Debug("Successful validation")
-
-	// LOGIC
-	// NOTE: Parallel requests with the same ID are allowed by this behaviour. Can fix this later. Its safe because create session should fail at db level
-	if request.Branch == "" {
-		description := ""
-		if request.AgentConfig != nil {
-			description = request.AgentConfig.ToDescription()
-		}
-
-		generatedID, err := sessionids.NewForCreateSession(r.Context(), sessionids.CreateSessionIDOptions{
-			RepoPath:    request.Path,
-			Naming:      s.Base.Config.Sessions.Naming,
-			Description: description,
-			MaxAttempts: 100,
-			IsValid: func(id string) error {
-				return backend.ValidateSessionID(request.Path, id)
-			},
-			OnNamingError: func(err error) {
-				logger.Info("OpenCode naming failed; falling back to random", slog.String("error", err.Error()))
-			},
-		})
-		if err != nil {
-			logger.Error("Failed to generate session id", slog.String("error", err.Error()))
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to generate session id", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-		if generatedID == "" {
-			logger.Error("Generated empty session id")
-			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Generated ID that was empty", nil), Render.Status(http.StatusInternalServerError))
-			return
-		}
-		request.Branch = schemas.NewSBranch(generatedID)
-	}
-
-	if err := backend.ValidateSessionID(request.Path, request.Branch.String()); err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, "Branch is not available", nil), Render.Status(http.StatusBadRequest))
-		return
-	}
-
-	worktreePath, err := backend.WorktreePath(request.Path, request.Branch.String())
-	if err != nil {
-		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve worktree path", nil), Render.Status(http.StatusInternalServerError))
-		return
-	}
 
 	sessionID, err := uuid.NewV7()
 	if err != nil {
@@ -145,10 +100,9 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	result, err := s.events.CreateSession(r.Context(), sessionevents.CreateSessionInput{
 		StreamID:        sessionID.String(),
 		Harness:         request.Harness,
-		Branch:          request.Branch.String(),
+		RequestedBranch: request.Branch.String(),
 		BackendID:       request.BackendID,
 		RepoPath:        request.Path,
-		WorktreePath:    worktreePath,
 		RemoteURL:       remoteURL,
 		AgentConfigJSON: agentConfigValue.String,
 	})
@@ -159,12 +113,10 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	res := schemas.SessionCreateResponse{
-		ID:           sessionID.String(),
-		Harness:      request.Harness,
-		Branch:       request.Branch,
-		BackendID:    request.BackendID,
-		WorktreePath: worktreePath,
-		TaskID:       result.TaskID,
+		ID:        sessionID.String(),
+		Harness:   request.Harness,
+		BackendID: request.BackendID,
+		TaskID:    result.TaskID,
 	}
 	RenderJSON(w, r, res, Render.Status(http.StatusAccepted))
 }
@@ -377,9 +329,17 @@ func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []s
 			Repo:        item.Repo,
 			RemoteURL:   item.RemoteURL,
 			TmuxSession: tmuxSession,
-			Branch:      schemas.NewSBranch(item.Branch),
+			Branch:      optionalBranch(item.Branch),
 			State:       schemas.SessionPublicState(item.State),
 		})
 	}
 	RenderJSON(w, r, schemas.SessionListResponse{Sessions: responseItems})
+}
+
+func optionalBranch(value string) *schemas.SBranch {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	branch := schemas.NewSBranch(value)
+	return &branch
 }

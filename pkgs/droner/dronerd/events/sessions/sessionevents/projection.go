@@ -45,10 +45,10 @@ func (s *System) upsertProjection(ctx context.Context, m projectionMutation) err
 	return s.queries.UpsertSessionProjection(ctx, coredb.UpsertSessionProjectionParams{
 		StreamID:       m.StreamID,
 		Harness:        m.Harness,
-		Branch:         m.Branch,
+		Branch:         nullableString(m.Branch),
 		BackendID:      m.BackendID,
 		RepoPath:       m.RepoPath,
-		WorktreePath:   m.WorktreePath,
+		WorktreePath:   nullableString(m.WorktreePath),
 		RemoteUrl:      m.RemoteURL,
 		AgentConfig:    m.AgentConfig,
 		LifecycleState: m.LifecycleState,
@@ -71,8 +71,8 @@ func (s *System) loadProjectionStateForUpdate(ctx context.Context, evt eventlog.
 	return state, err
 }
 
-func (s *System) loadProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
-	row, err := s.queries.GetSessionProjectionByBranch(ctx, branch)
+func (s *System) loadCurrentProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+	row, err := s.queries.GetCurrentSessionProjectionByBranch(ctx, nullableString(branch))
 	if err != nil {
 		return SessionRef{}, err
 	}
@@ -80,7 +80,7 @@ func (s *System) loadProjectionByBranch(ctx context.Context, branch string) (Ses
 }
 
 func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
-	row, err := s.queries.GetSessionProjectionByWorktreePath(ctx, worktreePath)
+	row, err := s.queries.GetSessionProjectionByWorktreePath(ctx, nullableString(worktreePath))
 	if err != nil {
 		return SessionRef{}, err
 	}
@@ -88,7 +88,7 @@ func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath 
 }
 
 func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
-	row, err := s.queries.GetLatestNavigationSessionProjectionByBranch(ctx, branch)
+	row, err := s.queries.GetLatestNavigationSessionProjectionByBranch(ctx, nullableString(branch))
 	if err != nil {
 		return SessionRef{}, err
 	}
@@ -138,10 +138,10 @@ func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
 	return SessionRef{
 		StreamID:       row.StreamID,
 		Harness:        row.Harness,
-		Branch:         row.Branch,
+		Branch:         nullStringValue(row.Branch),
 		BackendID:      row.BackendID,
 		RepoPath:       row.RepoPath,
-		WorktreePath:   row.WorktreePath,
+		WorktreePath:   nullStringValue(row.WorktreePath),
 		RemoteURL:      row.RemoteUrl,
 		LifecycleState: LifecycleState(row.LifecycleState),
 		PublicState:    PublicState(row.PublicState),
@@ -149,4 +149,18 @@ func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+func nullableString(value string) sql.NullString {
+	if value == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
+}
+
+func nullStringValue(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }

@@ -54,10 +54,12 @@ SELECT *
 FROM session_projection
 WHERE stream_id = ?;
 
--- name: GetSessionProjectionByBranch :one
+-- name: GetCurrentSessionProjectionByBranch :one
 SELECT *
 FROM session_projection
-WHERE branch = ?;
+WHERE branch = ?
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: GetSessionProjectionByWorktreePath :one
 SELECT *

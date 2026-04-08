@@ -22,6 +22,9 @@ const (
 
 const (
 	eventTypeSessionQueued                         = eventlog.EventType("session.queued")
+	eventTypeSessionEnrichmentRequested            = eventlog.EventType("session.enrichment.requested")
+	eventTypeSessionEnrichmentSucceeded            = eventlog.EventType("session.enrichment.succeeded")
+	eventTypeSessionEnrichmentFailed               = eventlog.EventType("session.enrichment.failed")
 	eventTypeSessionHydrationRequested             = eventlog.EventType("session.hydration.requested")
 	eventTypeSessionEnvironmentProvisioningStarted = eventlog.EventType("session.environment_provisioning.started")
 	eventTypeSessionEnvironmentProvisioningSuccess = eventlog.EventType("session.environment_provisioning.success")
@@ -45,10 +48,9 @@ const (
 type queuedPayload struct {
 	StreamID        string `json:"streamId"`
 	Harness         string `json:"harness"`
-	Branch          string `json:"branch"`
+	RequestedBranch string `json:"requestedBranch,omitempty"`
 	BackendID       string `json:"backendId"`
 	RepoPath        string `json:"repoPath"`
-	WorktreePath    string `json:"worktreePath"`
 	RemoteURL       string `json:"remoteUrl,omitempty"`
 	AgentConfigJSON string `json:"agentConfigJson,omitempty"`
 }
@@ -60,6 +62,11 @@ type failedPayload struct {
 
 type branchPayload struct {
 	Branch string `json:"branch"`
+}
+
+type enrichmentSucceededPayload struct {
+	Branch       string `json:"branch"`
+	WorktreePath string `json:"worktreePath"`
 }
 
 type provisioningPayload struct {
@@ -79,10 +86,9 @@ func newQueuedPayload(input CreateSessionInput) queuedPayload {
 	return queuedPayload{
 		StreamID:        input.StreamID,
 		Harness:         input.Harness.String(),
-		Branch:          input.Branch,
+		RequestedBranch: input.RequestedBranch,
 		BackendID:       input.BackendID.String(),
 		RepoPath:        input.RepoPath,
-		WorktreePath:    input.WorktreePath,
 		RemoteURL:       input.RemoteURL,
 		AgentConfigJSON: input.AgentConfigJSON,
 	}
@@ -95,6 +101,10 @@ func newFailedPayload(err error) failedPayload {
 
 func newBranchPayload(branch string) branchPayload {
 	return branchPayload{Branch: branch}
+}
+
+func newEnrichmentSucceededPayload(branch string, worktreePath string) enrichmentSucceededPayload {
+	return enrichmentSucceededPayload{Branch: branch, WorktreePath: worktreePath}
 }
 
 func decodeQueuedPayload(evt eventlog.Envelope) (queuedPayload, error) {
@@ -111,6 +121,12 @@ func decodeFailedPayload(evt eventlog.Envelope) (failedPayload, error) {
 
 func decodeBranchPayload(evt eventlog.Envelope) (branchPayload, error) {
 	var payload branchPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
+func decodeEnrichmentSucceededPayload(evt eventlog.Envelope) (enrichmentSucceededPayload, error) {
+	var payload enrichmentSucceededPayload
 	err := json.Unmarshal(evt.Payload, &payload)
 	return payload, err
 }
@@ -140,14 +156,6 @@ func newPendingEvent(streamID string, eventType eventlog.EventType, payload any,
 		CausationID:   eventlog.EventID(causationID),
 		CorrelationID: correlationID,
 	}, nil
-}
-
-func provisionStartedPayload(queued queuedPayload) map[string]string {
-	return map[string]string{"branch": queued.Branch}
-}
-
-func readyStepPayload(queued queuedPayload) map[string]string {
-	return map[string]string{"branch": queued.Branch}
 }
 
 func requestStepPayload(branch string) branchPayload {

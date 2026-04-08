@@ -267,13 +267,12 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 	)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:     streamID,
-		Harness:      conf.HarnessOpenCode,
-		Branch:       branch,
-		BackendID:    conf.BackendLocal,
-		RepoPath:     repoPath,
-		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..watch-branch"),
-		RemoteURL:    remoteURL,
+		StreamID:        streamID,
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: branch,
+		BackendID:       conf.BackendLocal,
+		RepoPath:        repoPath,
+		RemoteURL:       remoteURL,
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -326,12 +325,11 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 	)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:     streamID,
-		Harness:      conf.HarnessOpenCode,
-		Branch:       branch,
-		BackendID:    conf.BackendLocal,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: filepath.Join(dataDir, "worktrees", "repo..hydrate-branch"),
+		StreamID:        streamID,
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: branch,
+		BackendID:       conf.BackendLocal,
+		RepoPath:        "/tmp/repo",
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -389,12 +387,11 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 	system, backend, dataDir, _ := newRemoteTestSystem(t)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:     "old-stream",
-		Harness:      conf.HarnessOpenCode,
-		Branch:       "old-branch",
-		BackendID:    conf.BackendLocal,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: filepath.Join(backend.worktreeRoot, "repo..old-branch"),
+		StreamID:        "old-stream",
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: "old-branch",
+		BackendID:       conf.BackendLocal,
+		RepoPath:        "/tmp/repo",
 	}); err != nil {
 		t.Fatalf("CreateSession old: %v", err)
 	}
@@ -405,12 +402,11 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 	waitForPublicState(t, system, "old-branch", PublicStateCompleted)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:     "new-stream",
-		Harness:      conf.HarnessOpenCode,
-		Branch:       "new-branch",
-		BackendID:    conf.BackendLocal,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: filepath.Join(backend.worktreeRoot, "repo..new-branch"),
+		StreamID:        "new-stream",
+		Harness:         conf.HarnessOpenCode,
+		RequestedBranch: "new-branch",
+		BackendID:       conf.BackendLocal,
+		RepoPath:        "/tmp/repo",
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

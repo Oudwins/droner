@@ -42,8 +42,9 @@ func TestClientSessionFlows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /sessions":
+			branch := schemas.NewSBranch("simple-1")
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-1", Harness: conf.HarnessOpenCode, Branch: schemas.NewSBranch("simple-1"), TaskID: "task1"})
+			_ = json.NewEncoder(w).Encode(&schemas.SessionCreateResponse{ID: "stream-1", Harness: conf.HarnessOpenCode, Branch: &branch, TaskID: "task1"})
 		case http.MethodDelete + " /sessions":
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(&schemas.TaskResponse{TaskID: "task2", Status: schemas.TaskStatusPending, Type: "session_delete"})
@@ -61,8 +62,8 @@ func TestClientSessionFlows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if createResp.Branch != "simple-1" {
-		t.Fatalf("unexpected branch %s", createResp.Branch)
+	if createResp.Branch == nil || *createResp.Branch != "simple-1" {
+		t.Fatalf("unexpected branch %#v", createResp.Branch)
 	}
 	if createResp.Harness != conf.HarnessOpenCode {
 		t.Fatalf("unexpected harness %s", createResp.Harness)

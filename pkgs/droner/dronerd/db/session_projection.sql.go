@@ -11,17 +11,16 @@ import (
 	"time"
 )
 
-const getLatestNavigationSessionProjectionByBranch = `-- name: GetLatestNavigationSessionProjectionByBranch :one
+const getCurrentSessionProjectionByBranch = `-- name: GetCurrentSessionProjectionByBranch :one
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE branch = ?
-  AND public_state IN ('active.idle', 'active.busy', 'completed')
 ORDER BY created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestNavigationSessionProjectionByBranch(ctx context.Context, branch string) (SessionProjection, error) {
-	row := q.db.QueryRowContext(ctx, getLatestNavigationSessionProjectionByBranch, branch)
+func (q *Queries) GetCurrentSessionProjectionByBranch(ctx context.Context, branch sql.NullString) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getCurrentSessionProjectionByBranch, branch)
 	var i SessionProjection
 	err := row.Scan(
 		&i.StreamID,
@@ -41,14 +40,17 @@ func (q *Queries) GetLatestNavigationSessionProjectionByBranch(ctx context.Conte
 	return i, err
 }
 
-const getSessionProjectionByBranch = `-- name: GetSessionProjectionByBranch :one
+const getLatestNavigationSessionProjectionByBranch = `-- name: GetLatestNavigationSessionProjectionByBranch :one
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE branch = ?
+  AND public_state IN ('active.idle', 'active.busy', 'completed')
+ORDER BY created_at DESC
+LIMIT 1
 `
 
-func (q *Queries) GetSessionProjectionByBranch(ctx context.Context, branch string) (SessionProjection, error) {
-	row := q.db.QueryRowContext(ctx, getSessionProjectionByBranch, branch)
+func (q *Queries) GetLatestNavigationSessionProjectionByBranch(ctx context.Context, branch sql.NullString) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getLatestNavigationSessionProjectionByBranch, branch)
 	var i SessionProjection
 	err := row.Scan(
 		&i.StreamID,
@@ -101,7 +103,7 @@ FROM session_projection
 WHERE worktree_path = ?
 `
 
-func (q *Queries) GetSessionProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionProjection, error) {
+func (q *Queries) GetSessionProjectionByWorktreePath(ctx context.Context, worktreePath sql.NullString) (SessionProjection, error) {
 	row := q.db.QueryRowContext(ctx, getSessionProjectionByWorktreePath, worktreePath)
 	var i SessionProjection
 	err := row.Scan(
@@ -177,7 +179,7 @@ type ListAllSessionProjectionItemsRow struct {
 	StreamID    string
 	RepoPath    string
 	RemoteUrl   string
-	Branch      string
+	Branch      sql.NullString
 	PublicState string
 }
 
@@ -326,7 +328,7 @@ type ListSessionProjectionItemsAfterCursorByStatusesRow struct {
 	StreamID    string
 	RepoPath    string
 	RemoteUrl   string
-	Branch      string
+	Branch      sql.NullString
 	PublicState string
 }
 
@@ -386,7 +388,7 @@ type ListSessionProjectionItemsBeforeCursorByStatusesRow struct {
 	StreamID    string
 	RepoPath    string
 	RemoteUrl   string
-	Branch      string
+	Branch      sql.NullString
 	PublicState string
 }
 
@@ -437,7 +439,7 @@ type ListVisibleSessionProjectionItemsRow struct {
 	StreamID    string
 	RepoPath    string
 	RemoteUrl   string
-	Branch      string
+	Branch      sql.NullString
 	PublicState string
 }
 
@@ -545,10 +547,10 @@ ON CONFLICT(stream_id) DO UPDATE SET
 type UpsertSessionProjectionParams struct {
 	StreamID       string
 	Harness        string
-	Branch         string
+	Branch         sql.NullString
 	BackendID      string
 	RepoPath       string
-	WorktreePath   string
+	WorktreePath   sql.NullString
 	RemoteUrl      string
 	AgentConfig    string
 	LifecycleState string

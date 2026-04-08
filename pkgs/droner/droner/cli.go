@@ -305,7 +305,11 @@ func newSessionsCmd() *cobra.Command {
 			writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(writer, "id\trepo\tremoteUrl\tbranch\tstate")
 			for _, session := range response.Sessions {
-				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", session.ID, session.Repo, session.RemoteURL, session.Branch, session.State)
+				branch := ""
+				if session.Branch != nil {
+					branch = session.Branch.String()
+				}
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", session.ID, session.Repo, session.RemoteURL, branch, session.State)
 			}
 			writer.Flush()
 			return nil
