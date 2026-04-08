@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/eventdebug"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
@@ -177,5 +179,42 @@ func TestCLIVersionFlagServerNotRunning(t *testing.T) {
 	}
 	if !strings.Contains(output, "server: (not running)") {
 		t.Fatalf("expected not running, got %q", output)
+	}
+}
+
+func TestCLIDebuggerCommand(t *testing.T) {
+	origRun := runEventDebugServer
+	t.Cleanup(func() {
+		runEventDebugServer = origRun
+	})
+
+	var gotCfg eventdebug.Config
+	runEventDebugServer = func(_ context.Context, cfg eventdebug.Config) error {
+		gotCfg = cfg
+		return nil
+	}
+
+	if err := executeCLI([]string{"debugger"}); err != nil {
+		t.Fatalf("run debugger: %v", err)
+	}
+
+	defaults := eventdebug.DefaultConfig()
+	if gotCfg != defaults {
+		t.Fatalf("config = %#v, want %#v", gotCfg, defaults)
+	}
+	if _, _, err := newRootCmd().Find([]string{"debugger"}); err != nil {
+		t.Fatalf("expected debugger command to be registered: %v", err)
+	}
+	if _, _, err := newRootCmd().Find([]string{"eventdebug"}); err != nil {
+		t.Fatalf("expected eventdebug alias to be registered: %v", err)
+	}
+	debuggerCmd, _, err := newRootCmd().Find([]string{"debugger"})
+	if err != nil {
+		t.Fatalf("find debugger command: %v", err)
+	}
+	for _, name := range []string{"addr", "db", "table", "title"} {
+		if flag := debuggerCmd.Flags().Lookup(name); flag != nil {
+			t.Fatalf("unexpected debugger flag registered: %s", name)
+		}
 	}
 }

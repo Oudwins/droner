@@ -5,33 +5,27 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
-	"github.com/Oudwins/droner/pkgs/droner/internals/env"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/eventdebug"
 )
 
 func main() {
-	defaultDBPath := sessionslog.DBPath(env.Get().DATA_DIR)
-
-	addr := flag.String("addr", "localhost:57877", "listen address")
-	dbPath := flag.String("db", defaultDBPath, "path to sqlite database")
-	tableName := flag.String("table", "event_log", "event log table name")
-	title := flag.String("title", "Droner Event Debug", "page title")
+	cfg := eventdebug.DefaultConfig()
+	flag.StringVar(&cfg.Addr, "addr", cfg.Addr, "listen address")
+	flag.StringVar(&cfg.DBPath, "db", cfg.DBPath, "path to sqlite database")
+	flag.StringVar(&cfg.TableName, "table", cfg.TableName, "event log table name")
+	flag.StringVar(&cfg.Title, "title", cfg.Title, "page title")
 	flag.Parse()
-
-	store, err := OpenSQLite(*dbPath, SQLiteStoreOptions{TableName: *tableName})
-	if err != nil {
-		log.Fatal(fmt.Errorf("open event debug store: %w", err))
-	}
-	defer store.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("event debug listening on http://%s (db=%s, table=%s)", *addr, *dbPath, *tableName)
-	if err := ListenAndServe(ctx, *addr, store, ServerOptions{Title: *title}); err != nil && err != context.Canceled {
-		log.Fatal(fmt.Errorf("run event debug server: %w", err))
+	log.SetOutput(os.Stdout)
+	log.Printf("event debug listening on http://%s (db=%s, table=%s)", cfg.Addr, cfg.DBPath, cfg.TableName)
+	if err := eventdebug.Run(ctx, cfg); err != nil {
+		log.Fatal(fmt.Errorf("event debug failed: %w", err))
 	}
 }

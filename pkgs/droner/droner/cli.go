@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/eventdebug"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/server"
 	"github.com/Oudwins/droner/pkgs/droner/internals/cliutil"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -88,6 +91,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newServeCmd(),
+		newDebuggerCmd(),
 		newTUICmd(),
 		newNewCmd(),
 		newDelCmd(),
@@ -98,6 +102,8 @@ func newRootCmd() *cobra.Command {
 
 	return cmd
 }
+
+var runEventDebugServer = eventdebug.Run
 
 func newTUICmd() *cobra.Command {
 	return &cobra.Command{
@@ -178,6 +184,19 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&args.Detach, "detach", "d", false, "run server in background")
+	return cmd
+}
+
+func newDebuggerCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "debugger",
+		Aliases: []string{"eventdebug"},
+		Short:   "Start the debug event server",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runDebuggerServer()
+		},
+	}
 	return cmd
 }
 
@@ -365,6 +384,13 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	}
 	cliutil.PrintSessionCreated(response)
 	return nil
+}
+
+func runDebuggerServer() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	return runEventDebugServer(ctx, eventdebug.DefaultConfig())
 }
 
 func isInteractiveTerminal() bool {

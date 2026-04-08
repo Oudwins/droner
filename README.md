@@ -1,11 +1,11 @@
 # Droner
 
-Droner manages coding sessions in git worktrees and opens each session in a tmux workspace with `nvim`, `opencode`, and a shell ready to go.
+Droner manages coding sessions in git worktrees and opens each session in a tmux workspace with `opencode`, a shell, and a split shell window ready to go.
 
 ## What it does
 
 - creates a new git worktree per session
-- starts a tmux session with `nvim`, `opencode`, and `terminal` windows
+- starts a tmux session with `opencode`, `terminal`, and `terminal-split` windows
 - optionally seeds the agent with a model, agent name, and prompt
 - tracks long-running work as async tasks through a local HTTP server
 - can keep completed worktrees around or fully delete them later
@@ -18,7 +18,6 @@ Worktrees are named `<repo>..<session-id>`.
 - Go 1.22+ if building from source
 - `git`
 - `tmux`
-- `nvim`
 - `opencode`
 
 ## Installation

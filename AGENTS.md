@@ -9,6 +9,7 @@
 ## Repository quick map
 - Go module lives in `pkgs/droner` (module name `droner`, Go 1.22).
 - Server entry points live under `pkgs/droner/dronerd/cmd`: dronerd startup code is shared in `cmd/cmd.go`, the dronerd binary is in `cmd/dronerd`, and the event debug command plus its helpers live in `cmd/eventdebug`.
+- The reusable event debug server package now lives in `pkgs/droner/dronerd/eventdebug`; `cmd/eventdebug` is the standalone wrapper and the bundled CLI entrypoint is `droner debugger`.
 - Dronerd's SQLite package and `sqlc` output live under `pkgs/droner/dronerd/db`, with queries in `db/queries` and Goose migrations in `db/migrations`.
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Shared cross-package helpers live under `pkgs/droner/internals/...`; dronerd-only helpers now live under `pkgs/droner/dronerd/internals/...`.
