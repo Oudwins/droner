@@ -26,7 +26,7 @@ func NewForCreateSession(ctx context.Context, opts CreateSessionIDOptions) (stri
 		opts.MaxAttempts = 100
 	}
 	if opts.IsValid == nil {
-		return "", fmt.Errorf("missing IsValid")
+		opts.IsValid = func(string) error { return nil }
 	}
 
 	promptText := strings.TrimSpace(opts.Description)

@@ -51,19 +51,6 @@ func tmuxSessionNameFromWorktreePath(worktreePath string) string {
 	return fmt.Sprintf("%s#%s", parts[0], parts[1])
 }
 
-func (l LocalBackend) ValidateSessionID(repoPath string, sessionID string) error {
-	worktreePath, err := l.WorktreePath(repoPath, sessionID)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(worktreePath); err == nil {
-		return errors.New("session folder already exists")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat worktree path: %w", err)
-	}
-	return nil
-}
-
 func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error) {
 	sessionName := tmuxSessionName(session.RepoPath, session.Branch)
 	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.Branch) == "" {
@@ -317,11 +304,59 @@ func (l LocalBackend) CompleteSession(_ context.Context, worktreePath string, se
 }
 
 func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string) error {
-	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath)
+	if strings.TrimSpace(branchName) == "" {
+		return errors.New("branch name is required")
+	}
+
+	localBranchExists, err := l.gitRefExists(repoPath, "refs/heads/"+branchName)
+	if err != nil {
+		return err
+	}
+	if localBranchExists {
+		cmd := execCommand("git", "-C", repoPath, "worktree", "add", "--force", worktreePath, branchName)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to create worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+		}
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			return fmt.Errorf("failed to create worktree directory: %w", err)
+		}
+		return nil
+	}
+
+	baseRef := ""
+	remoteBranchExists, err := l.gitRefExists(repoPath, "refs/remotes/origin/"+branchName)
+	if err != nil {
+		return err
+	}
+	if remoteBranchExists {
+		baseRef = "refs/remotes/origin/" + branchName
+	} else {
+		baseRef, err = l.resolveBaseRef(repoPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	cmd := execCommand("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseRef)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
 	}
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		return fmt.Errorf("failed to create worktree directory: %w", err)
+	}
 	return nil
+}
+
+func (l LocalBackend) gitRefExists(repoPath string, ref string) (bool, error) {
+	check := execCommand("git", "-C", repoPath, "show-ref", "--verify", "--quiet", ref)
+	if err := check.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check git ref %q: %w", ref, err)
+	}
+	return true, nil
 }
 
 func (l LocalBackend) removeGitWorktree(worktreePath string) error {

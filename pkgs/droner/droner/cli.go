@@ -30,16 +30,12 @@ import (
 )
 
 type NewArgs struct {
-	Path      string `zog:"path"`
-	Branch    string `zog:"branch"`
 	Model     string `zog:"model"`
 	AgentName string `zog:"agent"`
 	Prompt    string `zog:"prompt"`
 }
 
 var newArgsSchema = z.Struct(z.Shape{
-	"Path":      z.String().Optional().Trim(),
-	"Branch":    z.String().Optional().Trim(),
 	"Model":     z.String().Optional().Trim(),
 	"AgentName": z.String().Optional().Trim(),
 	"Prompt":    z.String().Optional().Trim(),
@@ -108,19 +104,23 @@ var runEventDebugServer = eventdebug.Run
 
 func newTUICmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "tui",
+		Use:   "tui [repo[@branch]|@branch]",
 		Short: "Open the Droner TUI",
-		Args:  cobra.NoArgs,
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runTUICmd,
 	}
 }
 
-func runTUICmd(cmd *cobra.Command, _ []string) error {
+func runTUICmd(cmd *cobra.Command, inputs []string) error {
 	if !isInteractiveTerminal() {
 		return cmd.Usage()
 	}
+	target, err := resolveSessionTargetFromInputs(inputs)
+	if err != nil {
+		return err
+	}
 	client := sdk.NewClient()
-	return tui.Run(client)
+	return tui.Run(client, target.RepoPath, target.Branch)
 }
 
 func printVersionInfo(cmd *cobra.Command) {
@@ -204,19 +204,17 @@ func newDebuggerCmd() *cobra.Command {
 func newNewCmd() *cobra.Command {
 	args := NewArgs{}
 	cmd := &cobra.Command{
-		Use:   "new",
+		Use:   "new [repo[@branch]|@branch]",
 		Short: "Create a new session",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, inputs []string) error {
 
 			includeAgentConfig := cmd.Flags().Changed("model") || cmd.Flags().Changed("agent") || cmd.Flags().Changed("prompt") || args.Model != "" || args.AgentName != "" || args.Prompt != ""
 
-			return runCreateSession(&args, includeAgentConfig)
+			return runCreateSession(resolveOptionalInput(inputs), &args, includeAgentConfig)
 		},
 	}
 
-	cmd.Flags().StringVar(&args.Path, "path", "", "path to the repository")
-	cmd.Flags().StringVar(&args.Branch, "branch", "", "branch name")
 	cmd.Flags().StringVar(&args.Model, "model", "", "agent model")
 	cmd.Flags().StringVar(&args.AgentName, "agent", "", "opencode agent")
 	cmd.Flags().StringVar(&args.Prompt, "prompt", "", "agent prompt")
@@ -353,14 +351,11 @@ func validateDelArgs(payload *DelArgs) error {
 	return nil
 }
 
-func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
+func runCreateSession(locator string, args *NewArgs, includeAgentConfig bool) error {
 	client := sdk.NewClient()
-	if args.Path == "" {
-		repoRoot, err := cliutil.RepoRootFromCwd()
-		if err != nil {
-			return err
-		}
-		args.Path = repoRoot
+	target, err := cliutil.ResolveSessionTarget(locator)
+	if err != nil {
+		return err
 	}
 	if err := validateNewArgs(args); err != nil {
 		return err
@@ -370,7 +365,7 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
-	request := schemas.SessionCreateRequest{Path: args.Path, Branch: schemas.NewSBranch(args.Branch)}
+	request := schemas.SessionCreateRequest{Path: target.RepoPath, Branch: schemas.NewSBranch(target.Branch)}
 	if includeAgentConfig {
 		agentConfig := &schemas.SessionAgentConfig{Model: args.Model, AgentName: strings.TrimSpace(args.AgentName)}
 		prompt := strings.TrimSpace(args.Prompt)
@@ -385,6 +380,17 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	}
 	cliutil.PrintSessionCreated(response)
 	return nil
+}
+
+func resolveSessionTargetFromInputs(inputs []string) (cliutil.SessionTarget, error) {
+	return cliutil.ResolveSessionTarget(resolveOptionalInput(inputs))
+}
+
+func resolveOptionalInput(inputs []string) string {
+	if len(inputs) == 0 {
+		return ""
+	}
+	return inputs[0]
 }
 
 func runDebuggerServer(out io.Writer) error {

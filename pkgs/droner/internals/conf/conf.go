@@ -17,6 +17,7 @@ import (
 
 type Config struct {
 	Version   string          `json:"-"`
+	Projects  ProjectsConfig  `json:"projects" zog:"projects"`
 	Providers ProvidersConfig `json:"providers"`
 	Sessions  SessionsConfig  `json:"sessions"`
 	TUI       TUIConfig       `json:"tui" zog:"tui"`
@@ -42,6 +43,7 @@ var providersSchema = z.Struct(z.Shape{
 })
 
 var ConfigSchema = z.Struct(z.Shape{
+	"Projects":  ProjectsConfigSchema,
 	"Providers": providersSchema,
 	"Sessions":  SessionsConfigSchema,
 	"TUI":       TUIConfigSchema,

@@ -41,10 +41,6 @@ func (b *createSessionBackend) WorktreePath(repoPath string, sessionID string) (
 	return filepath.Join(b.worktreeRoot, filepath.Base(repoPath)+".."+sessionID), nil
 }
 
-func (b *createSessionBackend) ValidateSessionID(repoPath string, sessionID string) error {
-	return nil
-}
-
 func (b *createSessionBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	return nil
 }

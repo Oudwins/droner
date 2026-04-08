@@ -37,10 +37,6 @@ func (b *remoteTestBackend) WorktreePath(repoPath string, sessionID string) (str
 	return filepath.Join(b.worktreeRoot, filepath.Base(repoPath)+".."+sessionID), nil
 }
 
-func (b *remoteTestBackend) ValidateSessionID(repoPath string, sessionID string) error {
-	return nil
-}
-
 func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	b.mu.Lock()
 	b.createCalls++

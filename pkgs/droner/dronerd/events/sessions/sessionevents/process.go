@@ -45,11 +45,6 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 		return nil
 	}
 
-	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
-	if err != nil {
-		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
-	}
-
 	agentConfig, err := s.agentConfigFromJSON(conf.HarnessID(state.Harness), state.AgentConfig)
 	if err != nil {
 		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to decode agent config: %w", err))
@@ -62,9 +57,6 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 			Naming:      s.config.Sessions.Naming,
 			Description: agentConfig.ToDescription(),
 			MaxAttempts: 100,
-			IsValid: func(id string) error {
-				return backend.ValidateSessionID(state.RepoPath, id)
-			},
 			OnNamingError: func(err error) {
 				s.logger.Info("OpenCode naming failed; falling back to random", "stream_id", evt.StreamID, "error", err.Error())
 			},
@@ -75,8 +67,11 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 		if strings.TrimSpace(branch) == "" {
 			return s.appendEnrichmentFailure(ctx, evt, errors.New("generated ID that was empty"))
 		}
-	} else if err := backend.ValidateSessionID(state.RepoPath, branch); err != nil {
-		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("branch is not available: %w", err))
+	}
+
+	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
+	if err != nil {
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
 	}
 
 	worktreePath, err := backend.WorktreePath(state.RepoPath, branch)

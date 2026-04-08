@@ -8,7 +8,11 @@ import (
 )
 
 func RepoRootFromCwd() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	return RepoRootFromPath(".")
+}
+
+func RepoRootFromPath(path string) (string, error) {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine repo root: %s", strings.TrimSpace(string(output)))

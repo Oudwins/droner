@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,6 +53,7 @@ func executeCLI(args []string) error {
 func setupCLIEnv(t *testing.T, baseURL string) {
 	config := conf.GetConfig()
 	origVersion := config.Version
+	origParentPaths := append([]string(nil), config.Projects.ParentPaths...)
 	config.Version = "test-version"
 
 	currentEnv := env.Get()
@@ -59,11 +62,16 @@ func setupCLIEnv(t *testing.T, baseURL string) {
 
 	t.Cleanup(func() {
 		config.Version = origVersion
+		config.Projects.ParentPaths = origParentPaths
 		currentEnv.BASE_URL = origBase
 	})
 }
 
 func TestCLINewDeleteAndComplete(t *testing.T) {
+	parentDir := t.TempDir()
+	repoDir := filepath.Join(parentDir, "repo")
+	initGitRepo(t, repoDir)
+
 	var createRequest schemas.SessionCreateRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -97,9 +105,10 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 	defer server.Close()
 
 	setupCLIEnv(t, server.URL)
+	conf.GetConfig().Projects.ParentPaths = []string{parentDir}
 
 	output, err := captureOutput(t, func() error {
-		return executeCLI([]string{"new", "--path", "/repo", "--agent", "plan", "--prompt", "hello"})
+		return executeCLI([]string{"new", "repo@feature", "--agent", "plan", "--prompt", "hello"})
 	})
 	if err != nil {
 		t.Fatalf("run new: %v", err)
@@ -115,6 +124,12 @@ func TestCLINewDeleteAndComplete(t *testing.T) {
 	}
 	if createRequest.AgentConfig.Message == nil || len(createRequest.AgentConfig.Message.Parts) != 1 || createRequest.AgentConfig.Message.Parts[0].Text != "hello" {
 		t.Fatalf("unexpected prompt payload: %#v", createRequest.AgentConfig.Message)
+	}
+	if createRequest.Path != repoDir {
+		t.Fatalf("path = %q, want %q", createRequest.Path, repoDir)
+	}
+	if createRequest.Branch.String() != "feature" {
+		t.Fatalf("branch = %q, want %q", createRequest.Branch.String(), "feature")
 	}
 
 	output, err = captureOutput(t, func() error {
@@ -231,5 +246,26 @@ func TestDebugServerPort(t *testing.T) {
 	}
 	if got := debugServerPort("57877"); got != "57877" {
 		t.Fatalf("fallback = %q, want %q", got, "57877")
+	}
+}
+
+func initGitRepo(t *testing.T, repoDir string) {
+	t.Helper()
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", "init")
+}
+
+func runGit(t *testing.T, repoDir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, string(output))
 	}
 }

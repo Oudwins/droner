@@ -136,12 +136,8 @@ type sessionComposerModel struct {
 	pasteFallbackValue  string
 }
 
-func Run(client *sdk.Client) error {
-	path, err := cliutil.RepoRootFromCwd()
-	if err != nil {
-		return err
-	}
-	fileCandidates, err := loadRepoFileCandidates(path)
+func Run(client *sdk.Client, repoPath string, branch string) error {
+	fileCandidates, err := loadRepoFileCandidates(repoPath)
 	if err != nil {
 		return err
 	}
@@ -150,7 +146,7 @@ func Run(client *sdk.Client) error {
 		return err
 	}
 	agentNames := conf.GetConfig().TUI.AgentNames
-	prompt, rawInput, agentName, submitted, err := runSessionComposer(path, fileCandidates, slashCommands, agentNames)
+	prompt, rawInput, agentName, submitted, err := runSessionComposer(repoPath, fileCandidates, slashCommands, agentNames)
 	if err != nil {
 		return err
 	}
@@ -160,7 +156,7 @@ func Run(client *sdk.Client) error {
 	if err := cliutil.EnsureDaemonRunning(client); err != nil {
 		return err
 	}
-	request := buildSessionCreateRequest(path, agentName, rawInput, prompt, slashCommands)
+	request := buildSessionCreateRequest(repoPath, branch, agentName, rawInput, prompt, slashCommands)
 	ctx, cancel := context.WithTimeout(context.Background(), timeouts.SecondLong)
 	defer cancel()
 	response, err := client.CreateSession(ctx, request)
@@ -185,8 +181,8 @@ func runSessionComposer(repoRoot string, fileCandidates []string, slashCommands 
 	return extractComposerResult(finalModel)
 }
 
-func buildSessionCreateRequest(path string, agentName string, rawInput string, prompt *messages.Message, slashCommands []slashCommand) schemas.SessionCreateRequest {
-	request := schemas.SessionCreateRequest{Path: path}
+func buildSessionCreateRequest(path string, branch string, agentName string, rawInput string, prompt *messages.Message, slashCommands []slashCommand) schemas.SessionCreateRequest {
+	request := schemas.SessionCreateRequest{Path: path, Branch: schemas.NewSBranch(branch)}
 	command := commandInvocationFromPrompt(rawInput, prompt, slashCommands)
 	if !messageHasContent(prompt) && (command == nil || !command.HasContent()) {
 		return request

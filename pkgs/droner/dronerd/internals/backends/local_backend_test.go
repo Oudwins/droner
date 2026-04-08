@@ -92,6 +92,62 @@ func TestLocalBackendCompleteSessionKillsTmuxSessionNameFromWorktreePath(t *test
 	}
 }
 
+func TestLocalBackendCreateGitWorktreeUsesExistingLocalBranch(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	useBackendHelperProcess(t, logPath, []string{"refs/heads/feature"})
+
+	backend := LocalBackend{}
+	if err := backend.createGitWorktree(repoPath, worktreePath, "feature"); err != nil {
+		t.Fatalf("createGitWorktree: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(raw), "git\t-C\t"+repoPath+"\tworktree\tadd\t--force\t"+worktreePath+"\tfeature") {
+		t.Fatalf("expected existing-branch worktree add command, log:\n%s", string(raw))
+	}
+}
+
+func TestLocalBackendCreateGitWorktreeUsesRemoteBranchAsBase(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	useBackendHelperProcess(t, logPath, []string{"refs/remotes/origin/feature"})
+
+	backend := LocalBackend{}
+	if err := backend.createGitWorktree(repoPath, worktreePath, "feature"); err != nil {
+		t.Fatalf("createGitWorktree: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(raw), "git\t-C\t"+repoPath+"\tworktree\tadd\t-b\tfeature\t"+worktreePath+"\trefs/remotes/origin/feature") {
+		t.Fatalf("expected remote-branch worktree add command, log:\n%s", string(raw))
+	}
+}
+
+func useBackendHelperProcess(t *testing.T, logPath string, existingRefs []string) {
+	t.Helper()
+	origExec := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cmdArgs := append([]string{"-test.run=TestHelperProcess", "--", name}, args...)
+		cmd := exec.Command(os.Args[0], cmdArgs...)
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"DRONER_TEST_CMD_LOG="+logPath,
+			"DRONER_TEST_EXISTING_REFS="+strings.Join(existingRefs, ","),
+		)
+		return cmd
+	}
+	t.Cleanup(func() { execCommand = origExec })
+}
+
 // TestHelperProcess is a helper subprocess used to stub exec.Command calls.
 //
 // It logs each invocation to DRONER_TEST_CMD_LOG as tab-delimited fields:
@@ -133,6 +189,16 @@ func TestHelperProcess(t *testing.T) {
 		default:
 			os.Exit(0)
 		}
+	}
+
+	if name == "git" && len(args) >= 6 && args[2] == "show-ref" && args[3] == "--verify" && args[4] == "--quiet" {
+		existingRefs := strings.Split(os.Getenv("DRONER_TEST_EXISTING_REFS"), ",")
+		for _, ref := range existingRefs {
+			if ref == args[5] {
+				os.Exit(0)
+			}
+		}
+		os.Exit(1)
 	}
 
 	os.Exit(0)

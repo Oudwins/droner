@@ -17,7 +17,7 @@ func TestBuildSessionCreateRequestPreservesMultilinePrompt(t *testing.T) {
 			messages.NewTextPart("first line\n\nsecond line\n"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "plan", "first line\n\nsecond line\n", prompt, nil)
+	request := buildSessionCreateRequest("/tmp/repo", "", "plan", "first line\n\nsecond line\n", prompt, nil)
 
 	if request.Path != "/tmp/repo" {
 		t.Fatalf("expected path to be preserved, got %q", request.Path)
@@ -51,7 +51,7 @@ func TestBuildSessionCreateRequestPreservesFileParts(t *testing.T) {
 			messages.NewFilePart("pkgs/droner/tui/tui.go"),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "build", "inspect @pkgs/droner/tui/tui.go", prompt, nil)
+	request := buildSessionCreateRequest("/tmp/repo", "", "build", "inspect @pkgs/droner/tui/tui.go", prompt, nil)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -75,7 +75,7 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 			messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ=="),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "build", "[Image 1]", prompt, nil)
+	request := buildSessionCreateRequest("/tmp/repo", "", "build", "[Image 1]", prompt, nil)
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected agent message to be included")
@@ -93,7 +93,7 @@ func TestBuildSessionCreateRequestPreservesInlineImageParts(t *testing.T) {
 }
 
 func TestBuildSessionCreateRequestOmitsAgentConfigForEmptyPrompt(t *testing.T) {
-	request := buildSessionCreateRequest("/tmp/repo", "plan", "  \n\t  ", &messages.Message{
+	request := buildSessionCreateRequest("/tmp/repo", "", "plan", "  \n\t  ", &messages.Message{
 		Role:  messages.MessageRoleUser,
 		Parts: []messages.MessagePart{messages.NewTextPart("  \n\t  ")},
 	}, nil)
@@ -198,6 +198,17 @@ func TestSessionComposerEscCancels(t *testing.T) {
 	}
 }
 
+func TestBuildSessionCreateRequestIncludesBranch(t *testing.T) {
+	request := buildSessionCreateRequest("/tmp/repo", "feature/test", "plan", "hello", &messages.Message{
+		Role:  messages.MessageRoleUser,
+		Parts: []messages.MessagePart{messages.NewTextPart("hello")},
+	}, nil)
+
+	if request.Branch.String() != "feature/test" {
+		t.Fatalf("branch = %q, want %q", request.Branch.String(), "feature/test")
+	}
+}
+
 func TestBuildSessionCreateRequestUsesKnownSlashCommands(t *testing.T) {
 	prompt := &messages.Message{
 		Role: messages.MessageRoleUser,
@@ -207,7 +218,7 @@ func TestBuildSessionCreateRequestUsesKnownSlashCommands(t *testing.T) {
 			messages.NewDataURLFilePart("image/png", "shot.png", "data:image/png;base64,ZmFrZQ=="),
 		},
 	}
-	request := buildSessionCreateRequest("/tmp/repo", "plan", "/review check this @README.md [Image 1]", prompt, []slashCommand{{Name: "review", Description: "Review a change"}})
+	request := buildSessionCreateRequest("/tmp/repo", "", "plan", "/review check this @README.md [Image 1]", prompt, []slashCommand{{Name: "review", Description: "Review a change"}})
 
 	if request.AgentConfig == nil {
 		t.Fatal("expected agent config")
@@ -234,7 +245,7 @@ func TestBuildSessionCreateRequestUsesKnownSlashCommands(t *testing.T) {
 
 func TestBuildSessionCreateRequestLeavesUnknownSlashAsMessage(t *testing.T) {
 	prompt := &messages.Message{Role: messages.MessageRoleUser, Parts: []messages.MessagePart{messages.NewTextPart("/unknown do not special case")}}
-	request := buildSessionCreateRequest("/tmp/repo", "plan", "/unknown do not special case", prompt, []slashCommand{{Name: "review"}})
+	request := buildSessionCreateRequest("/tmp/repo", "", "plan", "/unknown do not special case", prompt, []slashCommand{{Name: "review"}})
 
 	if request.AgentConfig == nil || request.AgentConfig.Message == nil {
 		t.Fatal("expected normal message payload")

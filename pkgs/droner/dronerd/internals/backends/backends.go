@@ -13,7 +13,6 @@ import (
 type Backend interface {
 	ID() conf.BackendID
 	WorktreePath(repoPath string, sessionID string) (string, error)
-	ValidateSessionID(repoPath string, sessionID string) error
 	CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig, opts ...CreateSessionOptions) error
 	HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error)
 	// CompleteSession stops the active session runtime (e.g. tmux/opencode) but keeps the worktree/branch for reuse.
