@@ -240,6 +240,9 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
 		}
+		if got := r.URL.Query().Get("directory"); got != worktreeDir {
+			t.Fatalf("directory query = %q, want %q", got, worktreeDir)
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
@@ -253,12 +256,11 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if body["agent"] != "plan" {
 			t.Fatalf("agent = %v, want plan", body["agent"])
 		}
-		model, ok := body["model"].(map[string]any)
-		if !ok {
-			t.Fatalf("missing model")
+		if body["model"] != "openai/gpt-5-mini" {
+			t.Fatalf("model = %v, want openai/gpt-5-mini", body["model"])
 		}
-		if model["providerID"] != "openai" || model["modelID"] != "gpt-5-mini" {
-			t.Fatalf("model = %#v", model)
+		if _, exists := body["directory"]; exists {
+			t.Fatalf("expected directory to be omitted from body, got %#v", body["directory"])
 		}
 		parts, ok := body["parts"].([]any)
 		if !ok || len(parts) != 2 {

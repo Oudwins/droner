@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,15 +30,9 @@ type opencodeClient struct {
 type opencodeCommandRequest struct {
 	Command   string                    `json:"command"`
 	Arguments string                    `json:"arguments,omitempty"`
-	Directory string                    `json:"directory,omitempty"`
 	Agent     string                    `json:"agent,omitempty"`
-	Model     *opencodeCommandModel     `json:"model,omitempty"`
+	Model     string                    `json:"model,omitempty"`
 	Parts     []opencodeCommandFilePart `json:"parts,omitempty"`
-}
-
-type opencodeCommandModel struct {
-	ProviderID string `json:"providerID"`
-	ModelID    string `json:"modelID"`
 }
 
 type opencodeCommandFilePart struct {
@@ -156,18 +151,22 @@ func (c *opencodeClient) SendCommand(ctx context.Context, sessionID string, dire
 	body := opencodeCommandRequest{
 		Command:   strings.TrimSpace(command.Name),
 		Arguments: command.Arguments,
-		Directory: strings.TrimSpace(directory),
 		Agent:     strings.TrimSpace(agentName),
 		Parts:     parts,
 	}
-	if providerID, modelID, ok := parseOpencodeModel(model); ok {
-		body.Model = &opencodeCommandModel{ProviderID: providerID, ModelID: modelID}
+	if strings.TrimSpace(model) != "" {
+		body.Model = strings.TrimSpace(model)
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 	endpoint := fmt.Sprintf("%s/session/%s/command", c.baseURL, sessionID)
+	if strings.TrimSpace(directory) != "" {
+		query := url.Values{}
+		query.Set("directory", strings.TrimSpace(directory))
+		endpoint += "?" + query.Encode()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
