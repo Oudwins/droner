@@ -41,7 +41,7 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 		return err
 	}
 
-	if state.Branch !== "" {
+	if state.Branch != "" {
 		return nil
 	}
 
