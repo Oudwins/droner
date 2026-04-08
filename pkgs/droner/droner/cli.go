@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -194,7 +195,7 @@ func newDebuggerCmd() *cobra.Command {
 		Short:   "Start the debug event server",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runDebuggerServer()
+			return runDebuggerServer(cmd.OutOrStdout())
 		},
 	}
 	return cmd
@@ -386,11 +387,21 @@ func runCreateSession(args *NewArgs, includeAgentConfig bool) error {
 	return nil
 }
 
-func runDebuggerServer() error {
+func runDebuggerServer(out io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	return runEventDebugServer(ctx, eventdebug.DefaultConfig())
+	cfg := eventdebug.DefaultConfig()
+	_, _ = fmt.Fprintf(out, "debug server listening on port %s\n", debugServerPort(cfg.Addr))
+	return runEventDebugServer(ctx, cfg)
+}
+
+func debugServerPort(addr string) string {
+	_, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil || port == "" {
+		return strings.TrimSpace(addr)
+	}
+	return port
 }
 
 func isInteractiveTerminal() bool {

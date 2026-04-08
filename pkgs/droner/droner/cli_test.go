@@ -194,13 +194,19 @@ func TestCLIDebuggerCommand(t *testing.T) {
 		return nil
 	}
 
-	if err := executeCLI([]string{"debugger"}); err != nil {
+	output, err := captureOutput(t, func() error {
+		return executeCLI([]string{"debugger"})
+	})
+	if err != nil {
 		t.Fatalf("run debugger: %v", err)
 	}
 
 	defaults := eventdebug.DefaultConfig()
 	if gotCfg != defaults {
 		t.Fatalf("config = %#v, want %#v", gotCfg, defaults)
+	}
+	if !strings.Contains(output, "debug server listening on port 57877") {
+		t.Fatalf("unexpected debugger output: %q", output)
 	}
 	if _, _, err := newRootCmd().Find([]string{"debugger"}); err != nil {
 		t.Fatalf("expected debugger command to be registered: %v", err)
@@ -216,5 +222,14 @@ func TestCLIDebuggerCommand(t *testing.T) {
 		if flag := debuggerCmd.Flags().Lookup(name); flag != nil {
 			t.Fatalf("unexpected debugger flag registered: %s", name)
 		}
+	}
+}
+
+func TestDebugServerPort(t *testing.T) {
+	if got := debugServerPort("localhost:57877"); got != "57877" {
+		t.Fatalf("port = %q, want %q", got, "57877")
+	}
+	if got := debugServerPort("57877"); got != "57877" {
+		t.Fatalf("fallback = %q, want %q", got, "57877")
 	}
 }
