@@ -258,6 +258,79 @@ func TestHandlerCreateSessionPersistsInlineImagePrompt(t *testing.T) {
 	}
 }
 
+func TestHandlerCreateSessionConflictsForBlockedRepoBranch(t *testing.T) {
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+	now := time.Now().UTC()
+	if err := projectionQueries.UpsertSessionProjection(context.Background(), db.UpsertSessionProjectionParams{
+		StreamID:       "blocked-stream",
+		Harness:        conf.HarnessOpenCode.String(),
+		Branch:         sql.NullString{String: "blocked-branch", Valid: true},
+		BackendID:      conf.BackendLocal.String(),
+		RepoPath:       repoDir,
+		WorktreePath:   sql.NullString{String: filepath.Join(filepath.Dir(repoDir), "worktrees", "repo..blocked-branch"), Valid: true},
+		RemoteUrl:      "",
+		AgentConfig:    "",
+		LifecycleState: string(sessionevents.LifecycleStateEnvironmentProvisioningStarted),
+		PublicState:    string(sessionevents.PublicStateCompleting),
+		LastError:      "",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("UpsertSessionProjection: %v", err)
+	}
+
+	payload, err := json.Marshal(schemas.SessionCreateRequest{Path: repoDir, Branch: schemas.NewSBranch("blocked-branch"), BackendID: conf.BackendLocal})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.HandlerCreateSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "status=completing") {
+		t.Fatalf("expected conflict body to mention blocking status, body=%s", rec.Body.String())
+	}
+}
+
+func TestHandlerCreateSessionAllowsCompletedRepoBranchReuse(t *testing.T) {
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+	now := time.Now().UTC()
+	if err := projectionQueries.UpsertSessionProjection(context.Background(), db.UpsertSessionProjectionParams{
+		StreamID:       "completed-stream",
+		Harness:        conf.HarnessOpenCode.String(),
+		Branch:         sql.NullString{String: "completed-branch", Valid: true},
+		BackendID:      conf.BackendLocal.String(),
+		RepoPath:       repoDir,
+		WorktreePath:   sql.NullString{String: filepath.Join(filepath.Dir(repoDir), "worktrees", "repo..completed-branch"), Valid: true},
+		RemoteUrl:      "",
+		AgentConfig:    "",
+		LifecycleState: string(sessionevents.LifecycleStateCompletionSuccess),
+		PublicState:    string(sessionevents.PublicStateCompleted),
+		LastError:      "",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("UpsertSessionProjection: %v", err)
+	}
+
+	payload, err := json.Marshal(schemas.SessionCreateRequest{Path: repoDir, Branch: schemas.NewSBranch("completed-branch"), BackendID: conf.BackendLocal})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/sessions", bytesReader(payload))
+	rec := httptest.NewRecorder()
+
+	server.HandlerCreateSession(server.Base.Logger, rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+}
+
 func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	server, projectionQueries, repoDir, dataDir := newEventSourcedCreateSessionTestServer(t)
 

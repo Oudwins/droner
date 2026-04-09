@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
 func TestLocalBackendCompleteSessionKillsTmuxSessionNameFromWorktreePath(t *testing.T) {
@@ -99,7 +101,7 @@ func TestLocalBackendCreateGitWorktreeUsesExistingLocalBranch(t *testing.T) {
 	useBackendHelperProcess(t, logPath, []string{"refs/heads/feature"})
 
 	backend := LocalBackend{}
-	if err := backend.createGitWorktree(repoPath, worktreePath, "feature"); err != nil {
+	if err := backend.createGitWorktree(repoPath, worktreePath, "feature", localBranchState{localExists: true}); err != nil {
 		t.Fatalf("createGitWorktree: %v", err)
 	}
 
@@ -119,7 +121,7 @@ func TestLocalBackendCreateGitWorktreeUsesRemoteBranchAsBase(t *testing.T) {
 	useBackendHelperProcess(t, logPath, []string{"refs/remotes/origin/feature"})
 
 	backend := LocalBackend{}
-	if err := backend.createGitWorktree(repoPath, worktreePath, "feature"); err != nil {
+	if err := backend.createGitWorktree(repoPath, worktreePath, "feature", localBranchState{remoteRef: "refs/remotes/origin/feature"}); err != nil {
 		t.Fatalf("createGitWorktree: %v", err)
 	}
 
@@ -129,6 +131,127 @@ func TestLocalBackendCreateGitWorktreeUsesRemoteBranchAsBase(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "git\t-C\t"+repoPath+"\tworktree\tadd\t-b\tfeature\t"+worktreePath+"\trefs/remotes/origin/feature") {
 		t.Fatalf("expected remote-branch worktree add command, log:\n%s", string(raw))
+	}
+}
+
+func TestLocalBackendPrepareSessionWorktreeReusesExistingTargetPath(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	useBackendHelperProcess(t, logPath, nil)
+
+	backend := LocalBackend{}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
+		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
+			return &WorktreeSessionRef{StreamID: "old", Branch: "feature", PublicState: "completed"}, nil
+		},
+	}, localBranchState{localExists: true}, true)
+	if err != nil {
+		t.Fatalf("prepareSessionWorktree: %v", err)
+	}
+	if !reused {
+		t.Fatal("expected worktree reuse")
+	}
+	if cleanupCandidate != nil {
+		t.Fatalf("expected no cleanup candidate, got %#v", cleanupCandidate)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	log := string(raw)
+	if strings.Contains(log, "\tworktree\tadd\t") {
+		t.Fatalf("did not expect worktree add, log:\n%s", log)
+	}
+	if !strings.Contains(log, "git\t-C\t"+worktreePath+"\treset\t--hard") || !strings.Contains(log, "git\t-C\t"+worktreePath+"\tcheckout\tfeature") {
+		t.Fatalf("expected in-place reuse commands, log:\n%s", log)
+	}
+}
+
+func TestLocalBackendPrepareSessionWorktreeBlocksLiveExistingTargetPath(t *testing.T) {
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	backend := LocalBackend{}
+	_, _, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
+		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
+			return &WorktreeSessionRef{StreamID: "live-stream", Branch: "feature", PublicState: "active.idle"}, nil
+		},
+	}, localBranchState{localExists: true}, true)
+	if err == nil || !strings.Contains(err.Error(), "status=active.idle") || !strings.Contains(err.Error(), "streamID=live-stream") {
+		t.Fatalf("expected blocked worktree error, got %v", err)
+	}
+}
+
+func TestLocalBackendPrepareSessionWorktreeIgnoresCurrentStreamCollision(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	useBackendHelperProcess(t, logPath, nil)
+
+	backend := LocalBackend{}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
+		CurrentStreamID: "current-stream",
+		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
+			return &WorktreeSessionRef{StreamID: "current-stream", Branch: "feature", PublicState: "queued"}, nil
+		},
+	}, localBranchState{localExists: true}, true)
+	if err != nil {
+		t.Fatalf("prepareSessionWorktree: %v", err)
+	}
+	if !reused {
+		t.Fatal("expected self-collision to be ignored and reused")
+	}
+	if cleanupCandidate != nil {
+		t.Fatalf("expected no cleanup candidate, got %#v", cleanupCandidate)
+	}
+}
+
+func TestLocalBackendPrepareSessionWorktreeReusesRepoCandidateBeforeCreatingFresh(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "cmd.log")
+	worktreeRoot := filepath.Join(root, "worktrees")
+	oldWorktreePath := filepath.Join(worktreeRoot, "repo..old")
+	targetWorktreePath := filepath.Join(worktreeRoot, "repo..feature")
+	if err := os.MkdirAll(oldWorktreePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll old worktree: %v", err)
+	}
+	useBackendHelperProcess(t, logPath, nil)
+
+	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: worktreeRoot}}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", targetWorktreePath, "feature", CreateSessionOptions{
+		NextReusableWorktree: func(context.Context) (*ReusableWorktreeCandidate, error) {
+			candidate := &ReusableWorktreeCandidate{StreamID: "old-stream", Branch: "old", RepoPath: "/repo", WorktreePath: oldWorktreePath}
+			return candidate, nil
+		},
+	}, localBranchState{localExists: true}, false)
+	if err != nil {
+		t.Fatalf("prepareSessionWorktree: %v", err)
+	}
+	if !reused {
+		t.Fatal("expected candidate reuse")
+	}
+	if cleanupCandidate == nil || cleanupCandidate.StreamID != "old-stream" {
+		t.Fatalf("unexpected cleanup candidate: %#v", cleanupCandidate)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	log := string(raw)
+	if !strings.Contains(log, "git\t-C\t/repo\tworktree\tmove\t"+oldWorktreePath+"\t"+targetWorktreePath) {
+		t.Fatalf("expected worktree move, log:\n%s", log)
+	}
+	if strings.Contains(log, "\tworktree\tadd\t") {
+		t.Fatalf("did not expect fresh worktree add, log:\n%s", log)
 	}
 }
 
@@ -199,6 +322,11 @@ func TestHelperProcess(t *testing.T) {
 			}
 		}
 		os.Exit(1)
+	}
+
+	if name == "git" && len(args) >= 3 && args[2] == "rev-parse" {
+		_, _ = os.Stdout.Write([]byte(".git\n"))
+		os.Exit(0)
 	}
 
 	os.Exit(0)

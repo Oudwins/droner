@@ -89,6 +89,14 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if len(opts) > 0 {
 		createOpts = opts[0]
 	}
+	branchState, branchStateErr := l.resolveBranchState(repoPath, sessionID)
+	if branchStateErr != nil {
+		return branchStateErr
+	}
+	targetWorktreeExisted, worktreeExistsErr := worktreeDirExists(worktreePath)
+	if worktreeExistsErr != nil {
+		return worktreeExistsErr
+	}
 
 	defer func() {
 		if retErr == nil {
@@ -100,46 +108,32 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 
 		cleanRoot := filepath.Clean(l.config.WorktreeDir)
 		cleanWorktree := filepath.Clean(worktreePath)
-		if cleanRoot != "" && cleanWorktree != "" {
+		if !targetWorktreeExisted && cleanRoot != "" && cleanWorktree != "" {
 			if rel, err := filepath.Rel(cleanRoot, cleanWorktree); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 				_ = l.removeGitWorktreeFromRepo(repoPath, cleanWorktree)
 				_ = os.RemoveAll(cleanWorktree)
 			}
 		}
 
-		if commonGitDir, err := l.gitCommonDirFromRepo(repoPath); err == nil {
-			_ = l.deleteGitBranch(commonGitDir, sessionID)
+		if !targetWorktreeExisted && !branchState.localExists {
+			if commonGitDir, err := l.gitCommonDirFromRepo(repoPath); err == nil {
+				_ = l.deleteGitBranch(commonGitDir, sessionID)
+			}
 		}
 	}()
 
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
-	reused := false
-	if createOpts.NextReusableWorktree != nil {
-		for {
-			candidate, err := createOpts.NextReusableWorktree(ctx)
-			if err != nil {
-				return err
-			}
-			if candidate == nil {
-				break
-			}
-			reuseCandidate, ok, err := l.tryReuseProvidedWorktree(repoPath, worktreePath, sessionID, *candidate)
-			if err != nil {
-				return err
-			}
-			if createOpts.MarkReusableWorktreeDeletion != nil {
-				createOpts.MarkReusableWorktreeDeletion(reuseCandidate)
-			}
-			if ok {
-				reused = true
-				break
-			}
-		}
+	reused, cleanupCandidate, prepareErr := l.prepareSessionWorktree(ctx, repoPath, worktreePath, sessionID, createOpts, branchState, targetWorktreeExisted)
+	if prepareErr != nil {
+		return prepareErr
+	}
+	if cleanupCandidate != nil && createOpts.MarkReusableWorktreeDeletion != nil {
+		createOpts.MarkReusableWorktreeDeletion(*cleanupCandidate)
 	}
 	if !reused {
-		if err := l.createGitWorktree(repoPath, worktreePath, sessionID); err != nil {
+		if err := l.createGitWorktree(repoPath, worktreePath, sessionID, branchState); err != nil {
 			return err
 		}
 	}
@@ -192,7 +186,51 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	return nil
 }
 
-func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath string, sessionID string, candidate ReusableWorktreeCandidate) (ReusableWorktreeCandidate, bool, error) {
+type localBranchState struct {
+	localExists bool
+	remoteRef   string
+}
+
+func (l LocalBackend) prepareSessionWorktree(ctx context.Context, repoPath string, worktreePath string, sessionID string, createOpts CreateSessionOptions, branchState localBranchState, targetWorktreeExisted bool) (bool, *ReusableWorktreeCandidate, error) {
+	if targetWorktreeExisted {
+		if createOpts.LookupWorktreeSession != nil {
+			ref, err := createOpts.LookupWorktreeSession(ctx, worktreePath)
+			if err != nil {
+				return false, nil, err
+			}
+			if ref != nil && ref.StreamID != "" && ref.StreamID != createOpts.CurrentStreamID && isBlockedWorktreeState(ref.PublicState) {
+				return false, nil, fmt.Errorf("session already exists for worktree (status=%s streamID=%s)", ref.PublicState, ref.StreamID)
+			}
+		}
+		if err := l.reuseExistingWorktreeInPlace(repoPath, worktreePath, sessionID, branchState); err != nil {
+			return false, nil, err
+		}
+		return true, nil, nil
+	}
+
+	if createOpts.NextReusableWorktree != nil {
+		for {
+			candidate, err := createOpts.NextReusableWorktree(ctx)
+			if err != nil {
+				return false, nil, err
+			}
+			if candidate == nil {
+				break
+			}
+			reuseCandidate, ok, err := l.tryReuseProvidedWorktree(repoPath, worktreePath, sessionID, *candidate, branchState)
+			if err != nil {
+				return false, nil, err
+			}
+			if ok {
+				return true, &reuseCandidate, nil
+			}
+		}
+	}
+
+	return false, nil, nil
+}
+
+func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath string, sessionID string, candidate ReusableWorktreeCandidate, branchState localBranchState) (ReusableWorktreeCandidate, bool, error) {
 	cleanRepoPath := filepath.Clean(repoPath)
 	cleanTarget := filepath.Clean(worktreePath)
 	cleanRoot := filepath.Clean(l.config.WorktreeDir)
@@ -220,11 +258,7 @@ func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath str
 	if err := l.moveGitWorktree(cleanRepoPath, oldWorktreePath, cleanTarget); err != nil {
 		return candidate, false, nil
 	}
-	baseRef, err := l.resolveBaseRef(cleanRepoPath)
-	if err != nil {
-		return candidate, false, err
-	}
-	if err := l.checkoutNewBranch(cleanTarget, sessionID, baseRef); err != nil {
+	if err := l.prepareWorktreeForBranch(cleanRepoPath, cleanTarget, sessionID, branchState); err != nil {
 		return candidate, false, err
 	}
 
@@ -303,16 +337,12 @@ func (l LocalBackend) CompleteSession(_ context.Context, worktreePath string, se
 	return l.killTmuxSession(sessionName)
 }
 
-func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string) error {
+func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {
 	if strings.TrimSpace(branchName) == "" {
 		return errors.New("branch name is required")
 	}
 
-	localBranchExists, err := l.gitRefExists(repoPath, "refs/heads/"+branchName)
-	if err != nil {
-		return err
-	}
-	if localBranchExists {
+	if branchState.localExists {
 		cmd := execCommand("git", "-C", repoPath, "worktree", "add", "--force", worktreePath, branchName)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to create worktree: %s: %s", err.Error(), strings.TrimSpace(string(output)))
@@ -323,14 +353,9 @@ func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, br
 		return nil
 	}
 
-	baseRef := ""
-	remoteBranchExists, err := l.gitRefExists(repoPath, "refs/remotes/origin/"+branchName)
-	if err != nil {
-		return err
-	}
-	if remoteBranchExists {
-		baseRef = "refs/remotes/origin/" + branchName
-	} else {
+	baseRef := branchState.remoteRef
+	if baseRef == "" {
+		var err error
 		baseRef, err = l.resolveBaseRef(repoPath)
 		if err != nil {
 			return err
@@ -345,6 +370,72 @@ func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, br
 		return fmt.Errorf("failed to create worktree directory: %w", err)
 	}
 	return nil
+}
+
+func (l LocalBackend) reuseExistingWorktreeInPlace(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {
+	_ = l.killTmuxSession(tmuxSessionNameFromWorktreePath(worktreePath))
+	if err := l.resetAndCleanWorktree(worktreePath); err != nil {
+		return err
+	}
+	return l.prepareWorktreeForBranch(repoPath, worktreePath, branchName, branchState)
+}
+
+func (l LocalBackend) prepareWorktreeForBranch(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {
+	if branchState.localExists {
+		return l.checkoutExistingBranch(worktreePath, branchName)
+	}
+	baseRef := branchState.remoteRef
+	if baseRef == "" {
+		var err error
+		baseRef, err = l.resolveBaseRef(repoPath)
+		if err != nil {
+			return err
+		}
+	}
+	return l.checkoutNewBranch(worktreePath, branchName, baseRef)
+}
+
+func (l LocalBackend) resolveBranchState(repoPath string, branchName string) (localBranchState, error) {
+	state := localBranchState{}
+	localExists, err := l.gitRefExists(repoPath, "refs/heads/"+branchName)
+	if err != nil {
+		return state, err
+	}
+	state.localExists = localExists
+	if localExists {
+		return state, nil
+	}
+	remoteExists, err := l.gitRefExists(repoPath, "refs/remotes/origin/"+branchName)
+	if err != nil {
+		return state, err
+	}
+	if remoteExists {
+		state.remoteRef = "refs/remotes/origin/" + branchName
+	}
+	return state, nil
+}
+
+func worktreeDirExists(worktreePath string) (bool, error) {
+	info, err := os.Stat(worktreePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("worktree path is not a directory")
+	}
+	return true, nil
+}
+
+func isBlockedWorktreeState(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "queued", "active.idle", "active.busy", "completing", "deleting":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l LocalBackend) gitRefExists(repoPath string, ref string) (bool, error) {
@@ -790,6 +881,14 @@ func (l LocalBackend) resetAndCleanWorktree(worktreePath string) error {
 
 func (l LocalBackend) checkoutNewBranch(worktreePath string, branchName string, baseRef string) error {
 	cmd := execCommand("git", "-C", worktreePath, "checkout", "-B", branchName, baseRef)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to checkout branch: %s: %s", err.Error(), strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (l LocalBackend) checkoutExistingBranch(worktreePath string, branchName string) error {
+	cmd := execCommand("git", "-C", worktreePath, "checkout", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to checkout branch: %s: %s", err.Error(), strings.TrimSpace(string(output)))
 	}

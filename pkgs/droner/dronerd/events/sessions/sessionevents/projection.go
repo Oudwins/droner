@@ -79,6 +79,17 @@ func (s *System) loadCurrentProjectionByBranch(ctx context.Context, branch strin
 	return sessionRefFromRow(row), nil
 }
 
+func (s *System) loadBlockedProjectionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (SessionRef, error) {
+	row, err := s.queries.GetBlockedSessionProjectionByRepoPathAndBranch(ctx, coredb.GetBlockedSessionProjectionByRepoPathAndBranchParams{
+		RepoPath: repoPath,
+		Branch:   nullableString(branch),
+	})
+	if err != nil {
+		return SessionRef{}, err
+	}
+	return sessionRefFromRow(row), nil
+}
+
 func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
 	row, err := s.queries.GetSessionProjectionByWorktreePath(ctx, nullableString(worktreePath))
 	if err != nil {

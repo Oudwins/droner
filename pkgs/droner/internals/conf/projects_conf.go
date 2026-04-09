@@ -11,7 +11,9 @@ type ProjectsConfig struct {
 }
 
 var ProjectsConfigSchema = z.Struct(z.Shape{
-	"ParentPaths": z.Slice(z.String()).Default([]string{"~/projects", "~/Documents"}).Transform(normalizeParentPathsTransform),
+	"ParentPaths": z.Slice(z.String()).DefaultFunc(func() any {
+		return []string{"~/projects", "~/Documents"}
+	}).Transform(normalizeParentPathsTransform),
 })
 
 func normalizeParentPathsTransform(data any, c z.Ctx) error {

@@ -200,6 +200,17 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 					WorktreePath: ref.WorktreePath,
 				}, nil
 			},
+			LookupWorktreeSession: func(ctx context.Context, worktreePath string) (*backends.WorktreeSessionRef, error) {
+				ref, err := s.LookupSessionByWorktreePath(ctx, worktreePath)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						return nil, nil
+					}
+					return nil, err
+				}
+				return &backends.WorktreeSessionRef{StreamID: ref.StreamID, Branch: ref.Branch, PublicState: ref.PublicState.String()}, nil
+			},
+			CurrentStreamID: string(evt.StreamID),
 			MarkReusableWorktreeDeletion: func(candidate backends.ReusableWorktreeCandidate) {
 				cleanupCandidates = append(cleanupCandidates, candidate)
 			},

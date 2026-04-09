@@ -7,13 +7,24 @@ import (
 )
 
 func TestProjectsConfigSchemaDefaultsParentPaths(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+
 	var parsed ProjectsConfig
 	if err := ProjectsConfigSchema.Parse(map[string]any{}, &parsed); err != nil {
 		t.Fatalf("parse defaults: %v", err)
 	}
 
-	if len(parsed.ParentPaths) != 0 {
-		t.Fatalf("parentPaths = %v, want empty", parsed.ParentPaths)
+	want := []string{filepath.Join(homeDir, "projects"), filepath.Join(homeDir, "Documents")}
+	if len(parsed.ParentPaths) != len(want) {
+		t.Fatalf("parentPaths = %v, want %v", parsed.ParentPaths, want)
+	}
+	for i := range want {
+		if parsed.ParentPaths[i] != want[i] {
+			t.Fatalf("parentPaths[%d] = %q, want %q", i, parsed.ParentPaths[i], want[i])
+		}
 	}
 }
 

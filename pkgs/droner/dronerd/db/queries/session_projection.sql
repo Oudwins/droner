@@ -68,7 +68,18 @@ LIMIT 1;
 -- name: GetSessionProjectionByWorktreePath :one
 SELECT *
 FROM session_projection
-WHERE worktree_path = ?;
+WHERE worktree_path = ?
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetBlockedSessionProjectionByRepoPathAndBranch :one
+SELECT *
+FROM session_projection
+WHERE repo_path = ?
+  AND branch = ?
+  AND public_state IN ('queued', 'active.idle', 'active.busy', 'completing', 'deleting')
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: GetLatestNavigationSessionProjectionByBranch :one
 SELECT *

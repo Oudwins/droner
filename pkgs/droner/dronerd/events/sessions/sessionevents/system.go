@@ -370,6 +370,14 @@ func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (Sess
 	return s.loadCurrentProjectionByBranch(ctx, branch)
 }
 
+func (s *System) LookupBlockedSessionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (SessionRef, error) {
+	return s.loadBlockedProjectionByRepoAndBranch(ctx, repoPath, branch)
+}
+
+func (s *System) LookupSessionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
+	return s.loadProjectionByWorktreePath(ctx, worktreePath)
+}
+
 func (s *System) LookupLatestNavigationSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
 	return s.loadLatestNavigationProjectionByBranch(ctx, branch)
 }

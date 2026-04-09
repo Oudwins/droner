@@ -61,6 +61,7 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	}
 
 	logger = logger.With(slog.Any("validated_payload", request))
+	requestedBranch := strings.TrimSpace(request.Branch.String())
 
 	if err := repo.CheckRepo(request.Path); err != nil {
 		logger.Info("Repo validation failed", slog.String("error", err.Error()))
@@ -76,6 +77,18 @@ func (s *Server) HandlerCreateSession(logger *slog.Logger, w http.ResponseWriter
 	if err != nil {
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Backend '%s' is not registered", request.BackendID), nil), Render.Status(http.StatusBadRequest))
 		return
+	}
+	if requestedBranch != "" {
+		ref, err := s.events.LookupBlockedSessionByRepoAndBranch(r.Context(), request.Path, requestedBranch)
+		if err == nil {
+			RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session already exists for repo and branch (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
+			return
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			logger.Error("Failed to load existing session conflict", slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to check existing sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
 	}
 
 	logger = logger.With(slog.Any("request", request))

@@ -21,6 +21,42 @@ func (q *Queries) DeleteSessionProjection(ctx context.Context, streamID string) 
 	return err
 }
 
+const getBlockedSessionProjectionByRepoPathAndBranch = `-- name: GetBlockedSessionProjectionByRepoPathAndBranch :one
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
+FROM session_projection
+WHERE repo_path = ?
+  AND branch = ?
+  AND public_state IN ('queued', 'active.idle', 'active.busy', 'completing', 'deleting')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetBlockedSessionProjectionByRepoPathAndBranchParams struct {
+	RepoPath string
+	Branch   sql.NullString
+}
+
+func (q *Queries) GetBlockedSessionProjectionByRepoPathAndBranch(ctx context.Context, arg GetBlockedSessionProjectionByRepoPathAndBranchParams) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getBlockedSessionProjectionByRepoPathAndBranch, arg.RepoPath, arg.Branch)
+	var i SessionProjection
+	err := row.Scan(
+		&i.StreamID,
+		&i.Harness,
+		&i.Branch,
+		&i.BackendID,
+		&i.RepoPath,
+		&i.WorktreePath,
+		&i.RemoteUrl,
+		&i.AgentConfig,
+		&i.LifecycleState,
+		&i.PublicState,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCurrentSessionProjectionByBranch = `-- name: GetCurrentSessionProjectionByBranch :one
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
@@ -111,6 +147,8 @@ const getSessionProjectionByWorktreePath = `-- name: GetSessionProjectionByWorkt
 SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at
 FROM session_projection
 WHERE worktree_path = ?
+ORDER BY created_at DESC
+LIMIT 1
 `
 
 func (q *Queries) GetSessionProjectionByWorktreePath(ctx context.Context, worktreePath sql.NullString) (SessionProjection, error) {

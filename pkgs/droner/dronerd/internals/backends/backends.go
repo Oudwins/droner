@@ -50,8 +50,16 @@ type ReusableWorktreeCandidate struct {
 	WorktreePath string
 }
 
+type WorktreeSessionRef struct {
+	StreamID    string
+	Branch      string
+	PublicState string
+}
+
 type CreateSessionOptions struct {
 	NextReusableWorktree         func(ctx context.Context) (*ReusableWorktreeCandidate, error)
+	LookupWorktreeSession        func(ctx context.Context, worktreePath string) (*WorktreeSessionRef, error)
+	CurrentStreamID              string
 	MarkReusableWorktreeDeletion func(candidate ReusableWorktreeCandidate)
 }
 
