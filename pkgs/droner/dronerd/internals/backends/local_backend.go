@@ -201,6 +201,9 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := l.createTmuxTerminalSplitWindow(sessionName, worktreePath); err != nil {
 		return err
 	}
+	if err := l.selectTmuxWindow(sessionName, "^"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -569,6 +572,14 @@ func (l LocalBackend) createTmuxTerminalSplitWindow(sessionName string, worktree
 	return nil
 }
 
+func (l LocalBackend) selectTmuxWindow(sessionName string, target string) error {
+	selectWindow := execCommand("tmux", "select-window", "-t", sessionName+":"+target)
+	if output, err := selectWindow.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to select tmux window %q: %s", target, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName string, worktreePath string, agentConfig AgentConfig) (retErr error) {
 	defer func() {
 		if retErr == nil {
@@ -627,6 +638,10 @@ func (l LocalBackend) hydrateLocalRuntime(ctx context.Context, sessionName strin
 	}
 
 	if err := l.createTmuxTerminalSplitWindow(sessionName, worktreePath); err != nil {
+		return err
+	}
+
+	if err := l.selectTmuxWindow(sessionName, "^"); err != nil {
 		return err
 	}
 

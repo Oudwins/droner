@@ -216,8 +216,17 @@ func TestLocalBackend_CreateSession_OpensSplitTerminalWindow(t *testing.T) {
 	if !containsTmuxCall(calls, []string{"split-window", "-h", "-t", "repo#sid:terminal-split", "-c", worktreePath}) {
 		t.Fatalf("expected terminal split window to be split side-by-side, got: %v", calls)
 	}
-	if !tmuxCallOrder(calls, []string{"new-session", "-d", "-s", "repo#sid", "-n", "opencode"}, []string{"new-window", "-t", "repo#sid", "-n", "terminal"}, []string{"new-window", "-t", "repo#sid", "-n", "terminal-split"}, []string{"split-window", "-h", "-t", "repo#sid:terminal-split"}) {
-		t.Fatalf("expected tmux window order opencode -> terminal -> terminal-split -> split-window, got: %v", calls)
+	if !containsTmuxCall(calls, []string{"select-window", "-t", "repo#sid:^"}) {
+		t.Fatalf("expected tmux to re-select the first window, got: %v", calls)
+	}
+	if !tmuxCallOrder(calls,
+		[]string{"new-session", "-d", "-s", "repo#sid", "-n", "opencode"},
+		[]string{"new-window", "-t", "repo#sid", "-n", "terminal"},
+		[]string{"new-window", "-t", "repo#sid", "-n", "terminal-split"},
+		[]string{"split-window", "-h", "-t", "repo#sid:terminal-split"},
+		[]string{"select-window", "-t", "repo#sid:^"},
+	) {
+		t.Fatalf("expected tmux to select the first window after setup, got: %v", calls)
 	}
 }
 

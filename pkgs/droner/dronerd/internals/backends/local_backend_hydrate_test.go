@@ -205,6 +205,9 @@ func TestLocalBackendHydrateSessionReusesLatestSessionForDirectory(t *testing.T)
 	if !containsHydrationCallWithArgs(calls, []string{"split-window", "-h", "-t", "repo#sid:terminal-split", "-c", worktreePath}) {
 		t.Fatalf("expected hydration to split the terminal window side-by-side, got %v", calls)
 	}
+	if !containsHydrationCallWithArgs(calls, []string{"select-window", "-t", "repo#sid:^"}) {
+		t.Fatalf("expected hydration to re-select the first tmux window, got %v", calls)
+	}
 	opencodeURL := fmt.Sprintf("http://%s:%d", opencodeCfg.Hostname, opencodeCfg.Port)
 	if !containsHydrationCallFragment(calls, "opencode attach '"+opencodeURL+"' --session 'latest' --dir '"+worktreePath+"'; exec \"${SHELL:-/bin/sh}\"") {
 		t.Fatalf("expected opencode window to attach latest session, got %v", calls)
@@ -319,6 +322,9 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 	}
 	if !containsHydrationCallWithArgs(calls, []string{"split-window", "-h", "-t", "repo#sid:terminal-split", "-c", worktreePath}) {
 		t.Fatalf("expected hydration to split the terminal window side-by-side, got %v", calls)
+	}
+	if !containsHydrationCallWithArgs(calls, []string{"select-window", "-t", "repo#sid:^"}) {
+		t.Fatalf("expected hydration to re-select the first tmux window, got %v", calls)
 	}
 	if !containsHydrationCallFragment(calls, "opencode attach '"+opencodeURL+"' --session 'created' --dir '"+worktreePath+"'; exec \"${SHELL:-/bin/sh}\"") {
 		t.Fatalf("expected opencode window to attach created session, got %v", calls)
