@@ -49,6 +49,9 @@ func TestNewFilePartUsesCanonicalPathAndFilename(t *testing.T) {
 	if part.File.Filename != "tui.go" {
 		t.Fatalf("Filename = %q, want tui.go", part.File.Filename)
 	}
+	if part.File.Mime != "text/plain" {
+		t.Fatalf("Mime = %q, want text/plain", part.File.Mime)
+	}
 }
 
 func TestCloneMessageCopiesPartsSlice(t *testing.T) {

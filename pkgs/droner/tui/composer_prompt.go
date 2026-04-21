@@ -76,7 +76,7 @@ func (p composerPrompt) Message() *messages.Message {
 		if position < token.Start {
 			parts = appendTextPart(parts, string(runes[position:token.Start]))
 		}
-		parts = append(parts, token.Part)
+		parts = append(parts, token.messagePart())
 		position = token.End
 	}
 	if position < len(runes) {
@@ -101,6 +101,23 @@ func (t structuredPromptToken) matches(runes []rune) bool {
 		return false
 	}
 	return string(runes[t.Start:t.End]) == t.Display
+}
+
+func (t structuredPromptToken) messagePart() messages.MessagePart {
+	part := t.Part
+	if part.Type != messages.PartTypeFile || part.File == nil || part.File.Source == nil || part.File.Source.Text == nil {
+		return part
+	}
+	filePart := *part.File
+	source := *filePart.Source
+	text := *source.Text
+	text.Start = int64(t.Start)
+	text.End = int64(t.End)
+	text.Value = t.Display
+	source.Text = &text
+	filePart.Source = &source
+	part.File = &filePart
+	return part
 }
 
 func appendTextPart(parts []messages.MessagePart, text string) []messages.MessagePart {
