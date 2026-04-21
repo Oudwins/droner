@@ -51,6 +51,24 @@ func tmuxSessionNameFromWorktreePath(worktreePath string) string {
 	return fmt.Sprintf("%s#%s", parts[0], parts[1])
 }
 
+func shellQuote(raw string) string {
+	return "'" + strings.ReplaceAll(raw, "'", `'"'"'`) + "'"
+}
+
+func tmuxOpencodeAttachCommand(opencodeURL string, opencodeSessionID string, worktreePath string) string {
+	var command strings.Builder
+	command.WriteString("opencode attach ")
+	command.WriteString(shellQuote(opencodeURL))
+	if strings.TrimSpace(opencodeSessionID) != "" {
+		command.WriteString(" --session ")
+		command.WriteString(shellQuote(opencodeSessionID))
+	}
+	command.WriteString(" --dir ")
+	command.WriteString(shellQuote(worktreePath))
+	command.WriteString(`; exec "${SHELL:-/bin/sh}"`)
+	return command.String()
+}
+
 func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error) {
 	sessionName := tmuxSessionName(session.RepoPath, session.Branch)
 	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.Branch) == "" {
@@ -495,11 +513,7 @@ func (l LocalBackend) deleteGitBranch(commonGitDir string, sessionID string) err
 
 func (l LocalBackend) createTmuxOpencodeSession(sessionName string, worktreePath string, agentConfig AgentConfig, opencodeSessionID string) error {
 	opencodeURL := fmt.Sprintf("http://%s:%d", agentConfig.Opencode.Hostname, agentConfig.Opencode.Port)
-	opencodeArgs := []string{"new-session", "-d", "-s", sessionName, "-n", "opencode", "-c", worktreePath, "opencode", "attach", opencodeURL}
-	if strings.TrimSpace(opencodeSessionID) != "" {
-		opencodeArgs = append(opencodeArgs, "--session", opencodeSessionID)
-	}
-	opencodeArgs = append(opencodeArgs, "--dir", worktreePath)
+	opencodeArgs := []string{"new-session", "-d", "-s", sessionName, "-n", "opencode", "-c", worktreePath, "sh", "-lc", tmuxOpencodeAttachCommand(opencodeURL, opencodeSessionID, worktreePath)}
 	newSession := execCommand("tmux", opencodeArgs...)
 	if output, err := newSession.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tmux opencode session: %s", strings.TrimSpace(string(output)))

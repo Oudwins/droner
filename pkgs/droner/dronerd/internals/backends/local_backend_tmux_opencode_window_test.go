@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -75,17 +76,21 @@ func TestLocalBackend_CreateSession_StartsOpencodeInWorktreeDir(t *testing.T) {
 	if !containsSubsequence(args, []string{"-c", worktreePath}) {
 		t.Fatalf("expected tmux to set cwd to worktreePath, got: %v", args)
 	}
-	if !containsSubsequence(args, []string{"opencode", "attach", opencodeURL, "--session", "abc", "--dir", worktreePath}) {
-		t.Fatalf("expected opencode attach url/session/dir args, got: %v", args)
+	if !containsSubsequence(args, []string{"sh", "-lc"}) {
+		t.Fatalf("expected opencode window to launch via sh -lc, got: %v", args)
 	}
-	if !containsString(args, opencodeURL) {
-		t.Fatalf("expected opencode URL %q in args, got: %v", opencodeURL, args)
+	script := args[len(args)-1]
+	if !strings.Contains(script, "opencode attach '"+opencodeURL+"'") {
+		t.Fatalf("expected opencode attach url in script, got: %q", script)
 	}
-	if !containsSubsequence(args, []string{"--session", "abc"}) {
-		t.Fatalf("expected opencode attach to include --session abc, got: %v", args)
+	if !strings.Contains(script, "--session 'abc'") {
+		t.Fatalf("expected opencode attach to include --session abc, got: %q", script)
 	}
-	if !containsSubsequence(args, []string{"--dir", worktreePath}) {
-		t.Fatalf("expected opencode attach to include --dir worktreePath, got: %v", args)
+	if !strings.Contains(script, "--dir '"+worktreePath+"'") {
+		t.Fatalf("expected opencode attach to include --dir worktreePath, got: %q", script)
+	}
+	if !strings.Contains(script, `exec "${SHELL:-/bin/sh}"`) {
+		t.Fatalf("expected opencode script to fall back to a shell, got: %q", script)
 	}
 }
 
@@ -143,11 +148,18 @@ func TestLocalBackend_CreateSession_OpensOpencodeWithoutSessionWhenPromptMissing
 	args := tmuxOpencodeArgs[1:]
 	opencodeURL := fmt.Sprintf("http://%s:%d", opencodeCfg.Hostname, opencodeCfg.Port)
 
-	if !containsSubsequence(args, []string{"opencode", "attach", opencodeURL, "--dir", worktreePath}) {
-		t.Fatalf("expected opencode attach url/dir args, got: %v", args)
+	if !containsSubsequence(args, []string{"sh", "-lc"}) {
+		t.Fatalf("expected opencode window to launch via sh -lc, got: %v", args)
 	}
-	if containsString(args, "--session") {
-		t.Fatalf("expected opencode attach to omit --session, got: %v", args)
+	script := args[len(args)-1]
+	if !strings.Contains(script, "opencode attach '"+opencodeURL+"'") {
+		t.Fatalf("expected opencode attach url in script, got: %q", script)
+	}
+	if !strings.Contains(script, "--dir '"+worktreePath+"'") {
+		t.Fatalf("expected opencode attach to include --dir worktreePath, got: %q", script)
+	}
+	if containsString(args, "--session") || strings.Contains(script, "--session") {
+		t.Fatalf("expected opencode attach to omit --session, got args=%v script=%q", args, script)
 	}
 }
 
