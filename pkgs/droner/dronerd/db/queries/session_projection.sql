@@ -118,6 +118,13 @@ WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
 ORDER BY stream_id ASC
 LIMIT ?;
 
+-- name: ListSessionProjectionItemsOldestByStatuses :many
+SELECT stream_id, repo_path, remote_url, branch, public_state
+FROM session_projection
+WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
+ORDER BY stream_id ASC
+LIMIT ?;
+
 -- name: ListActiveSessionProjectionRefs :many
 SELECT *
 FROM session_projection

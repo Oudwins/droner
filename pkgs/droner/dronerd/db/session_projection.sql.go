@@ -475,6 +475,57 @@ func (q *Queries) ListSessionProjectionItemsBeforeCursorByStatuses(ctx context.C
 	return items, nil
 }
 
+const listSessionProjectionItemsOldestByStatuses = `-- name: ListSessionProjectionItemsOldestByStatuses :many
+SELECT stream_id, repo_path, remote_url, branch, public_state
+FROM session_projection
+WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
+ORDER BY stream_id ASC
+LIMIT ?
+`
+
+type ListSessionProjectionItemsOldestByStatusesParams struct {
+	Column1 interface{}
+	Column2 sql.NullString
+	Limit   int64
+}
+
+type ListSessionProjectionItemsOldestByStatusesRow struct {
+	StreamID    string
+	RepoPath    string
+	RemoteUrl   string
+	Branch      sql.NullString
+	PublicState string
+}
+
+func (q *Queries) ListSessionProjectionItemsOldestByStatuses(ctx context.Context, arg ListSessionProjectionItemsOldestByStatusesParams) ([]ListSessionProjectionItemsOldestByStatusesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionProjectionItemsOldestByStatuses, arg.Column1, arg.Column2, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionProjectionItemsOldestByStatusesRow
+	for rows.Next() {
+		var i ListSessionProjectionItemsOldestByStatusesRow
+		if err := rows.Scan(
+			&i.StreamID,
+			&i.RepoPath,
+			&i.RemoteUrl,
+			&i.Branch,
+			&i.PublicState,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisibleSessionProjectionItems = `-- name: ListVisibleSessionProjectionItems :many
 SELECT stream_id, repo_path, remote_url, branch, public_state
 FROM session_projection

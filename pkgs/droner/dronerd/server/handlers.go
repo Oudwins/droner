@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -353,8 +354,24 @@ func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWri
 		RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to navigate sessions", nil), Render.Status(http.StatusInternalServerError))
 		return
 	}
+	if cursor != "" && len(items) == 0 {
+		items, err = s.wrapSessionNavigation(r.Context(), direction)
+		if err != nil {
+			logger.Error("Failed to wrap session navigation", slog.String("direction", direction), slog.String("error", err.Error()))
+			RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to navigate sessions", nil), Render.Status(http.StatusInternalServerError))
+			return
+		}
+	}
 
 	renderSessionListResponse(w, r, items)
+}
+
+func (s *Server) wrapSessionNavigation(ctx context.Context, direction string) ([]sessionevents.ListItem, error) {
+	statuses := []string{string(schemas.SessionPublicStateActiveIdle)}
+	if direction == string(schemas.SessionListDirectionBefore) {
+		return s.events.ListOldestSessionProjections(ctx, statuses, 1)
+	}
+	return s.events.ListSessionProjections(ctx, statuses, 1, "", direction)
 }
 
 func navigationBranchFromTmuxSession(tmuxSession string) string {

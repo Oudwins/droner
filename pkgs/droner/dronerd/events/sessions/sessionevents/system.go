@@ -324,6 +324,16 @@ func (s *System) ListSessionProjections(ctx context.Context, statuses []string, 
 	return items, nil
 }
 
+func (s *System) ListOldestSessionProjections(ctx context.Context, statuses []string, limit int) ([]ListItem, error) {
+	statusesArg := ""
+	if len(statuses) > 0 {
+		statusesArg = strings.Join(statuses, ",")
+	}
+	statusesValue := sql.NullString{String: statusesArg, Valid: statusesArg != ""}
+
+	return s.listSessionProjectionItemsOldest(ctx, statusesArg, statusesValue, limit)
+}
+
 func (s *System) listSessionProjectionItemsAfterCursor(ctx context.Context, statusesArg string, statusesValue sql.NullString, cursor string, limit int) ([]ListItem, error) {
 	rows, err := s.queries.ListSessionProjectionItemsAfterCursorByStatuses(ctx, coredb.ListSessionProjectionItemsAfterCursorByStatusesParams{
 		Column1:  statusesArg,
@@ -349,6 +359,22 @@ func (s *System) listSessionProjectionItemsBeforeCursor(ctx context.Context, sta
 		Column3:  cursor,
 		StreamID: cursor,
 		Limit:    int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
+	}
+	return items, nil
+}
+
+func (s *System) listSessionProjectionItemsOldest(ctx context.Context, statusesArg string, statusesValue sql.NullString, limit int) ([]ListItem, error) {
+	rows, err := s.queries.ListSessionProjectionItemsOldestByStatuses(ctx, coredb.ListSessionProjectionItemsOldestByStatusesParams{
+		Column1: statusesArg,
+		Column2: statusesValue,
+		Limit:   int64(limit),
 	})
 	if err != nil {
 		return nil, err

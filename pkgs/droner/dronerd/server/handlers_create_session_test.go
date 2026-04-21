@@ -766,23 +766,76 @@ func TestHandlerSessionNavigationByTmuxSessionResolvesCompletedSessionID(t *test
 	}
 }
 
-func TestHandlerSessionNavigationReturnsEmptyWhenNoMatches(t *testing.T) {
+func TestHandlerSessionNavigationWrapsAtEdgesWhenCursorPresent(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	branches := []string{"nav-wrap-a", "nav-wrap-b", "nav-wrap-c"}
+	for _, branch := range branches {
+		createEventSourcedSession(t, server, repoDir, branch)
+		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	fullResponse := listSessions(t, server, "/sessions?status=active.idle&limit=10")
+	if got, want := len(fullResponse.Sessions), len(branches); got != want {
+		t.Fatalf("listed %d sessions, want %d", got, want)
+	}
+
+	newestID := fullResponse.Sessions[0].ID
+	oldestID := fullResponse.Sessions[len(fullResponse.Sessions)-1].ID
+
+	response := navigateSession(t, server, "/_session/next?id="+oldestID)
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("next listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, newestID; got != want {
+		t.Fatalf("next wrapped id = %q, want %q", got, want)
+	}
+
+	response = navigateSession(t, server, "/_session/prev?id="+newestID)
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("prev listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, oldestID; got != want {
+		t.Fatalf("prev wrapped id = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationSingleSessionWrapsToSelf(t *testing.T) {
+	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "nav-single")
+	ref := waitForSessionState(t, server, "nav-single", sessionevents.PublicStateActiveIdle)
+
+	response := navigateSession(t, server, "/_session/next?id="+ref.StreamID)
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("next listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, ref.StreamID; got != want {
+		t.Fatalf("next wrapped id = %q, want %q", got, want)
+	}
+
+	response = navigateSession(t, server, "/_session/prev?id="+ref.StreamID)
+	if got, want := len(response.Sessions), 1; got != want {
+		t.Fatalf("prev listed %d sessions, want %d", got, want)
+	}
+	if got, want := response.Sessions[0].ID, ref.StreamID; got != want {
+		t.Fatalf("prev wrapped id = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerSessionNavigationUnknownTmuxSessionFallsBackToNewest(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nav-empty")
-	ref := waitForSessionState(t, server, "nav-empty", sessionevents.PublicStateActiveIdle)
-
-	response := navigateSession(t, server, "/_session/next?id="+ref.StreamID)
-	if len(response.Sessions) != 0 {
-		t.Fatalf("next listed %d sessions, want 0", len(response.Sessions))
-	}
+	waitForSessionState(t, server, "nav-empty", sessionevents.PublicStateActiveIdle)
 
 	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1")
 	if len(expected.Sessions) != 1 {
 		t.Fatalf("expected list returned %d sessions, want 1", len(expected.Sessions))
 	}
 
-	response = navigateSession(t, server, "/_session/next?tmuxsession=workspace#does-not-exist")
+	response := navigateSession(t, server, "/_session/next?tmuxsession=workspace#does-not-exist")
 	if got, want := len(response.Sessions), 1; got != want {
 		t.Fatalf("unknown tmuxsession listed %d sessions, want %d", got, want)
 	}
