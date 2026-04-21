@@ -149,7 +149,7 @@ func TestLocalBackendHydrateSessionReusesLatestSessionForDirectory(t *testing.T)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":"latest","directory":"` + worktreePath + `","projectID":"proj","time":{"created":1,"updated":10},"title":"latest","version":"1"},{"id":"older","directory":"` + worktreePath + `","projectID":"proj","time":{"created":1,"updated":5},"title":"older","version":"1"}]`))
 	})
-	mux.HandleFunc("/session/latest/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/latest/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		messageCalled = true
 		w.WriteHeader(http.StatusOK)
 	})
@@ -257,7 +257,7 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 			t.Fatalf("method = %s, want GET or POST", r.Method)
 		}
 	})
-	mux.HandleFunc("/session/created/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/created/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if dir := r.URL.Query().Get("directory"); dir != worktreePath {
 			t.Fatalf("directory = %q, want %q", dir, worktreePath)
 		}
@@ -266,9 +266,7 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 		default:
 			close(messageStarted)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"info":{"role":"assistant"},"parts":[{"type":"text","text":"ok"}]}`))
+		w.WriteHeader(http.StatusNoContent)
 		close(messageDone)
 	})
 

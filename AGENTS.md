@@ -30,6 +30,7 @@
 - TUI clipboard image paste uses `pngpaste` on macOS and `wl-paste` or `xclip` on Linux; when no image tool or image payload is available, `Ctrl+V` falls back to normal text paste.
 - Root config lives at `$DRONERD_DATA_DIR/droner.json` and defaults to `~/.droner/droner.json`; TUI agent tabs come from `tui.agentNames`, which are trimmed and default to `build`, `plan` during config parsing.
 - TUI startup now discovers OpenCode custom slash commands from `~/.config/opencode/commands/*.md`; recognized leading `/command` input is sent as a first-class command payload while unknown slash input remains a normal prompt.
+- Current OpenCode versions no longer repair empty file-part `source.text`; Droner TUI `@file` mentions must preserve the visible token in `messages.MessagePart.File.Source.Text` (`start`, `end`, `value`) before sending prompts or slash-command attachments.
 - GitHub API auth is sourced from `GITHUB_TOKEN` or `gh auth token`; there is no repo-managed GitHub OAuth flow.
 
 ## Build and run

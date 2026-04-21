@@ -810,9 +810,7 @@ func opencodeFilePartFromMessagePart(part messages.MessagePart, worktreePath str
 	if filename == "" {
 		filename = filepath.Base(relativePath)
 	}
-	if mimeType == "" {
-		mimeType = mimeTypeForPath(relativePath)
-	}
+	mimeType = "text/plain"
 	source := opencode.FilePartSourceUnionParam(opencode.FileSourceParam{
 		Type: opencode.F(opencode.FileSourceTypeFile),
 		Path: opencode.F(relativePath),

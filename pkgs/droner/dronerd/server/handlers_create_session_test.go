@@ -199,6 +199,9 @@ func TestHandlerCreateSessionPersistsStructuredFilePrompt(t *testing.T) {
 	if stored.Message.Parts[1].Type != messages.PartTypeFile || stored.Message.Parts[1].File == nil || stored.Message.Parts[1].File.Source == nil || stored.Message.Parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
 		t.Fatalf("stored file part = %#v", stored.Message.Parts[1])
 	}
+	if stored.Message.Parts[1].File.Source.Text == nil || stored.Message.Parts[1].File.Source.Text.Value != "" {
+		t.Fatalf("expected stored file source text payload, got %#v", stored.Message.Parts[1].File.Source.Text)
+	}
 	if stored.Message.Parts[1].File.URL != nil {
 		t.Fatalf("expected stored file url to be nil, got %#v", stored.Message.Parts[1].File.URL)
 	}

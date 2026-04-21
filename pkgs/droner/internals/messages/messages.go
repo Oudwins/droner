@@ -61,7 +61,7 @@ func NewFilePart(path string) MessagePart {
 		Type: PartTypeFile,
 		File: &FilePartData{
 			URL:      nil,
-			Mime:     mimeTypeForPath(cleanPath),
+			Mime:     "text/plain",
 			Filename: filepath.Base(cleanPath),
 			Source: &FilePartSourceData{
 				Type: "file",

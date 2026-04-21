@@ -380,6 +380,9 @@ func TestComposerPromptTracksFileReferences(t *testing.T) {
 	if message.Parts[1].File == nil || message.Parts[1].File.Source == nil || message.Parts[1].File.Source.Path != "pkgs/droner/tui/tui.go" {
 		t.Fatalf("file source = %#v, want pkgs/droner/tui/tui.go", message.Parts[1].File)
 	}
+	if message.Parts[1].File.Source.Text == nil || message.Parts[1].File.Source.Text.Start != 8 || message.Parts[1].File.Source.Text.End != 31 || message.Parts[1].File.Source.Text.Value != "@pkgs/droner/tui/tui.go" {
+		t.Fatalf("file source text = %#v", message.Parts[1].File.Source.Text)
+	}
 	if message.Parts[1].File.URL != nil {
 		t.Fatalf("expected nil file url, got %#v", message.Parts[1].File.URL)
 	}
@@ -459,6 +462,9 @@ func TestSessionComposerTabInsertsStructuredFileReference(t *testing.T) {
 	}
 	if message.Parts[1].Type != messages.PartTypeFile {
 		t.Fatalf("expected file part, got %#v", message.Parts[1])
+	}
+	if message.Parts[1].File == nil || message.Parts[1].File.Source == nil || message.Parts[1].File.Source.Text == nil || message.Parts[1].File.Source.Text.Value != "@pkgs/droner/tui/tui.go" {
+		t.Fatalf("expected file source text metadata, got %#v", message.Parts[1].File)
 	}
 }
 

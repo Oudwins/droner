@@ -129,8 +129,33 @@ func (c *opencodeClient) SendPrompt(ctx context.Context, sessionID string, direc
 		}
 		sessionID = id
 	}
-	_, err = c.sdk.Session.Prompt(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
-	return err
+	payload, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("%s/session/%s/prompt_async", c.baseURL, sessionID)
+	if query := params.URLQuery(); len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		if len(bodyBytes) == 0 {
+			return fmt.Errorf("opencode prompt request failed: %s", resp.Status)
+		}
+		return fmt.Errorf("opencode prompt request failed: %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 func (c *opencodeClient) SendCommand(ctx context.Context, sessionID string, directory string, model string, agentName string, command *messages.CommandInvocation) error {
@@ -247,9 +272,7 @@ func opencodeCommandFilePartFromMessagePart(part messages.MessagePart, worktreeP
 	if filePart.Filename == "" {
 		filePart.Filename = filepath.Base(relativePath)
 	}
-	if filePart.Mime == "" {
-		filePart.Mime = mimeTypeForPath(relativePath)
-	}
+	filePart.Mime = "text/plain"
 	filePart.URL = fileURL
 	filePart.Source = &opencodeCommandFileSource{
 		Type: "file",

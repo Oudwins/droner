@@ -16,32 +16,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
-func writePromptOK(w http.ResponseWriter, sessionID string) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"info": map[string]any{
-			"id":         "m1",
-			"cost":       0,
-			"mode":       "default",
-			"modelID":    "gpt-5-mini",
-			"parentID":   "",
-			"path":       map[string]any{"cwd": "", "root": ""},
-			"providerID": "openai",
-			"role":       "assistant",
-			"sessionID":  sessionID,
-			"system":     []any{},
-			"time":       map[string]any{"created": 0, "completed": 0},
-			"tokens": map[string]any{
-				"cache":     map[string]any{"read": 0, "write": 0},
-				"input":     0,
-				"output":    0,
-				"reasoning": 0,
-			},
-		},
-		"parts": []any{},
-	})
-}
-
 func writeCommandOK(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
@@ -64,7 +38,7 @@ func opencodeConfigFromServer(t *testing.T, srv *httptest.Server) conf.OpenCodeC
 	return conf.OpenCodeConfig{Hostname: host, Port: port}
 }
 
-func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
+func TestSendOpencodeMessage_CallsPromptAsyncEndpoint(t *testing.T) {
 	worktreeDir := t.TempDir()
 	filePath := filepath.Join(worktreeDir, "pkgs", "droner", "tui", "tui.go")
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
@@ -73,12 +47,15 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("package tui\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	expectedMime := messages.NewFilePart("pkgs/droner/tui/tui.go").File.Mime
+	expectedMime := "text/plain"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if got := r.URL.Query().Get("directory"); got != worktreeDir {
+			t.Fatalf("directory query = %q, want %q", got, worktreeDir)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -128,7 +105,7 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 		if !ok {
 			t.Fatalf("source.text = %#v, want object", source["text"])
 		}
-		if text["start"] != float64(0) || text["end"] != float64(0) || text["value"] != "" {
+		if text["start"] != float64(8) || text["end"] != float64(31) || text["value"] != "@pkgs/droner/tui/tui.go" {
 			t.Fatalf("source.text = %#v", text)
 		}
 		model, ok := body["model"].(map[string]any)
@@ -144,22 +121,23 @@ func TestSendOpencodeMessage_CallsMessageEndpoint(t *testing.T) {
 		if body["agent"] != "plan" {
 			t.Fatalf("agent = %v, want plan", body["agent"])
 		}
-		writePromptOK(w, "abc")
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	backend := LocalBackend{}
 	filePart := messages.NewFilePart("pkgs/droner/tui/tui.go")
+	filePart.File.Source.Text = &messages.FilePartSourceTextData{Start: 8, End: 31, Value: "@pkgs/droner/tui/tui.go"}
 	msg := &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello"), filePart}}
 	if err := backend.sendOpencodeMessage(context.Background(), opencodeConfigFromServer(t, srv), "abc", worktreeDir, "openai/gpt-5-mini", "plan", msg); err != nil {
 		t.Fatalf("sendOpencodeMessage: %v", err)
 	}
 }
 
-func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
+func TestSeedOpencodeMessage_CallsPromptAsyncEndpointWithNoReply(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
 		}
@@ -173,7 +151,7 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 		if body["agent"] != "build" {
 			t.Fatalf("agent = %v, want build", body["agent"])
 		}
-		writePromptOK(w, "abc")
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -188,7 +166,7 @@ func TestSeedOpencodeMessage_CallsMessageEndpointWithNoReply(t *testing.T) {
 func TestSendOpencodeMessage_ForwardsInlineImagePartsUnchanged(t *testing.T) {
 	mux := http.NewServeMux()
 	inlinePart := messages.NewDataURLFilePart("image/png", "pasted-image-1.png", "data:image/png;base64,ZmFrZQ==")
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
 		}
@@ -216,7 +194,7 @@ func TestSendOpencodeMessage_ForwardsInlineImagePartsUnchanged(t *testing.T) {
 		if _, exists := filePart["source"]; exists {
 			t.Fatalf("expected inline file part source to be omitted, got %#v", filePart["source"])
 		}
-		writePromptOK(w, "abc")
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -273,9 +251,16 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if filePart["type"] != "file" || filePart["filename"] != "README.md" {
 			t.Fatalf("file part = %#v", filePart)
 		}
+		if filePart["mime"] != "text/plain" {
+			t.Fatalf("mime = %v, want text/plain", filePart["mime"])
+		}
 		source, ok := filePart["source"].(map[string]any)
 		if !ok || source["path"] != "README.md" {
 			t.Fatalf("source = %#v", filePart["source"])
+		}
+		text, ok := source["text"].(map[string]any)
+		if !ok || text["start"] != float64(11) || text["end"] != float64(21) || text["value"] != "@README.md" {
+			t.Fatalf("source.text = %#v", source["text"])
 		}
 		imagePart, ok := parts[1].(map[string]any)
 		if !ok {
@@ -297,7 +282,11 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		Name:      "review",
 		Arguments: "README.md [Image 1]",
 		Parts: []messages.MessagePart{
-			messages.NewFilePart("README.md"),
+			func() messages.MessagePart {
+				part := messages.NewFilePart("README.md")
+				part.File.Source.Text = &messages.FilePartSourceTextData{Start: 11, End: 21, Value: "@README.md"}
+				return part
+			}(),
 			inlinePart,
 		},
 	}
@@ -324,5 +313,17 @@ func TestNewFilePartStartsWithNilURL(t *testing.T) {
 	}
 	if part.File.URL != nil {
 		t.Fatalf("expected nil url, got %#v", part.File.URL)
+	}
+}
+
+func TestParseOpencodeModel_NormalizesLegacyGPT5Dot4Name(t *testing.T) {
+	t.Parallel()
+
+	providerID, modelID, ok := parseOpencodeModel("openai/gpt-5-4")
+	if !ok {
+		t.Fatal("expected model parse to succeed")
+	}
+	if providerID != "openai" || modelID != "gpt-5.4" {
+		t.Fatalf("parseOpencodeModel = (%q, %q), want (%q, %q)", providerID, modelID, "openai", "gpt-5.4")
 	}
 }

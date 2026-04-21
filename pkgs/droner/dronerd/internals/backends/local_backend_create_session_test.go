@@ -14,7 +14,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
-func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.T) {
+func TestLocalBackend_CreateSession_AutorunsPromptViaPromptAsyncEndpoint(t *testing.T) {
 	origTimeout := opencodeAutorunTimeout
 	opencodeAutorunTimeout = 250 * time.Millisecond
 	t.Cleanup(func() { opencodeAutorunTimeout = origTimeout })
@@ -51,9 +51,12 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"abc"}`))
 	})
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if dir := r.URL.Query().Get("directory"); dir != worktreePath {
+			t.Fatalf("directory = %q, want %q", dir, worktreePath)
 		}
 		select {
 		case <-messageStarted:
@@ -76,19 +79,9 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 			t.Fatalf("parts missing or empty")
 		}
 		gotMessage = true
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"info":{"role":"assistant"},"parts":[`))
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
 		select {
 		case <-releaseMessage:
-			_, _ = w.Write([]byte(`{"type":"text","text":"ok"}]}`))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+			w.WriteHeader(http.StatusNoContent)
 			close(messageDone)
 		case <-r.Context().Done():
 			select {
@@ -124,7 +117,7 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 	case <-messageStarted:
 		// ok
 	case <-time.After(1 * time.Second):
-		t.Fatalf("timed out waiting for POST to /session/abc/message")
+		t.Fatalf("timed out waiting for POST to /session/abc/prompt_async")
 	}
 	close(releaseMessage)
 	select {
@@ -134,7 +127,7 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaMessageEndpoint(t *testing.
 		t.Fatalf("timed out waiting for message request to finish")
 	}
 	if !gotMessage {
-		t.Fatalf("expected a POST to /session/abc/message")
+		t.Fatalf("expected a POST to /session/abc/prompt_async")
 	}
 	select {
 	case err := <-handlerErr:
@@ -168,7 +161,7 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"abc"}`))
 	})
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-messageStarted:
 		default:
@@ -225,7 +218,7 @@ func TestLocalBackend_CreateSession_DoesNotCreateOpencodeSessionWithoutPrompt(t 
 		sessionCalled = true
 		w.WriteHeader(http.StatusInternalServerError)
 	})
-	mux.HandleFunc("/session/abc/message", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		messageCalled = true
 		w.WriteHeader(http.StatusInternalServerError)
 	})
@@ -251,6 +244,6 @@ func TestLocalBackend_CreateSession_DoesNotCreateOpencodeSessionWithoutPrompt(t 
 		t.Fatal("expected no POST to /session when prompt is empty")
 	}
 	if messageCalled {
-		t.Fatal("expected no POST to /session/abc/message when prompt is empty")
+		t.Fatal("expected no POST to /session/abc/prompt_async when prompt is empty")
 	}
 }
