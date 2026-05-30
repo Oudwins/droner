@@ -58,6 +58,8 @@ func NewServer(store Store, opts ServerOptions) *Server {
 			"fmtTime":                 fmtTime,
 			"fmtElapsedBetween":       fmtElapsedBetween,
 			"fmtElapsedSincePrevious": fmtElapsedSincePrevious,
+			"topicSelected":           topicSelected,
+			"streamLink":              streamLink,
 		}).Parse(pageTemplate)),
 		mux: http.NewServeMux(),
 	}
@@ -121,8 +123,13 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 
 	streamID := strings.TrimSpace(r.FormValue("stream_id"))
 	eventID := strings.TrimSpace(r.FormValue("event_id"))
+	topic := normalizeTopic(r.FormValue("topic"))
 	if streamID == "" || eventID == "" {
 		http.Error(w, "stream_id and event_id are required", http.StatusBadRequest)
+		return
+	}
+	if topic != topicSessions {
+		http.Error(w, "reset is only supported for sessions streams", http.StatusBadRequest)
 		return
 	}
 
@@ -164,9 +171,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := parseLimit(r, s.defaultListLimit)
+	topics := r.URL.Query()["topic"]
 	streams, err := s.store.ListStreams(r.Context(), ListOptions{
-		Query: r.URL.Query().Get("q"),
-		Limit: limit,
+		Topics: topics,
+		Query:  r.URL.Query().Get("q"),
+		Limit:  limit,
 	})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to list streams: %v", err), http.StatusInternalServerError)
@@ -176,25 +185,37 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	var selected *Stream
 	selectedGroups := make([]eventGroupView, 0)
 	selectedID := strings.TrimSpace(r.URL.Query().Get("stream"))
+	selectedStreamTopic := normalizeTopic(r.URL.Query().Get("stream_topic"))
 	if selectedID != "" {
-		stream, err := s.store.LoadStream(r.Context(), selectedID, StreamOptions{Limit: parseStreamLimit(r, s.defaultStreamLimit)})
+		loadTopic := selectedStreamTopic
+		if loadTopic == topicAll {
+			loadTopic = selectedTopicForLoad(topics)
+		}
+		stream, err := s.store.LoadStream(r.Context(), selectedID, StreamOptions{Topic: loadTopic, Limit: parseStreamLimit(r, s.defaultStreamLimit)})
 		if err != nil && !errors.Is(err, ErrStreamNotFound) {
+			if isAmbiguousStreamError(err) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, fmt.Sprintf("failed to load stream: %v", err), http.StatusInternalServerError)
 			return
 		}
 		if err == nil {
 			selected = &stream
+			selectedStreamTopic = stream.Topic
 			selectedGroups = buildEventGroups(stream.Events)
 		}
 	}
 
 	data := pageData{
 		Title:          s.title,
+		Topics:         topics,
 		Query:          r.URL.Query().Get("q"),
 		Streams:        streams,
 		Selected:       selected,
 		SelectedGroups: selectedGroups,
 		SelectedStream: selectedID,
+		SelectedTopic:  selectedStreamTopic,
 		ListLimit:      limit,
 		StreamLimit:    parseStreamLimit(r, s.defaultStreamLimit),
 	}
@@ -222,8 +243,9 @@ func (s *Server) handleListAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	streams, err := s.store.ListStreams(r.Context(), ListOptions{
-		Query: r.URL.Query().Get("q"),
-		Limit: parseLimit(r, s.defaultListLimit),
+		Topics: r.URL.Query()["topic"],
+		Query:  r.URL.Query().Get("q"),
+		Limit:  parseLimit(r, s.defaultListLimit),
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -238,11 +260,14 @@ func (s *Server) handleStreamAPI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	stream, err := s.store.LoadStream(r.Context(), streamID, StreamOptions{Limit: parseStreamLimit(r, s.defaultStreamLimit)})
+	stream, err := s.store.LoadStream(r.Context(), streamID, StreamOptions{Topic: selectedTopicForLoad(r.URL.Query()["topic"]), Limit: parseStreamLimit(r, s.defaultStreamLimit)})
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrStreamNotFound) {
 			status = http.StatusNotFound
+		}
+		if isAmbiguousStreamError(err) {
+			status = http.StatusConflict
 		}
 		writeJSON(w, status, map[string]any{"error": err.Error()})
 		return
@@ -275,13 +300,46 @@ func parseStreamLimit(r *http.Request, fallback int) int {
 
 func buildSelectedStreamURL(streamID string, values url.Values) string {
 	q := url.Values{}
+	for _, topic := range values["topic"] {
+		if trimmed := strings.TrimSpace(topic); trimmed != "" {
+			q.Add("topic", trimmed)
+		}
+	}
 	for _, key := range []string{"q", "limit", "stream_limit"} {
 		if value := strings.TrimSpace(values.Get(key)); value != "" {
 			q.Set(key, value)
 		}
 	}
+	if value := strings.TrimSpace(values.Get("stream_topic")); value != "" {
+		q.Set("stream_topic", value)
+	}
 	q.Set("stream", streamID)
 	return "/?" + q.Encode()
+}
+
+func streamLink(topics []string, query string, listLimit int, streamLimit int, stream StreamSummary) string {
+	q := url.Values{}
+	for _, topic := range topics {
+		if trimmed := strings.TrimSpace(topic); trimmed != "" {
+			q.Add("topic", trimmed)
+		}
+	}
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		q.Set("q", trimmed)
+	}
+	q.Set("limit", strconv.Itoa(listLimit))
+	q.Set("stream_limit", strconv.Itoa(streamLimit))
+	q.Set("stream_topic", stream.Topic)
+	q.Set("stream", stream.StreamID)
+	return "/?" + q.Encode()
+}
+
+func selectedTopicForLoad(topics []string) string {
+	normalized := normalizeTopics(topics)
+	if len(normalized) == 1 {
+		return normalized[0]
+	}
+	return topicAll
 }
 
 func parsePositiveInt(raw string, fallback int) int {
@@ -403,11 +461,13 @@ func eventActionParts(eventType string) (string, string) {
 
 type pageData struct {
 	Title          string
+	Topics         []string
 	Query          string
 	Streams        []StreamSummary
 	Selected       *Stream
 	SelectedGroups []eventGroupView
 	SelectedStream string
+	SelectedTopic  string
 	ListLimit      int
 	StreamLimit    int
 }
@@ -490,6 +550,25 @@ const pageTemplate = `<!doctype html>
       font: inherit;
       background: var(--panel);
       color: var(--text);
+    }
+    .topic-options {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+    .topic-options label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .topic-options input {
+      width: auto;
+      margin: 0;
     }
     button {
       border: 0;
@@ -648,16 +727,23 @@ const pageTemplate = `<!doctype html>
       <h1>{{.Title}}</h1>
       <p class="muted">Internal event stream browser for debugging and replay inspection.</p>
       <form class="search" method="get" action="/">
+        <div class="topic-options">
+          <label><input type="checkbox" name="topic" value="all" {{if topicSelected .Topics "all"}}checked{{end}}> all topics</label>
+          <label><input type="checkbox" name="topic" value="sessions" {{if topicSelected .Topics "sessions"}}checked{{end}}> sessions</label>
+          <label><input type="checkbox" name="topic" value="pullrequests" {{if topicSelected .Topics "pullrequests"}}checked{{end}}> pullrequests</label>
+        </div>
         <input type="text" name="q" value="{{.Query}}" placeholder="search stream id">
         <input type="text" name="limit" value="{{.ListLimit}}" placeholder="list limit">
         <input type="text" name="stream_limit" value="{{.StreamLimit}}" placeholder="event limit">
         {{if .SelectedStream}}<input type="hidden" name="stream" value="{{.SelectedStream}}">{{end}}
+        {{if .SelectedTopic}}<input type="hidden" name="stream_topic" value="{{.SelectedTopic}}">{{end}}
         <button type="submit">Refresh</button>
       </form>
       <div class="stream-list">
         {{if .Streams}}
           {{range .Streams}}
-            <a class="stream-card {{if eq $.SelectedStream .StreamID}}active{{end}}" href="/?q={{$.Query}}&limit={{$.ListLimit}}&stream_limit={{$.StreamLimit}}&stream={{pathEscape .StreamID}}">
+            <a class="stream-card {{if eq $.SelectedStream .StreamID}}active{{end}}" href="{{streamLink $.Topics $.Query $.ListLimit $.StreamLimit .}}">
+              <div class="stream-meta">{{.Topic}}</div>
               <div class="stream-id">{{.StreamID}}</div>
               <div class="stream-meta">{{.EventCount}} events</div>
               <div class="stream-meta">first {{fmtTime .FirstOccurredAt}}</div>
@@ -673,6 +759,7 @@ const pageTemplate = `<!doctype html>
       {{if .Selected}}
         <section class="hero">
           <h2>{{.Selected.Summary.StreamID}}</h2>
+          <p class="muted">topic {{.Selected.Topic}}</p>
           <p class="muted">{{.Selected.Summary.EventCount}} total events. {{fmtElapsedBetween .Selected.Summary.FirstOccurredAt .Selected.Summary.LastOccurredAt}} total. Showing up to {{$.StreamLimit}}.</p>
           <p class="muted">first {{fmtTime .Selected.Summary.FirstOccurredAt}} | last {{fmtTime .Selected.Summary.LastOccurredAt}}</p>
         </section>
@@ -711,16 +798,20 @@ const pageTemplate = `<!doctype html>
                          <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
                          <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
                        </div>
-                       <div class="event-actions">
-                         <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
-                           <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
-                           <input type="hidden" name="event_id" value="{{$event.ID}}">
-                           <input type="hidden" name="q" value="{{$.Query}}">
-                           <input type="hidden" name="limit" value="{{$.ListLimit}}">
-                           <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
-                           <button type="submit">Reset To Here</button>
-                         </form>
-                       </div>
+                        {{if eq $.Selected.Topic "sessions"}}
+                          <div class="event-actions">
+                            <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
+                              <input type="hidden" name="topic" value="{{$.Selected.Topic}}">
+                              <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
+                              <input type="hidden" name="stream_topic" value="{{$.Selected.Topic}}">
+                              <input type="hidden" name="event_id" value="{{$event.ID}}">
+                              <input type="hidden" name="q" value="{{$.Query}}">
+                              <input type="hidden" name="limit" value="{{$.ListLimit}}">
+                              <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
+                              <button type="submit">Reset To Here</button>
+                            </form>
+                          </div>
+                        {{end}}
                         <pre>{{prettyJSON $event.Payload}}</pre>
                       </div>
                     </article>
@@ -747,16 +838,20 @@ const pageTemplate = `<!doctype html>
                     <div><strong>causation</strong><br>{{if $event.CausationID}}{{$event.CausationID}}{{else}}-{{end}}</div>
                     <div><strong>correlation</strong><br>{{if $event.CorrelationID}}{{$event.CorrelationID}}{{else}}-{{end}}</div>
                   </div>
-                  <div class="event-actions">
-                    <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
-                      <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
-                      <input type="hidden" name="event_id" value="{{$event.ID}}">
-                      <input type="hidden" name="q" value="{{$.Query}}">
-                      <input type="hidden" name="limit" value="{{$.ListLimit}}">
-                      <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
-                      <button type="submit">Reset To Here</button>
-                    </form>
-                  </div>
+                  {{if eq $.Selected.Topic "sessions"}}
+                    <div class="event-actions">
+                      <form method="post" action="/reset" onsubmit="return confirm('Reset this session to v{{$event.StreamVersion}} {{$event.EventType}}?');">
+                        <input type="hidden" name="topic" value="{{$.Selected.Topic}}">
+                        <input type="hidden" name="stream_id" value="{{$event.StreamID}}">
+                        <input type="hidden" name="stream_topic" value="{{$.Selected.Topic}}">
+                        <input type="hidden" name="event_id" value="{{$event.ID}}">
+                        <input type="hidden" name="q" value="{{$.Query}}">
+                        <input type="hidden" name="limit" value="{{$.ListLimit}}">
+                        <input type="hidden" name="stream_limit" value="{{$.StreamLimit}}">
+                        <button type="submit">Reset To Here</button>
+                      </form>
+                    </div>
+                  {{end}}
                   <pre>{{prettyJSON $event.Payload}}</pre>
                 </div>
               </article>

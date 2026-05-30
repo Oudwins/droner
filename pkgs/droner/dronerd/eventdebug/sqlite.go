@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -54,20 +55,32 @@ func (s *SQLiteStore) ListStreams(ctx context.Context, opts ListOptions) ([]Stre
 	if limit <= 0 {
 		limit = 100
 	}
+	topics := normalizeTopics(opts.Topics)
 
 	query := "%"
 	if trimmed := strings.TrimSpace(opts.Query); trimmed != "" {
 		query = "%" + trimmed + "%"
 	}
+	where := "stream_id LIKE ?"
+	args := []any{query}
+	if len(topics) > 0 {
+		where = fmt.Sprintf("topic IN (%s) AND stream_id LIKE ?", queryPlaceholders(len(topics)))
+		args = make([]any, 0, len(topics)+2)
+		for _, topic := range topics {
+			args = append(args, topic)
+		}
+		args = append(args, query)
+	}
+	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT stream_id, COUNT(*) AS event_count, MIN(occurred_at), MAX(occurred_at)
+		SELECT topic, stream_id, COUNT(*) AS event_count, MIN(occurred_at), MAX(occurred_at)
 		FROM %s
-		WHERE stream_id LIKE ?
-		GROUP BY stream_id
-		ORDER BY MIN(occurred_at) DESC, stream_id ASC
+		WHERE %s
+		GROUP BY topic, stream_id
+		ORDER BY MAX(occurred_at) DESC, topic ASC, stream_id ASC
 		LIMIT ?
-	`, s.tableName), query, limit)
+	`, s.tableName, where), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list streams: %w", err)
 	}
@@ -75,11 +88,12 @@ func (s *SQLiteStore) ListStreams(ctx context.Context, opts ListOptions) ([]Stre
 
 	streams := make([]StreamSummary, 0)
 	for rows.Next() {
+		var topic string
 		var streamID string
 		var eventCount int
 		var firstRaw any
 		var lastRaw any
-		if err := rows.Scan(&streamID, &eventCount, &firstRaw, &lastRaw); err != nil {
+		if err := rows.Scan(&topic, &streamID, &eventCount, &firstRaw, &lastRaw); err != nil {
 			return nil, fmt.Errorf("scan stream summary: %w", err)
 		}
 		firstAt, err := parseSQLiteTime(firstRaw)
@@ -91,6 +105,7 @@ func (s *SQLiteStore) ListStreams(ctx context.Context, opts ListOptions) ([]Stre
 			return nil, fmt.Errorf("parse last occurred_at for %q: %w", streamID, err)
 		}
 		streams = append(streams, StreamSummary{
+			Topic:           topic,
 			StreamID:        streamID,
 			EventCount:      eventCount,
 			FirstOccurredAt: firstAt,
@@ -109,6 +124,14 @@ func (s *SQLiteStore) LoadStream(ctx context.Context, streamID string, opts Stre
 	if trimmed == "" {
 		return Stream{}, ErrStreamNotFound
 	}
+	topic := normalizeTopic(opts.Topic)
+	if topic == topicAll {
+		resolvedTopic, err := s.resolveStreamTopic(ctx, trimmed)
+		if err != nil {
+			return Stream{}, err
+		}
+		topic = resolvedTopic
+	}
 
 	limit := opts.Limit
 	if limit <= 0 {
@@ -116,12 +139,12 @@ func (s *SQLiteStore) LoadStream(ctx context.Context, streamID string, opts Stre
 	}
 
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, stream_id, stream_version, event_type, schema_version, occurred_at, causation_id, correlation_id, payload
+		SELECT id, topic, stream_id, stream_version, event_type, schema_version, occurred_at, causation_id, correlation_id, payload
 		FROM %s
-		WHERE stream_id = ?
+		WHERE topic = ? AND stream_id = ?
 		ORDER BY stream_version ASC
 		LIMIT ?
-	`, s.tableName), trimmed, limit)
+	`, s.tableName), topic, trimmed, limit)
 	if err != nil {
 		return Stream{}, fmt.Errorf("load stream: %w", err)
 	}
@@ -136,6 +159,7 @@ func (s *SQLiteStore) LoadStream(ctx context.Context, streamID string, opts Stre
 		var payloadRaw any
 		if err := rows.Scan(
 			&evt.ID,
+			&evt.Topic,
 			&evt.StreamID,
 			&evt.StreamVersion,
 			&evt.EventType,
@@ -169,7 +193,9 @@ func (s *SQLiteStore) LoadStream(ctx context.Context, streamID string, opts Stre
 	}
 
 	stream := Stream{
+		Topic: topic,
 		Summary: StreamSummary{
+			Topic:           topic,
 			StreamID:        trimmed,
 			EventCount:      len(events),
 			FirstOccurredAt: events[0].OccurredAt,
@@ -179,11 +205,100 @@ func (s *SQLiteStore) LoadStream(ctx context.Context, streamID string, opts Stre
 	}
 
 	var totalCount int
-	if err := s.db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE stream_id = ?`, s.tableName), trimmed).Scan(&totalCount); err == nil {
+	if err := s.db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE topic = ? AND stream_id = ?`, s.tableName), topic, trimmed).Scan(&totalCount); err == nil {
 		stream.Summary.EventCount = totalCount
 	}
 
 	return stream, nil
+}
+
+func (s *SQLiteStore) resolveStreamTopic(ctx context.Context, streamID string) (string, error) {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT DISTINCT topic
+		FROM %s
+		WHERE stream_id = ?
+		ORDER BY topic ASC
+	`, s.tableName), streamID)
+	if err != nil {
+		return "", fmt.Errorf("resolve stream topic: %w", err)
+	}
+	defer rows.Close()
+
+	topics := make([]string, 0, 1)
+	for rows.Next() {
+		var topic string
+		if err := rows.Scan(&topic); err != nil {
+			return "", fmt.Errorf("scan stream topic: %w", err)
+		}
+		topics = append(topics, topic)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate stream topics: %w", err)
+	}
+	if len(topics) == 0 {
+		return "", ErrStreamNotFound
+	}
+	if len(topics) > 1 {
+		return "", fmt.Errorf("stream %q exists in multiple topics (%s); select a topic", streamID, strings.Join(topics, ", "))
+	}
+	return topics[0], nil
+}
+
+func normalizeTopic(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", topicAll:
+		return topicAll
+	case topicSessions:
+		return topicSessions
+	case topicPullRequests:
+		return topicPullRequests
+	default:
+		return topicAll
+	}
+}
+
+func normalizeTopics(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	topics := make([]string, 0, len(values))
+	for _, value := range values {
+		topic := normalizeTopic(value)
+		if topic == topicAll {
+			return nil
+		}
+		if seen[topic] {
+			continue
+		}
+		seen[topic] = true
+		topics = append(topics, topic)
+	}
+	return topics
+}
+
+func topicSelected(topics []string, topic string) bool {
+	normalized := normalizeTopics(topics)
+	if topic == topicAll {
+		return len(normalized) == 0
+	}
+	for _, selected := range normalized {
+		if selected == topic {
+			return true
+		}
+	}
+	return false
+}
+
+func queryPlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", count), ",")
+}
+
+func isAmbiguousStreamError(err error) bool {
+	return err != nil && !errors.Is(err, ErrStreamNotFound) && strings.Contains(err.Error(), "exists in multiple topics")
 }
 
 func parseSQLiteTime(raw any) (time.Time, error) {

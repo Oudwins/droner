@@ -18,20 +18,37 @@ type memoryStore struct {
 }
 
 func (m memoryStore) ListStreams(_ context.Context, opts ListOptions) ([]StreamSummary, error) {
-	if strings.TrimSpace(opts.Query) == "" {
-		return m.streams, nil
-	}
+	topics := normalizeTopics(opts.Topics)
 	filtered := make([]StreamSummary, 0)
 	for _, stream := range m.streams {
-		if strings.Contains(stream.StreamID, opts.Query) {
+		if len(topics) > 0 && !topicInSet(topics, stream.Topic) {
+			continue
+		}
+		if strings.TrimSpace(opts.Query) == "" || strings.Contains(stream.StreamID, opts.Query) {
 			filtered = append(filtered, stream)
 		}
 	}
 	return filtered, nil
 }
 
-func (m memoryStore) LoadStream(_ context.Context, streamID string, _ StreamOptions) (Stream, error) {
-	stream, ok := m.byID[streamID]
+func topicInSet(topics []string, topic string) bool {
+	for _, selected := range topics {
+		if selected == topic {
+			return true
+		}
+	}
+	return false
+}
+
+func (m memoryStore) LoadStream(_ context.Context, streamID string, opts StreamOptions) (Stream, error) {
+	key := streamID
+	if topic := normalizeTopic(opts.Topic); topic != topicAll {
+		key = topic + ":" + streamID
+	}
+	stream, ok := m.byID[key]
+	if !ok && normalizeTopic(opts.Topic) != topicAll {
+		stream, ok = m.byID[streamID]
+	}
 	if !ok {
 		return Stream{}, ErrStreamNotFound
 	}
@@ -41,8 +58,11 @@ func (m memoryStore) LoadStream(_ context.Context, streamID string, _ StreamOpti
 func TestServerListAPI(t *testing.T) {
 	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
 	server := NewServer(memoryStore{
-		streams: []StreamSummary{{StreamID: "session/a", EventCount: 2, FirstOccurredAt: now, LastOccurredAt: now}},
-		byID:    map[string]Stream{},
+		streams: []StreamSummary{
+			{Topic: topicSessions, StreamID: "session/a", EventCount: 2, FirstOccurredAt: now, LastOccurredAt: now},
+			{Topic: topicPullRequests, StreamID: "github:owner/repo#1", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+		},
+		byID: map[string]Stream{},
 	}, ServerOptions{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/streams", nil)
@@ -58,8 +78,52 @@ func TestServerListAPI(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(payload.Streams) != 1 || payload.Streams[0].StreamID != "session/a" {
+	if len(payload.Streams) != 2 {
 		t.Fatalf("unexpected streams payload: %#v", payload.Streams)
+	}
+	if payload.Streams[0].Topic != topicSessions || payload.Streams[1].Topic != topicPullRequests {
+		t.Fatalf("unexpected stream topics: %#v", payload.Streams)
+	}
+}
+
+func TestServerListAPIFiltersTopic(t *testing.T) {
+	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
+	server := NewServer(memoryStore{
+		streams: []StreamSummary{
+			{Topic: topicSessions, StreamID: "session/a", EventCount: 2, FirstOccurredAt: now, LastOccurredAt: now},
+			{Topic: topicPullRequests, StreamID: "github:owner/repo#1", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+		},
+		byID: map[string]Stream{},
+	}, ServerOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/streams?topic=pullrequests", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var payload struct {
+		Streams []StreamSummary `json:"streams"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(payload.Streams) != 1 || payload.Streams[0].Topic != topicPullRequests {
+		t.Fatalf("unexpected streams payload: %#v", payload.Streams)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/streams?topic=sessions&topic=pullrequests", nil)
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("multi-topic status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal multi-topic response: %v", err)
+	}
+	if len(payload.Streams) != 2 {
+		t.Fatalf("multi-topic streams payload: %#v", payload.Streams)
 	}
 }
 
@@ -68,14 +132,15 @@ func TestServerStreamAPI(t *testing.T) {
 	server := NewServer(memoryStore{
 		streams: nil,
 		byID: map[string]Stream{
-			"session/a": {
-				Summary: StreamSummary{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
-				Events:  []Event{{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.queued", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"ok":true}`)}},
+			"sessions:session/a": {
+				Topic:   topicSessions,
+				Summary: StreamSummary{Topic: topicSessions, StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+				Events:  []Event{{ID: "evt-1", Topic: topicSessions, StreamID: "session/a", StreamVersion: 1, EventType: "session.queued", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"ok":true}`)}},
 			},
 		},
 	}, ServerOptions{})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/streams/session%2Fa", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/streams/session%2Fa?topic=sessions", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -97,21 +162,22 @@ func TestServerStreamAPI(t *testing.T) {
 func TestServerRendersHTMLPage(t *testing.T) {
 	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
 	server := NewServer(memoryStore{
-		streams: []StreamSummary{{StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now}},
+		streams: []StreamSummary{{Topic: topicSessions, StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now}},
 		byID: map[string]Stream{
-			"session/a": {
-				Summary: StreamSummary{StreamID: "session/a", EventCount: 4, FirstOccurredAt: now, LastOccurredAt: now.Add(2500 * time.Millisecond)},
+			"sessions:session/a": {
+				Topic:   topicSessions,
+				Summary: StreamSummary{Topic: topicSessions, StreamID: "session/a", EventCount: 4, FirstOccurredAt: now, LastOccurredAt: now.Add(2500 * time.Millisecond)},
 				Events: []Event{
-					{ID: "evt-1", StreamID: "session/a", StreamVersion: 1, EventType: "session.environment_provisioning.started", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
-					{ID: "evt-2", StreamID: "session/a", StreamVersion: 2, EventType: "session.environment_provisioning.success", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
-					{ID: "evt-3", StreamID: "session/a", StreamVersion: 3, EventType: "session.environment_provisioning.failed", SchemaVersion: 1, OccurredAt: now.Add(1800 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
-					{ID: "evt-4", StreamID: "session/a", StreamVersion: 4, EventType: "session.execution.started", SchemaVersion: 1, OccurredAt: now.Add(2500 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-1", Topic: topicSessions, StreamID: "session/a", StreamVersion: 1, EventType: "session.environment_provisioning.started", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-2", Topic: topicSessions, StreamID: "session/a", StreamVersion: 2, EventType: "session.environment_provisioning.success", SchemaVersion: 1, OccurredAt: now.Add(1200 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-3", Topic: topicSessions, StreamID: "session/a", StreamVersion: 3, EventType: "session.environment_provisioning.failed", SchemaVersion: 1, OccurredAt: now.Add(1800 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
+					{ID: "evt-4", Topic: topicSessions, StreamID: "session/a", StreamVersion: 4, EventType: "session.execution.started", SchemaVersion: 1, OccurredAt: now.Add(2500 * time.Millisecond), Payload: json.RawMessage(`{"path":"/tmp/repo"}`)},
 				},
 			},
 		},
 	}, ServerOptions{})
 
-	req := httptest.NewRequest(http.MethodGet, "/?stream=session%2Fa", nil)
+	req := httptest.NewRequest(http.MethodGet, "/?topic=sessions&stream=session%2Fa", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -148,6 +214,48 @@ func TestServerRendersHTMLPage(t *testing.T) {
 	}
 }
 
+func TestServerDefaultsToAllTopicsAndHidesResetForPullRequests(t *testing.T) {
+	now := time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC)
+	server := NewServer(memoryStore{
+		streams: []StreamSummary{
+			{Topic: topicSessions, StreamID: "session/a", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+			{Topic: topicPullRequests, StreamID: "github:owner/repo#1", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+		},
+		byID: map[string]Stream{
+			"pullrequests:github:owner/repo#1": {
+				Topic:   topicPullRequests,
+				Summary: StreamSummary{Topic: topicPullRequests, StreamID: "github:owner/repo#1", EventCount: 1, FirstOccurredAt: now, LastOccurredAt: now},
+				Events:  []Event{{ID: "evt-1", Topic: topicPullRequests, StreamID: "github:owner/repo#1", StreamVersion: 1, EventType: "pr.observed", SchemaVersion: 1, OccurredAt: now, Payload: json.RawMessage(`{"number":1}`)}},
+			},
+		},
+	}, ServerOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="all" checked`) {
+		t.Fatalf("expected all topic selected by default, body=%s", body)
+	}
+	if !strings.Contains(body, "session/a") || !strings.Contains(body, "github:owner/repo#1") {
+		t.Fatalf("expected all topics to render, body=%s", body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/?topic=pullrequests&stream=github%3Aowner%2Frepo%231", nil)
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	body = rec.Body.String()
+	if strings.Contains(body, "Reset To Here") {
+		t.Fatalf("did not expect reset button for pullrequests stream, body=%s", body)
+	}
+}
+
 func TestServerResetProxyForwardsToMainServer(t *testing.T) {
 	var (
 		called  bool
@@ -172,6 +280,7 @@ func TestServerResetProxyForwardsToMainServer(t *testing.T) {
 
 	server := NewServer(memoryStore{}, ServerOptions{MainServerURL: mainServer.URL})
 	form := url.Values{
+		"topic":        {topicSessions},
 		"stream_id":    {"session/a"},
 		"event_id":     {"evt-1"},
 		"q":            {"session"},
@@ -190,7 +299,7 @@ func TestServerResetProxyForwardsToMainServer(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusSeeOther, rec.Body.String())
 	}
-	if got, want := rec.Header().Get("Location"), "/?limit=12&q=session&stream=session%2Fa&stream_limit=34"; got != want {
+	if got, want := rec.Header().Get("Location"), "/?limit=12&q=session&stream=session%2Fa&stream_limit=34&topic=sessions"; got != want {
 		t.Fatalf("redirect location = %q, want %q", got, want)
 	}
 	if got := string(gotBody); got != `{"eventId":"evt-1","streamId":"session/a"}` {

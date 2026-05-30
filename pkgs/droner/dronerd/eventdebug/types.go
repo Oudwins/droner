@@ -9,7 +9,14 @@ import (
 
 var ErrStreamNotFound = errors.New("event stream not found")
 
+const (
+	topicAll          = "all"
+	topicSessions     = "sessions"
+	topicPullRequests = "pullrequests"
+)
+
 type StreamSummary struct {
+	Topic           string    `json:"topic"`
 	StreamID        string    `json:"streamId"`
 	EventCount      int       `json:"eventCount"`
 	FirstOccurredAt time.Time `json:"firstOccurredAt"`
@@ -18,6 +25,7 @@ type StreamSummary struct {
 
 type Event struct {
 	ID            string          `json:"id"`
+	Topic         string          `json:"topic"`
 	StreamID      string          `json:"streamId"`
 	StreamVersion int64           `json:"streamVersion"`
 	EventType     string          `json:"eventType"`
@@ -29,16 +37,19 @@ type Event struct {
 }
 
 type Stream struct {
+	Topic   string        `json:"topic"`
 	Summary StreamSummary `json:"summary"`
 	Events  []Event       `json:"events"`
 }
 
 type ListOptions struct {
-	Query string
-	Limit int
+	Topics []string
+	Query  string
+	Limit  int
 }
 
 type StreamOptions struct {
+	Topic string
 	Limit int
 }
 
