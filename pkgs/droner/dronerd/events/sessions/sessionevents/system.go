@@ -18,15 +18,13 @@ import (
 )
 
 const (
-	consumerHydrationProcess   = "session_hydration_process"
-	consumerProjection         = "session_projection"
-	consumerCreateProcess      = "session_create_process"
-	consumerCompleteProcess    = "session_complete_process"
-	consumerDeleteProcess      = "session_delete_process"
-	consumerRemoteSubscription = "session_remote_subscription"
-	consumerRemoteObservation  = "session_remote_observation"
-	listDirectionBefore        = "before"
-	listDirectionAfter         = "after"
+	consumerHydrationProcess = "session_hydration_process"
+	consumerProjection       = "session_projection"
+	consumerCreateProcess    = "session_create_process"
+	consumerCompleteProcess  = "session_complete_process"
+	consumerDeleteProcess    = "session_delete_process"
+	listDirectionBefore      = "before"
+	listDirectionAfter       = "after"
 )
 
 type System struct {
@@ -36,7 +34,6 @@ type System struct {
 	logger         *slog.Logger
 	config         *conf.Config
 	backends       *backends.Store
-	remoteSubs     *remoteSubscriptionState
 	runAgentEvents func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
 
 	startOnce sync.Once
@@ -92,14 +89,10 @@ type SessionRef struct {
 }
 
 func New(log eventlog.EventLog, projections ProjectionStore, resetter SessionResetter, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) *System {
-	return &System{log: log, projections: projections, resetter: resetter, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}
+	return &System{log: log, projections: projections, resetter: resetter, logger: logger, config: config, backends: backendStore, runAgentEvents: agentevents.RunOpenCode}
 }
 
 func (s *System) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.closeRemoteSubscriptions(context.Background())
 	return nil
 }
 

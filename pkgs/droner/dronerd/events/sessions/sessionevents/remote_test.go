@@ -14,7 +14,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -95,63 +94,6 @@ func (b *remoteTestBackend) HydrateCalls() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.hydrateCalls
-}
-
-type remoteSubscriptionStub struct {
-	mu               sync.Mutex
-	handlers         map[string]remote.BranchEventHandler
-	subscribeCalls   int
-	unsubscribeCalls int
-}
-
-func newRemoteSubscriptionStub() *remoteSubscriptionStub {
-	return &remoteSubscriptionStub{handlers: map[string]remote.BranchEventHandler{}}
-}
-
-func (s *remoteSubscriptionStub) subscribe(ctx context.Context, remoteURL string, branch string, handler remote.BranchEventHandler) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subscribeCalls++
-	s.handlers[remoteSubscriptionKey(remoteURL, branch)] = handler
-	return nil
-}
-
-func (s *remoteSubscriptionStub) unsubscribe(ctx context.Context, remoteURL string, branch string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.unsubscribeCalls++
-	delete(s.handlers, remoteSubscriptionKey(remoteURL, branch))
-	return nil
-}
-
-func (s *remoteSubscriptionStub) emit(event remote.BranchEvent) bool {
-	s.mu.Lock()
-	handler := s.handlers[remoteSubscriptionKey(event.RemoteURL, event.Branch)]
-	s.mu.Unlock()
-	if handler == nil {
-		return false
-	}
-	handler(event)
-	return true
-}
-
-func (s *remoteSubscriptionStub) hasSubscription(remoteURL string, branch string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.handlers[remoteSubscriptionKey(remoteURL, branch)]
-	return ok
-}
-
-func (s *remoteSubscriptionStub) waitForSubscription(t *testing.T, remoteURL string, branch string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if s.hasSubscription(remoteURL, branch) {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("subscription not registered for %s %s", remoteURL, branch)
 }
 
 func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, context.CancelFunc) {
@@ -256,52 +198,6 @@ func assertEventOrder(t *testing.T, got []eventlog.EventType, want ...eventlog.E
 	if pos != len(want) {
 		t.Fatalf("expected ordered subsequence %v in %v", want, got)
 	}
-}
-
-func TestSessionEventsDoesNotOwnRemoteSubscriptions(t *testing.T) {
-	stub := newRemoteSubscriptionStub()
-	originalSubscribe := subscribeRemoteBranchEvents
-	originalUnsubscribe := unsubscribeRemoteBranchEvents
-	subscribeRemoteBranchEvents = stub.subscribe
-	unsubscribeRemoteBranchEvents = stub.unsubscribe
-	t.Cleanup(func() {
-		subscribeRemoteBranchEvents = originalSubscribe
-		unsubscribeRemoteBranchEvents = originalUnsubscribe
-	})
-
-	system, backend, dataDir, _ := newRemoteTestSystem(t)
-
-	const (
-		streamID  = "stream-remote-1"
-		branch    = "watch-branch"
-		repoPath  = "/tmp/repo"
-		remoteURL = "git@github.com:org/repo.git"
-	)
-
-	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
-		StreamID:        streamID,
-		Harness:         conf.HarnessOpenCode,
-		RequestedBranch: branch,
-		BackendID:       conf.BackendLocal,
-		RepoPath:        repoPath,
-		RemoteURL:       remoteURL,
-	}); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	waitForPublicState(t, system, branch, PublicStateActiveIdle)
-	if stub.hasSubscription(remoteURL, branch) {
-		t.Fatal("sessionevents should not subscribe directly to remote branch events")
-	}
-	if backend.CompleteCalls() != 0 {
-		t.Fatalf("expected no completion calls, got %d", backend.CompleteCalls())
-	}
-
-	eventTypes := loadEventTypes(t, dataDir, streamID)
-	assertEventOrder(t, eventTypes,
-		eventTypeSessionQueued,
-		eventTypeSessionReady,
-	)
 }
 
 func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {

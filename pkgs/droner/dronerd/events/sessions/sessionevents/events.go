@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -41,9 +40,6 @@ const (
 	eventTypeSessionDeletionStarted                = eventlog.EventType("session.deletion.started")
 	eventTypeSessionDeletionSuccess                = eventlog.EventType("session.deletion.success")
 	eventTypeSessionDeletionFailed                 = eventlog.EventType("session.deletion.failed")
-	eventTypeRemotePRClosed                        = eventlog.EventType("remote.pr.closed")
-	eventTypeRemotePRMerged                        = eventlog.EventType("remote.pr.merged")
-	eventTypeRemoteBranchDeleted                   = eventlog.EventType("remote.branch.deleted")
 	eventTypeSessionPRLinked                       = eventlog.EventType("session.pr.linked")
 	eventTypeSessionPRStateChanged                 = eventlog.EventType("session.pr.state_changed")
 	eventTypeSessionPRCIStateChanged               = eventlog.EventType("session.pr.ci_state_changed")
@@ -78,14 +74,6 @@ type enrichmentSucceededPayload struct {
 type provisioningPayload struct {
 	Branch string `json:"branch"`
 	Mode   string `json:"mode,omitempty"`
-}
-
-type remoteObservationPayload struct {
-	Branch     string    `json:"branch"`
-	RemoteURL  string    `json:"remoteUrl"`
-	PRNumber   *int      `json:"prNumber,omitempty"`
-	PRState    string    `json:"prState,omitempty"`
-	ObservedAt time.Time `json:"observedAt"`
 }
 
 type sessionPRLinkedPayload struct {
@@ -165,12 +153,6 @@ func decodeProvisioningPayload(evt eventlog.Envelope) (provisioningPayload, erro
 	return payload, err
 }
 
-func decodeRemoteObservationPayload(evt eventlog.Envelope) (remoteObservationPayload, error) {
-	var payload remoteObservationPayload
-	err := json.Unmarshal(evt.Payload, &payload)
-	return payload, err
-}
-
 func decodeSessionPRLinkedPayload(evt eventlog.Envelope) (sessionPRLinkedPayload, error) {
 	var payload sessionPRLinkedPayload
 	err := json.Unmarshal(evt.Payload, &payload)
@@ -214,41 +196,4 @@ func provisioningStepPayload(branch string, mode string) provisioningPayload {
 
 func queuedBackendID(payload queuedPayload) conf.BackendID {
 	return conf.BackendID(payload.BackendID)
-}
-
-func newRemoteObservationPayload(branch string, event remote.BranchEvent) remoteObservationPayload {
-	payload := remoteObservationPayload{
-		Branch:     branch,
-		RemoteURL:  event.RemoteURL,
-		ObservedAt: event.Timestamp,
-	}
-	if event.PRNumber != nil {
-		payload.PRNumber = event.PRNumber
-	}
-	if event.PRState != nil {
-		payload.PRState = *event.PRState
-	}
-	return payload
-}
-
-func remoteObservedEventType(eventType remote.BranchEventType) (eventlog.EventType, bool) {
-	switch eventType {
-	case remote.PRClosed:
-		return eventTypeRemotePRClosed, true
-	case remote.PRMerged:
-		return eventTypeRemotePRMerged, true
-	case remote.BranchDeleted:
-		return eventTypeRemoteBranchDeleted, true
-	default:
-		return "", false
-	}
-}
-
-func isRemoteObservedEventType(eventType eventlog.EventType) bool {
-	switch eventType {
-	case eventTypeRemotePRClosed, eventTypeRemotePRMerged, eventTypeRemoteBranchDeleted:
-		return true
-	default:
-		return false
-	}
 }

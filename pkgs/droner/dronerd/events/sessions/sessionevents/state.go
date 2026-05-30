@@ -165,8 +165,6 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		}
 		s.transition(LifecycleStateDeletionFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
-	case eventTypeRemotePRClosed, eventTypeRemotePRMerged, eventTypeRemoteBranchDeleted:
-		return false, nil
 	case eventTypeSessionPRLinked:
 		payload, err := decodeSessionPRLinkedPayload(evt)
 		if err != nil {
