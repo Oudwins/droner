@@ -49,10 +49,18 @@ func TestLiveGitHubSDKGetBranchData(t *testing.T) {
 			if query.Get("state") != "all" {
 				t.Fatalf("unexpected state query: %q", query.Get("state"))
 			}
-			if query.Get("per_page") != "1" {
+			if query.Get("per_page") != "100" {
 				t.Fatalf("unexpected per_page query: %q", query.Get("per_page"))
 			}
-			_, _ = w.Write([]byte(`[{"number":42,"state":"closed","merged_at":"2026-03-24T12:00:00Z","title":"Ship it","html_url":"https://github.com/owner/repo/pull/42","head":{"ref":"feature"},"base":{"ref":"main"}}]`))
+			_, _ = w.Write([]byte(`[{"number":42,"state":"closed","merged_at":"2026-03-24T12:00:00Z","updated_at":"2026-03-24T12:00:00Z","title":"Ship it","html_url":"https://github.com/owner/repo/pull/42","head":{"ref":"feature","sha":"abc"},"base":{"ref":"main"}}]`))
+		case r.URL.Path == "/repos/owner/repo/pulls/42":
+			_, _ = w.Write([]byte(`{"number":42,"state":"closed","merged_at":"2026-03-24T12:00:00Z","updated_at":"2026-03-24T12:00:00Z","title":"Ship it","html_url":"https://github.com/owner/repo/pull/42","head":{"ref":"feature","sha":"abc"},"base":{"ref":"main"}}`))
+		case r.URL.Path == "/repos/owner/repo/pulls/42/reviews":
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/repos/owner/repo/commits/abc/status":
+			_, _ = w.Write([]byte(`{"state":"success","statuses":[]}`))
+		case r.URL.Path == "/repos/owner/repo/commits/abc/check-runs":
+			_, _ = w.Write([]byte(`{"check_runs":[]}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}

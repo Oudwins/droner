@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
 
@@ -22,6 +21,10 @@ type projectionMutation struct {
 	LifecycleState string
 	PublicState    string
 	LastError      string
+	PRNumber       int64
+	PRState        string
+	PRCIState      string
+	PRUpdatedAt    time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -42,124 +45,75 @@ func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope
 }
 
 func (s *System) upsertProjection(ctx context.Context, m projectionMutation) error {
-	return s.queries.UpsertSessionProjection(ctx, coredb.UpsertSessionProjectionParams{
-		StreamID:       m.StreamID,
-		Harness:        m.Harness,
-		Branch:         nullableString(m.Branch),
-		BackendID:      m.BackendID,
-		RepoPath:       m.RepoPath,
-		WorktreePath:   nullableString(m.WorktreePath),
-		RemoteUrl:      m.RemoteURL,
-		AgentConfig:    m.AgentConfig,
-		LifecycleState: m.LifecycleState,
-		PublicState:    m.PublicState,
-		LastError:      m.LastError,
-		CreatedAt:      m.CreatedAt.UTC(),
-		UpdatedAt:      m.UpdatedAt.UTC(),
-	})
+	return s.projections.Upsert(ctx, m)
+}
+
+func nullableInt64(value int64) sql.NullInt64 {
+	if value == 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: value, Valid: true}
+}
+
+func nullableTime(value time.Time) sql.NullTime {
+	if value.IsZero() {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: value.UTC(), Valid: true}
+}
+
+func nullInt64Value(value sql.NullInt64) int64 {
+	if !value.Valid {
+		return 0
+	}
+	return value.Int64
+}
+
+func nullTimeValue(value sql.NullTime) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return value.Time
 }
 
 func (s *System) loadProjectionStateForUpdate(ctx context.Context, evt eventlog.Envelope) (sessionState, error) {
-	row, err := s.queries.GetSessionProjectionByStreamID(ctx, string(evt.StreamID))
+	state, err := s.projections.LoadStateByStreamID(ctx, string(evt.StreamID))
 	if err == nil {
-		return stateFromProjection(row), nil
+		return state, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return sessionState{}, err
 	}
-	state, _, err := s.loadSessionStateBeforeVersion(ctx, string(evt.StreamID), evt.StreamVersion)
+	state, _, err = s.loadSessionStateBeforeVersion(ctx, string(evt.StreamID), evt.StreamVersion)
 	return state, err
 }
 
 func (s *System) loadCurrentProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
-	row, err := s.queries.GetCurrentSessionProjectionByBranch(ctx, nullableString(branch))
-	if err != nil {
-		return SessionRef{}, err
-	}
-	return sessionRefFromRow(row), nil
+	return s.projections.LoadCurrentByBranch(ctx, branch)
 }
 
 func (s *System) loadBlockedProjectionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (SessionRef, error) {
-	row, err := s.queries.GetBlockedSessionProjectionByRepoPathAndBranch(ctx, coredb.GetBlockedSessionProjectionByRepoPathAndBranchParams{
-		RepoPath: repoPath,
-		Branch:   nullableString(branch),
-	})
-	if err != nil {
-		return SessionRef{}, err
-	}
-	return sessionRefFromRow(row), nil
+	return s.projections.LoadBlockedByRepoAndBranch(ctx, repoPath, branch)
 }
 
 func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
-	row, err := s.queries.GetSessionProjectionByWorktreePath(ctx, nullableString(worktreePath))
-	if err != nil {
-		return SessionRef{}, err
-	}
-	return sessionRefFromRow(row), nil
+	return s.projections.LoadByWorktreePath(ctx, worktreePath)
 }
 
 func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
-	row, err := s.queries.GetLatestNavigationSessionProjectionByBranch(ctx, nullableString(branch))
-	if err != nil {
-		return SessionRef{}, err
-	}
-	return sessionRefFromRow(row), nil
+	return s.projections.LoadLatestNavigationByBranch(ctx, branch)
 }
 
 func (s *System) listActiveProjectionRefs(ctx context.Context) ([]SessionRef, error) {
-	rows, err := s.queries.ListActiveSessionProjectionRefs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	refs := []SessionRef{}
-	for _, row := range rows {
-		refs = append(refs, sessionRefFromRow(row))
-	}
-	return refs, nil
+	return s.projections.ListActiveRefs(ctx)
 }
 
 func (s *System) listHydratableProjectionRefs(ctx context.Context) ([]SessionRef, error) {
-	rows, err := s.queries.ListHydratableSessionProjectionRefs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	refs := []SessionRef{}
-	for _, row := range rows {
-		refs = append(refs, sessionRefFromRow(row))
-	}
-	return refs, nil
+	return s.projections.ListHydratableRefs(ctx)
 }
 
 func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string, backendID string) ([]SessionRef, error) {
-	rows, err := s.queries.ListReusableSessionProjectionRefs(ctx, coredb.ListReusableSessionProjectionRefsParams{
-		RepoPath:  repoPath,
-		BackendID: backendID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	refs := []SessionRef{}
-	for _, row := range rows {
-		refs = append(refs, sessionRefFromRow(row))
-	}
-	return refs, nil
-}
-
-func sessionRefFromRow(row coredb.SessionProjection) SessionRef {
-	return SessionRef{
-		StreamID:       row.StreamID,
-		Harness:        row.Harness,
-		Branch:         nullStringValue(row.Branch),
-		BackendID:      row.BackendID,
-		RepoPath:       row.RepoPath,
-		WorktreePath:   nullStringValue(row.WorktreePath),
-		RemoteURL:      row.RemoteUrl,
-		LifecycleState: LifecycleState(row.LifecycleState),
-		PublicState:    PublicState(row.PublicState),
-		LastError:      row.LastError,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
-	}
+	return s.projections.ListReusableRefs(ctx, repoPath, backendID)
 }
 
 func nullableString(value string) sql.NullString {

@@ -44,6 +44,11 @@ const (
 	eventTypeRemotePRClosed                        = eventlog.EventType("remote.pr.closed")
 	eventTypeRemotePRMerged                        = eventlog.EventType("remote.pr.merged")
 	eventTypeRemoteBranchDeleted                   = eventlog.EventType("remote.branch.deleted")
+	eventTypeSessionPRLinked                       = eventlog.EventType("session.pr.linked")
+	eventTypeSessionPRStateChanged                 = eventlog.EventType("session.pr.state_changed")
+	eventTypeSessionPRCIStateChanged               = eventlog.EventType("session.pr.ci_state_changed")
+	eventTypeSessionPRClosed                       = eventlog.EventType("session.pr.closed")
+	eventTypeSessionPRMerged                       = eventlog.EventType("session.pr.merged")
 )
 
 type queuedPayload struct {
@@ -81,6 +86,28 @@ type remoteObservationPayload struct {
 	PRNumber   *int      `json:"prNumber,omitempty"`
 	PRState    string    `json:"prState,omitempty"`
 	ObservedAt time.Time `json:"observedAt"`
+}
+
+type sessionPRLinkedPayload struct {
+	PRStreamID string    `json:"prStreamId"`
+	PRNumber   int       `json:"prNumber"`
+	State      string    `json:"state,omitempty"`
+	CIState    string    `json:"ciState,omitempty"`
+	LinkedAt   time.Time `json:"linkedAt"`
+}
+
+type sessionPRStateChangedPayload struct {
+	PRStreamID string    `json:"prStreamId"`
+	PRNumber   int       `json:"prNumber"`
+	State      string    `json:"state"`
+	ChangedAt  time.Time `json:"changedAt"`
+}
+
+type sessionPRCIStateChangedPayload struct {
+	PRStreamID string    `json:"prStreamId"`
+	PRNumber   int       `json:"prNumber"`
+	CIState    string    `json:"ciState"`
+	ChangedAt  time.Time `json:"changedAt"`
 }
 
 func newQueuedPayload(input CreateSessionInput) queuedPayload {
@@ -140,6 +167,24 @@ func decodeProvisioningPayload(evt eventlog.Envelope) (provisioningPayload, erro
 
 func decodeRemoteObservationPayload(evt eventlog.Envelope) (remoteObservationPayload, error) {
 	var payload remoteObservationPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
+func decodeSessionPRLinkedPayload(evt eventlog.Envelope) (sessionPRLinkedPayload, error) {
+	var payload sessionPRLinkedPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
+func decodeSessionPRStateChangedPayload(evt eventlog.Envelope) (sessionPRStateChangedPayload, error) {
+	var payload sessionPRStateChangedPayload
+	err := json.Unmarshal(evt.Payload, &payload)
+	return payload, err
+}
+
+func decodeSessionPRCIStateChangedPayload(evt eventlog.Envelope) (sessionPRCIStateChangedPayload, error) {
+	var payload sessionPRCIStateChangedPayload
 	err := json.Unmarshal(evt.Payload, &payload)
 	return payload, err
 }

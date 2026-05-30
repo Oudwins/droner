@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
@@ -181,16 +182,31 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 	backend := &remoteTestBackend{worktreeRoot: worktreeDir}
 	store.Register(backend)
 
-	system, err := Open(dataDir, slog.New(slog.NewJSONHandler(io.Discard, nil)), config, store)
+	db, err := coredb.OpenSQLiteDB(coredb.DBPath(dataDir))
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("OpenSQLiteDB: %v", err)
 	}
+	queries := coredb.New(db)
+	eventLogs, err := eventlogs.Open(dataDir)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("eventlogs.Open: %v", err)
+	}
+	sessionsLog, err := eventLogs.Sessions()
+	if err != nil {
+		_ = eventLogs.Close()
+		_ = db.Close()
+		t.Fatalf("Sessions log: %v", err)
+	}
+	system := New(sessionsLog, NewSQLiteProjectionStore(queries), eventLogs.SessionResetter(), slog.New(slog.NewJSONHandler(io.Discard, nil)), config, store)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	system.Start(ctx)
 	t.Cleanup(func() {
 		cancel()
 		_ = system.Close()
+		_ = eventLogs.Close()
+		_ = db.Close()
 	})
 
 	return system, backend, dataDir, cancel
@@ -242,7 +258,7 @@ func assertEventOrder(t *testing.T, got []eventlog.EventType, want ...eventlog.E
 	}
 }
 
-func TestRemoteMergedObservationCompletesSession(t *testing.T) {
+func TestSessionEventsDoesNotOwnRemoteSubscriptions(t *testing.T) {
 	stub := newRemoteSubscriptionStub()
 	originalSubscribe := subscribeRemoteBranchEvents
 	originalUnsubscribe := unsubscribeRemoteBranchEvents
@@ -274,41 +290,17 @@ func TestRemoteMergedObservationCompletesSession(t *testing.T) {
 	}
 
 	waitForPublicState(t, system, branch, PublicStateActiveIdle)
-	stub.waitForSubscription(t, remoteURL, branch)
-
-	if !stub.emit(remote.BranchEvent{
-		Type:      remote.PRMerged,
-		RemoteURL: remoteURL,
-		Branch:    branch,
-		Timestamp: time.Now().UTC(),
-	}) {
-		t.Fatal("expected remote event handler to be registered")
-	}
-
-	waitForPublicState(t, system, branch, PublicStateCompleted)
-	if backend.CompleteCalls() != 1 {
-		t.Fatalf("expected 1 completion call, got %d", backend.CompleteCalls())
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !stub.hasSubscription(remoteURL, branch) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 	if stub.hasSubscription(remoteURL, branch) {
-		t.Fatal("expected remote subscription to be removed after completion")
+		t.Fatal("sessionevents should not subscribe directly to remote branch events")
+	}
+	if backend.CompleteCalls() != 0 {
+		t.Fatalf("expected no completion calls, got %d", backend.CompleteCalls())
 	}
 
 	eventTypes := loadEventTypes(t, dataDir, streamID)
 	assertEventOrder(t, eventTypes,
 		eventTypeSessionQueued,
 		eventTypeSessionReady,
-		eventTypeRemotePRMerged,
-		eventTypeSessionCompletionRequested,
-		eventTypeSessionCompletionStarted,
-		eventTypeSessionCompletionSuccess,
 	)
 }
 

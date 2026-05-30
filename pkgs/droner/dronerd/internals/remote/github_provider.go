@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -238,7 +239,7 @@ func (p *roundRobinGitHubProvider) currentEventHandler() BranchEventHandler {
 }
 
 func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, current GitHubBranchData) []BranchEvent {
-	events := make([]BranchEvent, 0, 2)
+	events := make([]BranchEvent, 0, 3)
 	now := time.Now()
 
 	if previous.BranchExists && !current.BranchExists {
@@ -247,6 +248,15 @@ func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, curre
 
 	previousPR := previous.PullRequest
 	currentPR := current.PullRequest
+	if currentPR != nil {
+		previousSnapshot := normalizeGitHubPullRequestForKey(key, previousPR)
+		currentSnapshot := normalizeGitHubPullRequestForKey(key, currentPR)
+		if !reflect.DeepEqual(previousSnapshot, currentSnapshot) {
+			prState := currentPR.State
+			number := currentPR.Number
+			events = append(events, BranchEvent{Type: PRObserved, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, PRSnapshot: currentSnapshot, Timestamp: now})
+		}
+	}
 	if previousPR != nil && currentPR != nil {
 		if previousPR.State == "open" && currentPR.State == "closed" {
 			prState := currentPR.State
@@ -264,24 +274,28 @@ func diffGitHubBranchState(key subscriptionKey, previous GitHubBranchData, curre
 }
 
 func initialGitHubBranchEvents(key subscriptionKey, current GitHubBranchData) []BranchEvent {
-	events := make([]BranchEvent, 0, 2)
+	events := make([]BranchEvent, 0, 3)
 	now := time.Now()
 
 	currentPR := current.PullRequest
 	if currentPR == nil {
 		return events
 	}
+	prState := currentPR.State
+	number := currentPR.Number
+	events = append(events, BranchEvent{Type: PRObserved, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, PRSnapshot: normalizeGitHubPullRequestForKey(key, currentPR), Timestamp: now})
 
 	if currentPR.State == "closed" {
-		prState := currentPR.State
-		number := currentPR.Number
 		events = append(events, BranchEvent{Type: PRClosed, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, Timestamp: now})
 	}
 	if currentPR.MergedAt != nil {
-		prState := currentPR.State
-		number := currentPR.Number
 		events = append(events, BranchEvent{Type: PRMerged, RemoteURL: key.remoteURL, Branch: key.branch, PRNumber: &number, PRState: &prState, Timestamp: now})
 	}
 
 	return events
+}
+
+func normalizeGitHubPullRequestForKey(key subscriptionKey, pull *GitHubPullRequest) *PullRequestSnapshot {
+	owner, repo, _ := parseGitHubURL(key.remoteURL)
+	return normalizeGitHubPullRequest(key.remoteURL, owner, repo, pull)
 }

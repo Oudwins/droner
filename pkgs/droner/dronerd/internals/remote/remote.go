@@ -11,6 +11,7 @@ import (
 type BranchEventType string
 
 const (
+	PRObserved    BranchEventType = "pr.observed"
 	PRCreated     BranchEventType = "pr.created"
 	PRClosed      BranchEventType = "pr.closed"
 	PRMerged      BranchEventType = "pr.merged"
@@ -19,16 +20,60 @@ const (
 	BranchDeleted BranchEventType = "branch.deleted"
 )
 
+type PullRequestSnapshot struct {
+	Provider           string          `json:"provider"`
+	RemoteURL          string          `json:"remoteUrl"`
+	RepoOwner          string          `json:"repoOwner"`
+	RepoName           string          `json:"repoName"`
+	Number             int             `json:"number"`
+	State              string          `json:"state"`
+	Title              string          `json:"title"`
+	HTMLURL            string          `json:"htmlUrl"`
+	Draft              bool            `json:"draft"`
+	HeadRef            string          `json:"headRef"`
+	HeadSHA            string          `json:"headSha"`
+	BaseRef            string          `json:"baseRef"`
+	Mergeable          *bool           `json:"mergeable,omitempty"`
+	MergeableState     string          `json:"mergeableState"`
+	RequestedReviewers []string        `json:"requestedReviewers"`
+	RequestedTeams     []string        `json:"requestedTeams"`
+	ReviewSummary      ReviewSummary   `json:"reviewSummary"`
+	CI                 CIStatusSummary `json:"ci"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
+	ClosedAt           *time.Time      `json:"closedAt,omitempty"`
+	MergedAt           *time.Time      `json:"mergedAt,omitempty"`
+}
+
+type ReviewSummary struct {
+	Approved         []string `json:"approved"`
+	ChangesRequested []string `json:"changesRequested"`
+	Commented        []string `json:"commented"`
+}
+
+type CIStatusSummary struct {
+	State    string            `json:"state"`
+	Statuses []CIStatusContext `json:"statuses"`
+}
+
+type CIStatusContext struct {
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	Description string `json:"description,omitempty"`
+	TargetURL   string `json:"targetUrl,omitempty"`
+}
+
 var ErrUnsupportedRemote = errors.New("unsupported remote provider")
 
 // BranchEvent represents a branch or PR lifecycle event
 type BranchEvent struct {
-	Type      BranchEventType `json:"type"`
-	RemoteURL string          `json:"remote_url"`
-	Branch    string          `json:"branch"`
-	PRNumber  *int            `json:"pr_number,omitempty"`
-	PRState   *string         `json:"pr_state,omitempty"`
-	Timestamp time.Time       `json:"timestamp"`
+	Type       BranchEventType      `json:"type"`
+	RemoteURL  string               `json:"remote_url"`
+	Branch     string               `json:"branch"`
+	PRNumber   *int                 `json:"pr_number,omitempty"`
+	PRState    *string              `json:"pr_state,omitempty"`
+	PRSnapshot *PullRequestSnapshot `json:"pr_snapshot,omitempty"`
+	Timestamp  time.Time            `json:"timestamp"`
 }
 
 // BranchEventHandler is a function that handles branch events

@@ -11,15 +11,10 @@ import (
 	"sync"
 	"time"
 
-	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
-	sqlite3eventlog "github.com/Oudwins/droner/pkgs/droner/dronerd/events/backend/sqlite3"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -35,17 +30,20 @@ const (
 )
 
 type System struct {
-	db              *sql.DB
-	queries         *coredb.Queries
-	log             eventlog.EventLog
-	sessionsBackend *sqlite3eventlog.Backend
-	logger          *slog.Logger
-	config          *conf.Config
-	backends        *backends.Store
-	remoteSubs      *remoteSubscriptionState
-	runAgentEvents  func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
+	log            eventlog.EventLog
+	projections    ProjectionStore
+	resetter       SessionResetter
+	logger         *slog.Logger
+	config         *conf.Config
+	backends       *backends.Store
+	remoteSubs     *remoteSubscriptionState
+	runAgentEvents func(context.Context, *slog.Logger, conf.OpenCodeConfig, func(context.Context, agentevents.Event) error) error
 
 	startOnce sync.Once
+}
+
+type SessionResetter interface {
+	ResetStreamToEvent(ctx context.Context, streamID eventlog.StreamID, eventID eventlog.EventID) (eventlog.Envelope, error)
 }
 
 type CreateSessionInput struct {
@@ -93,30 +91,8 @@ type SessionRef struct {
 	UpdatedAt      time.Time
 }
 
-func Open(dataDir string, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) (*System, error) {
-	conn, err := coredb.OpenSQLiteDB(coredb.DBPath(dataDir))
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			_ = conn.Close()
-		}
-	}()
-	backend, err := sessionslog.OpenBackend(dataDir)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err != nil && backend != nil {
-			_ = backend.Close()
-		}
-	}()
-	log, err := eventlog.New(eventlog.Config{Topic: sessionslog.Topic}, backend)
-	if err != nil {
-		return nil, err
-	}
-	return &System{db: conn, queries: coredb.New(conn), log: log, sessionsBackend: backend, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}, nil
+func New(log eventlog.EventLog, projections ProjectionStore, resetter SessionResetter, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) *System {
+	return &System{log: log, projections: projections, resetter: resetter, logger: logger, config: config, backends: backendStore, remoteSubs: newRemoteSubscriptionState(), runAgentEvents: agentevents.RunOpenCode}
 }
 
 func (s *System) Close() error {
@@ -124,15 +100,7 @@ func (s *System) Close() error {
 		return nil
 	}
 	s.closeRemoteSubscriptions(context.Background())
-	if s.log != nil {
-		if err := s.log.Close(); err != nil {
-			return err
-		}
-	}
-	if s.db == nil {
-		return nil
-	}
-	return s.db.Close()
+	return nil
 }
 
 func (s *System) Start(ctx context.Context) {
@@ -204,29 +172,6 @@ func (s *System) Start(ctx context.Context) {
 				return s.handleDeletionStarted(ctx, evt)
 			},
 		})
-		go s.runSubscription(ctx, consumerRemoteSubscription, eventlog.Subscription{
-			ID: eventlog.SubscriberID(consumerRemoteSubscription),
-			Filter: func(evt eventlog.Envelope) bool {
-				switch evt.Type {
-				case eventTypeSessionReady, eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
-					return true
-				default:
-					return false
-				}
-			},
-			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				return s.handleRemoteSubscriptionEvent(ctx, evt)
-			},
-		})
-		go s.runSubscription(ctx, consumerRemoteObservation, eventlog.Subscription{
-			ID: eventlog.SubscriberID(consumerRemoteObservation),
-			Filter: func(evt eventlog.Envelope) bool {
-				return isRemoteObservedEventType(evt.Type)
-			},
-			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				return s.handleRemoteObservationEvent(ctx, evt)
-			},
-		})
 	})
 }
 
@@ -264,25 +209,10 @@ func (s *System) CreateSession(ctx context.Context, input CreateSessionInput) (C
 }
 
 func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error) {
-	items := []ListItem{}
 	if !all {
-		rows, err := s.queries.ListVisibleSessionProjectionItems(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
-		}
-		return items, nil
+		return s.projections.ListVisible(ctx)
 	}
-	rows, err := s.queries.ListAllSessionProjectionItems(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
-	}
-	return items, nil
+	return s.projections.ListAll(ctx)
 }
 
 // ListSessionProjections reads directly from the session_projection table.
@@ -290,11 +220,7 @@ func (s *System) ListSessions(ctx context.Context, all bool) ([]ListItem, error)
 // "after" returns older rows that appear after the anchor, while "before"
 // returns newer rows that appear before it.
 func (s *System) ListSessionProjections(ctx context.Context, statuses []string, limit int, cursor string, direction string) ([]ListItem, error) {
-	statusesArg := ""
-	if len(statuses) > 0 {
-		statusesArg = strings.Join(statuses, ",")
-	}
-	statusesValue := sql.NullString{String: statusesArg, Valid: statusesArg != ""}
+	statusesArg, statusesValue := statusesValue(statuses)
 
 	if strings.TrimSpace(direction) == "" {
 		direction = listDirectionAfter
@@ -325,65 +251,21 @@ func (s *System) ListSessionProjections(ctx context.Context, statuses []string, 
 }
 
 func (s *System) ListOldestSessionProjections(ctx context.Context, statuses []string, limit int) ([]ListItem, error) {
-	statusesArg := ""
-	if len(statuses) > 0 {
-		statusesArg = strings.Join(statuses, ",")
-	}
-	statusesValue := sql.NullString{String: statusesArg, Valid: statusesArg != ""}
+	statusesArg, statusesValue := statusesValue(statuses)
 
 	return s.listSessionProjectionItemsOldest(ctx, statusesArg, statusesValue, limit)
 }
 
 func (s *System) listSessionProjectionItemsAfterCursor(ctx context.Context, statusesArg string, statusesValue sql.NullString, cursor string, limit int) ([]ListItem, error) {
-	rows, err := s.queries.ListSessionProjectionItemsAfterCursorByStatuses(ctx, coredb.ListSessionProjectionItemsAfterCursorByStatusesParams{
-		Column1:  statusesArg,
-		Column2:  statusesValue,
-		Column3:  cursor,
-		StreamID: cursor,
-		Limit:    int64(limit),
-	})
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ListItem, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
-	}
-	return items, nil
+	return s.projections.ListAfterCursor(ctx, statusesArg, statusesValue, cursor, limit)
 }
 
 func (s *System) listSessionProjectionItemsBeforeCursor(ctx context.Context, statusesArg string, statusesValue sql.NullString, cursor string, limit int) ([]ListItem, error) {
-	rows, err := s.queries.ListSessionProjectionItemsBeforeCursorByStatuses(ctx, coredb.ListSessionProjectionItemsBeforeCursorByStatusesParams{
-		Column1:  statusesArg,
-		Column2:  statusesValue,
-		Column3:  cursor,
-		StreamID: cursor,
-		Limit:    int64(limit),
-	})
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ListItem, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
-	}
-	return items, nil
+	return s.projections.ListBeforeCursor(ctx, statusesArg, statusesValue, cursor, limit)
 }
 
 func (s *System) listSessionProjectionItemsOldest(ctx context.Context, statusesArg string, statusesValue sql.NullString, limit int) ([]ListItem, error) {
-	rows, err := s.queries.ListSessionProjectionItemsOldestByStatuses(ctx, coredb.ListSessionProjectionItemsOldestByStatusesParams{
-		Column1: statusesArg,
-		Column2: statusesValue,
-		Limit:   int64(limit),
-	})
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ListItem, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, newListItem(row.StreamID, row.RepoPath, row.RemoteUrl, nullStringValue(row.Branch), PublicState(row.PublicState)))
-	}
-	return items, nil
+	return s.projections.ListOldest(ctx, statusesArg, statusesValue, limit)
 }
 
 func reverseListItems(items []ListItem) {
@@ -464,14 +346,14 @@ func (s *System) ResetToEvent(ctx context.Context, streamID string, eventID stri
 	if streamID == "" || eventID == "" {
 		return OperationResult{}, sql.ErrNoRows
 	}
-	if s.sessionsBackend == nil {
+	if s.resetter == nil {
 		return OperationResult{}, errors.New("sessions backend unavailable")
 	}
 
-	if err := s.queries.DeleteSessionProjection(ctx, streamID); err != nil {
+	if err := s.projections.Delete(ctx, streamID); err != nil {
 		return OperationResult{}, err
 	}
-	if _, err := s.sessionsBackend.ResetStreamToEvent(ctx, sessionslog.Topic, eventlog.StreamID(streamID), eventlog.EventID(eventID)); err != nil {
+	if _, err := s.resetter.ResetStreamToEvent(ctx, eventlog.StreamID(streamID), eventlog.EventID(eventID)); err != nil {
 		if rebuildErr := s.rebuildProjection(ctx, streamID); rebuildErr != nil {
 			s.logger.Error("failed to rebuild session projection after reset error", "stream_id", streamID, "error", rebuildErr)
 		}

@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+type PrLatestSnapshot struct {
+	StreamID     string
+	Provider     string
+	RemoteUrl    string
+	RepoOwner    string
+	RepoName     string
+	Number       int64
+	HeadRef      string
+	HeadSha      string
+	ObservedAt   time.Time
+	SnapshotJson string
+}
+
 type SessionProjection struct {
 	StreamID       string
 	Harness        string
@@ -23,4 +36,8 @@ type SessionProjection struct {
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	PrNumber       sql.NullInt64
+	PrState        sql.NullString
+	PrCiState      sql.NullString
+	PrUpdatedAt    sql.NullTime
 }

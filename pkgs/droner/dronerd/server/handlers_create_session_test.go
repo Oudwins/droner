@@ -19,8 +19,8 @@ import (
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
-	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/env"
@@ -89,6 +89,17 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 		t.Fatalf("OpenSQLiteDB projection db: %v", err)
 	}
 	projectionQueries := db.New(projectionConn)
+	eventLogs, err := eventlogs.Open(dataDir)
+	if err != nil {
+		_ = projectionConn.Close()
+		t.Fatalf("eventlogs.Open: %v", err)
+	}
+	sessionsLog, err := eventLogs.Sessions()
+	if err != nil {
+		_ = eventLogs.Close()
+		_ = projectionConn.Close()
+		t.Fatalf("Sessions log: %v", err)
+	}
 
 	store := backends.NewStore(config)
 	store.Register(&createSessionBackend{worktreeRoot: worktreeDir})
@@ -98,13 +109,14 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 		Config:       config,
 		Env:          &env.EnvStruct{DATA_DIR: dataDir},
 		Logger:       logger,
+		DB:           projectionConn,
+		Queries:      projectionQueries,
+		EventLogs:    eventLogs,
+		Sessions:     sessionevents.NewSQLiteProjectionStore(projectionQueries),
 		BackendStore: store,
 	}}
 
-	events, err := sessionevents.Open(server.Base.Env.DATA_DIR, server.Base.Logger, server.Base.Config, server.Base.BackendStore)
-	if err != nil {
-		t.Fatalf("sessionevents.Open: %v", err)
-	}
+	events := sessionevents.New(sessionsLog, server.Base.Sessions, eventLogs.SessionResetter(), server.Base.Logger, server.Base.Config, server.Base.BackendStore)
 	server.events = events
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,6 +124,7 @@ func newEventSourcedCreateSessionTestServer(t *testing.T) (*Server, *db.Queries,
 	t.Cleanup(func() {
 		cancel()
 		_ = server.events.Close()
+		_ = eventLogs.Close()
 		_ = projectionConn.Close()
 	})
 
@@ -553,16 +566,15 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 }
 
 func TestHandlerResetSessionResetsStreamToSelectedEvent(t *testing.T) {
-	server, queries, repoDir, dataDir := newEventSourcedCreateSessionTestServer(t)
+	server, queries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	created := createEventSourcedSession(t, server, repoDir, "reset-me")
 	waitForSessionState(t, server, "reset-me", sessionevents.PublicStateActiveIdle)
 
-	log, err := sessionslog.Open(dataDir)
+	log, err := server.Base.EventLogs.Sessions()
 	if err != nil {
-		t.Fatalf("sessionslog.Open: %v", err)
+		t.Fatalf("Sessions log: %v", err)
 	}
-	defer func() { _ = log.Close() }()
 
 	before, err := log.LoadStream(context.Background(), eventlog.StreamID(created.ID), eventlog.LoadStreamOptions{})
 	if err != nil {

@@ -11,9 +11,17 @@ INSERT INTO session_projection (
   lifecycle_state,
   public_state,
   last_error,
+  pr_number,
+  pr_state,
+  pr_ci_state,
+  pr_updated_at,
   created_at,
   updated_at
 ) VALUES (
+  ?,
+  ?,
+  ?,
+  ?,
   ?,
   ?,
   ?,
@@ -39,6 +47,10 @@ ON CONFLICT(stream_id) DO UPDATE SET
   lifecycle_state = excluded.lifecycle_state,
   public_state = excluded.public_state,
   last_error = excluded.last_error,
+  pr_number = excluded.pr_number,
+  pr_state = excluded.pr_state,
+  pr_ci_state = excluded.pr_ci_state,
+  pr_updated_at = excluded.pr_updated_at,
   updated_at = excluded.updated_at;
 
 -- name: PatchSessionProjection :exec

@@ -22,6 +22,10 @@ type sessionState struct {
 	LifecycleState  LifecycleState
 	PublicState     PublicState
 	LastError       string
+	PRNumber        int64
+	PRState         string
+	PRCIState       string
+	PRUpdatedAt     time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -163,6 +167,57 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		return true, nil
 	case eventTypeRemotePRClosed, eventTypeRemotePRMerged, eventTypeRemoteBranchDeleted:
 		return false, nil
+	case eventTypeSessionPRLinked:
+		payload, err := decodeSessionPRLinkedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.PRNumber = int64(payload.PRNumber)
+		s.PRState = payload.State
+		s.PRCIState = payload.CIState
+		s.PRUpdatedAt = payload.LinkedAt.UTC()
+		s.UpdatedAt = evt.OccurredAt.UTC()
+		return true, nil
+	case eventTypeSessionPRStateChanged:
+		payload, err := decodeSessionPRStateChangedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.PRNumber = int64(payload.PRNumber)
+		s.PRState = payload.State
+		s.PRUpdatedAt = payload.ChangedAt.UTC()
+		s.UpdatedAt = evt.OccurredAt.UTC()
+		return true, nil
+	case eventTypeSessionPRCIStateChanged:
+		payload, err := decodeSessionPRCIStateChangedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.PRNumber = int64(payload.PRNumber)
+		s.PRCIState = payload.CIState
+		s.PRUpdatedAt = payload.ChangedAt.UTC()
+		s.UpdatedAt = evt.OccurredAt.UTC()
+		return true, nil
+	case eventTypeSessionPRClosed:
+		payload, err := decodeSessionPRStateChangedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.PRNumber = int64(payload.PRNumber)
+		s.PRState = "closed"
+		s.PRUpdatedAt = payload.ChangedAt.UTC()
+		s.UpdatedAt = evt.OccurredAt.UTC()
+		return true, nil
+	case eventTypeSessionPRMerged:
+		payload, err := decodeSessionPRStateChangedPayload(evt)
+		if err != nil {
+			return false, err
+		}
+		s.PRNumber = int64(payload.PRNumber)
+		s.PRState = "merged"
+		s.PRUpdatedAt = payload.ChangedAt.UTC()
+		s.UpdatedAt = evt.OccurredAt.UTC()
+		return true, nil
 	default:
 		return false, nil
 	}
@@ -211,6 +266,10 @@ func stateFromProjection(row coredb.SessionProjection) sessionState {
 		LifecycleState: LifecycleState(row.LifecycleState),
 		PublicState:    PublicState(row.PublicState),
 		LastError:      row.LastError,
+		PRNumber:       nullInt64Value(row.PrNumber),
+		PRState:        nullStringValue(row.PrState),
+		PRCIState:      nullStringValue(row.PrCiState),
+		PRUpdatedAt:    nullTimeValue(row.PrUpdatedAt),
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
@@ -229,6 +288,10 @@ func (s sessionState) projectionMutation() projectionMutation {
 		LifecycleState: s.LifecycleState.String(),
 		PublicState:    s.PublicState.String(),
 		LastError:      s.LastError,
+		PRNumber:       s.PRNumber,
+		PRState:        s.PRState,
+		PRCIState:      s.PRCIState,
+		PRUpdatedAt:    s.PRUpdatedAt,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}

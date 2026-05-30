@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/pullrequests/pullrequestevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
@@ -18,20 +19,22 @@ type Server struct {
 	httpServer   *http.Server
 	canceler     context.CancelFunc
 	events       *sessionevents.System
+	prs          *pullrequestevents.System
 	shutdownOnce sync.Once
 }
 
 func New() *Server {
 	base := core.New()
+	sessionsLog, err := base.EventLogs.Sessions()
+	assert.AssertNil(err, "[SERVER] Failed to initialize sessions event log")
+	pullRequestsLog, err := base.EventLogs.PullRequests()
+	assert.AssertNil(err, "[SERVER] Failed to initialize pull requests event log")
 
 	return &Server{
 		Base:     base,
 		canceler: func() {},
-		events: func() *sessionevents.System {
-			system, err := sessionevents.Open(base.Env.DATA_DIR, base.Logger, base.Config, base.BackendStore)
-			assert.AssertNil(err, "[SERVER] Failed to initialize event-sourced create system")
-			return system
-		}(),
+		events:   sessionevents.New(sessionsLog, base.Sessions, base.EventLogs.SessionResetter(), base.Logger, base.Config, base.BackendStore),
+		prs:      pullrequestevents.New(pullRequestsLog, sessionsLog, base.PRSessions, base.PRSnapshots, base.Logger),
 	}
 }
 
@@ -48,6 +51,7 @@ func (s *Server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.canceler = cancel
 	s.events.Start(ctx)
+	s.prs.Start(ctx)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -77,11 +81,14 @@ func (s *Server) Shutdown() {
 			}
 		}
 
-		if s.Base != nil {
-			s.Base.Close()
-		}
 		if err := s.events.Close(); err != nil {
 			s.Base.Logger.Error("[shutdown] event system shutdown failed", "error", err)
+		}
+		if err := s.prs.Close(); err != nil {
+			s.Base.Logger.Error("[shutdown] pull request event system shutdown failed", "error", err)
+		}
+		if s.Base != nil {
+			s.Base.Close()
 		}
 	})
 }

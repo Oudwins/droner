@@ -126,7 +126,7 @@ func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 		{BranchExists: true, PullRequest: &GitHubPullRequest{Number: 7, State: "closed", MergedAt: &mergedAt}},
 	}
 
-	received := make(chan BranchEvent, 2)
+	received := make(chan BranchEvent, 4)
 	provider.eventHandler = func(event BranchEvent) {
 		received <- event
 	}
@@ -141,11 +141,19 @@ func TestRoundRobinGitHubProviderEmitsTerminalEvents(t *testing.T) {
 
 	firstEvent := <-received
 	secondEvent := <-received
-	if firstEvent.Type != PRClosed {
-		t.Fatalf("expected first event to be PRClosed, got %s", firstEvent.Type)
+	thirdEvent := <-received
+	fourthEvent := <-received
+	if firstEvent.Type != PRObserved {
+		t.Fatalf("expected first event to be PRObserved, got %s", firstEvent.Type)
 	}
-	if secondEvent.Type != PRMerged {
-		t.Fatalf("expected second event to be PRMerged, got %s", secondEvent.Type)
+	if secondEvent.Type != PRObserved {
+		t.Fatalf("expected second event to be PRObserved, got %s", secondEvent.Type)
+	}
+	if thirdEvent.Type != PRClosed {
+		t.Fatalf("expected third event to be PRClosed, got %s", thirdEvent.Type)
+	}
+	if fourthEvent.Type != PRMerged {
+		t.Fatalf("expected fourth event to be PRMerged, got %s", fourthEvent.Type)
 	}
 }
 
@@ -162,7 +170,7 @@ func TestRoundRobinGitHubProviderEmitsTerminalEventsFromInitialState(t *testing.
 		PullRequest:  &GitHubPullRequest{Number: 7, State: "closed"},
 	}}
 
-	received := make(chan BranchEvent, 2)
+	received := make(chan BranchEvent, 3)
 	provider.eventHandler = func(event BranchEvent) {
 		received <- event
 	}
@@ -173,6 +181,10 @@ func TestRoundRobinGitHubProviderEmitsTerminalEventsFromInitialState(t *testing.
 	}
 
 	event := expectEvent(t, received)
+	if event.Type != PRObserved {
+		t.Fatalf("expected event to be PRObserved, got %s", event.Type)
+	}
+	event = expectEvent(t, received)
 	if event.Type != PRClosed {
 		t.Fatalf("expected event to be PRClosed, got %s", event.Type)
 	}
