@@ -1,6 +1,6 @@
 # Droner
 
-Droner manages coding sessions in git worktrees and opens each session in a tmux workspace with `opencode`, a shell, and a split shell window ready to go
+Droner manages coding sessions in git worktrees and opens each session in a tmux workspace with `opencode`, a shell, and a split shell window ready to go.
 
 ## What it does
 
