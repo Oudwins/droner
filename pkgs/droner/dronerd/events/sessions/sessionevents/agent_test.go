@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
@@ -42,11 +43,11 @@ func TestSessionStateAppliesAgentBusyIdleWithoutChangingLifecycle(t *testing.T) 
 	}
 
 	now := time.Now().UTC()
-	apply(eventTypeSessionQueued, queuedPayload, now)
-	apply(eventTypeSessionEnrichmentSucceeded, enrichmentPayload, now.Add(500*time.Millisecond))
-	apply(eventTypeSessionReady, requestPayload, now.Add(time.Second))
+	apply(eventtypes.SessionQueued, queuedPayload, now)
+	apply(eventtypes.SessionEnrichmentSucceeded, enrichmentPayload, now.Add(500*time.Millisecond))
+	apply(eventtypes.SessionReady, requestPayload, now.Add(time.Second))
 
-	if !apply(eventTypeSessionAgentBusy, requestPayload, now.Add(2*time.Second)) {
+	if !apply(eventtypes.SessionAgentBusy, requestPayload, now.Add(2*time.Second)) {
 		t.Fatal("expected busy event to change state")
 	}
 	if state.LifecycleState != LifecycleStateReady {
@@ -56,15 +57,15 @@ func TestSessionStateAppliesAgentBusyIdleWithoutChangingLifecycle(t *testing.T) 
 		t.Fatalf("public state = %s, want %s", state.PublicState, PublicStateActiveBusy)
 	}
 
-	if !apply(eventTypeSessionAgentIdle, requestPayload, now.Add(3*time.Second)) {
+	if !apply(eventtypes.SessionAgentIdle, requestPayload, now.Add(3*time.Second)) {
 		t.Fatal("expected idle event to change state")
 	}
 	if state.PublicState != PublicStateActiveIdle {
 		t.Fatalf("public state = %s, want %s", state.PublicState, PublicStateActiveIdle)
 	}
 
-	apply(eventTypeSessionCompletionStarted, requestPayload, now.Add(4*time.Second))
-	if apply(eventTypeSessionAgentBusy, requestPayload, now.Add(5*time.Second)) {
+	apply(eventtypes.SessionCompletionStarted, requestPayload, now.Add(4*time.Second))
+	if apply(eventtypes.SessionAgentBusy, requestPayload, now.Add(5*time.Second)) {
 		t.Fatal("expected busy event to be ignored after completion starts")
 	}
 	if state.PublicState != PublicStateCompleting {
@@ -104,5 +105,5 @@ func TestHandleAgentEventResolvesSessionByWorktreePath(t *testing.T) {
 	}
 	waitForPublicState(t, system, branch, PublicStateActiveIdle)
 
-	assertEventOrder(t, loadEventTypes(t, dataDir, streamID), eventTypeSessionReady, eventTypeSessionAgentBusy, eventTypeSessionAgentIdle)
+	assertEventOrder(t, loadEventTypes(t, dataDir, streamID), eventtypes.SessionReady, eventtypes.SessionAgentBusy, eventtypes.SessionAgentIdle)
 }

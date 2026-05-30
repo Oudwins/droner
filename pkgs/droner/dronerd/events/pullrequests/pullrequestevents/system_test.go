@@ -7,6 +7,7 @@ import (
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -33,7 +34,7 @@ func TestIngestObservedWritesInitialSnapshotAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadStream pr: %v", err)
 	}
-	if len(prEvents) != 1 || prEvents[0].Type != eventTypePRObserved {
+	if len(prEvents) != 1 || prEvents[0].Type != eventtypes.PRObserved {
 		t.Fatalf("unexpected PR events: %#v", prEvents)
 	}
 
@@ -41,7 +42,7 @@ func TestIngestObservedWritesInitialSnapshotAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadStream session: %v", err)
 	}
-	want := []eventlog.EventType{eventTypeSessionPRLinked, eventTypeSessionPRStateChanged, eventTypeSessionPRCIStateChanged}
+	want := []eventlog.EventType{eventtypes.SessionPRLinked, eventtypes.SessionPRStateChanged, eventtypes.SessionPRCIStateChanged}
 	if len(sessionEvents) != len(want) {
 		t.Fatalf("expected %d session events, got %d", len(want), len(sessionEvents))
 	}
@@ -90,7 +91,7 @@ func TestIngestObservedWritesDeltaAndNamedCIEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadStream pr: %v", err)
 	}
-	if len(prEvents) != 2 || prEvents[1].Type != eventTypePRObserved {
+	if len(prEvents) != 2 || prEvents[1].Type != eventtypes.PRObserved {
 		t.Fatalf("unexpected PR events: %#v", prEvents)
 	}
 
@@ -99,8 +100,8 @@ func TestIngestObservedWritesDeltaAndNamedCIEvent(t *testing.T) {
 		t.Fatalf("LoadStream session: %v", err)
 	}
 	last := sessionEvents[len(sessionEvents)-1]
-	if last.Type != eventTypeSessionPRCIStateChanged {
-		t.Fatalf("last session event = %s, want %s", last.Type, eventTypeSessionPRCIStateChanged)
+	if last.Type != eventtypes.SessionPRCIStateChanged {
+		t.Fatalf("last session event = %s, want %s", last.Type, eventtypes.SessionPRCIStateChanged)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
 
@@ -73,7 +74,7 @@ func (s *sessionState) Hydrate(events []eventlog.Envelope) error {
 
 func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 	switch evt.Type {
-	case eventTypeSessionQueued:
+	case eventtypes.SessionQueued:
 		payload, err := decodeQueuedPayload(evt)
 		if err != nil {
 			return false, err
@@ -92,10 +93,10 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 			s.CreatedAt = evt.OccurredAt.UTC()
 		}
 		return true, nil
-	case eventTypeSessionEnrichmentRequested:
+	case eventtypes.SessionEnrichmentRequested:
 		s.transition(LifecycleStateEnrichmentRequested, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionEnrichmentSucceeded:
+	case eventtypes.SessionEnrichmentSucceeded:
 		payload, err := decodeEnrichmentSucceededPayload(evt)
 		if err != nil {
 			return false, err
@@ -104,68 +105,68 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.WorktreePath = payload.WorktreePath
 		s.transition(LifecycleStateEnrichmentSucceeded, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionEnrichmentFailed:
+	case eventtypes.SessionEnrichmentFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
 		s.transition(LifecycleStateEnrichmentFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionHydrationRequested:
+	case eventtypes.SessionHydrationRequested:
 		return false, nil
-	case eventTypeSessionEnvironmentProvisioningStarted:
+	case eventtypes.SessionEnvironmentProvisioningStarted:
 		s.transition(LifecycleStateEnvironmentProvisioningStarted, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionEnvironmentProvisioningSuccess:
+	case eventtypes.SessionEnvironmentProvisioningSuccess:
 		s.transition(LifecycleStateEnvironmentProvisioningSuccess, PublicStateQueued, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionReady:
+	case eventtypes.SessionReady:
 		s.transition(LifecycleStateReady, PublicStateActiveIdle, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionAgentBusy:
+	case eventtypes.SessionAgentBusy:
 		return s.applyAgentState(PublicStateActiveBusy, evt.OccurredAt), nil
-	case eventTypeSessionAgentIdle:
+	case eventtypes.SessionAgentIdle:
 		return s.applyAgentState(PublicStateActiveIdle, evt.OccurredAt), nil
-	case eventTypeSessionEnvironmentProvisioningFailed:
+	case eventtypes.SessionEnvironmentProvisioningFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
 		s.transition(LifecycleStateEnvironmentProvisioningFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionCompletionRequested:
+	case eventtypes.SessionCompletionRequested:
 		s.transition(LifecycleStateCompletionRequested, s.publicStateForCompletionRequest(), "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionCompletionStarted:
+	case eventtypes.SessionCompletionStarted:
 		s.transition(LifecycleStateCompletionStarted, PublicStateCompleting, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionCompletionSuccess:
+	case eventtypes.SessionCompletionSuccess:
 		s.transition(LifecycleStateCompletionSuccess, PublicStateCompleted, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionCompletionFailed:
+	case eventtypes.SessionCompletionFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
 		s.transition(LifecycleStateCompletionFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionDeletionRequested:
+	case eventtypes.SessionDeletionRequested:
 		s.transition(LifecycleStateDeletionRequested, PublicStateDeleting, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionDeletionStarted:
+	case eventtypes.SessionDeletionStarted:
 		s.transition(LifecycleStateDeletionStarted, PublicStateDeleting, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionDeletionSuccess:
+	case eventtypes.SessionDeletionSuccess:
 		s.transition(LifecycleStateDeletionSuccess, PublicStateDeleted, "", evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionDeletionFailed:
+	case eventtypes.SessionDeletionFailed:
 		payload, err := decodeFailedPayload(evt)
 		if err != nil {
 			return false, err
 		}
 		s.transition(LifecycleStateDeletionFailed, PublicStateFailed, payload.Error, evt.OccurredAt)
 		return true, nil
-	case eventTypeSessionPRLinked:
+	case eventtypes.SessionPRLinked:
 		payload, err := decodeSessionPRLinkedPayload(evt)
 		if err != nil {
 			return false, err
@@ -176,7 +177,7 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.PRUpdatedAt = payload.LinkedAt.UTC()
 		s.UpdatedAt = evt.OccurredAt.UTC()
 		return true, nil
-	case eventTypeSessionPRStateChanged:
+	case eventtypes.SessionPRStateChanged:
 		payload, err := decodeSessionPRStateChangedPayload(evt)
 		if err != nil {
 			return false, err
@@ -186,7 +187,7 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.PRUpdatedAt = payload.ChangedAt.UTC()
 		s.UpdatedAt = evt.OccurredAt.UTC()
 		return true, nil
-	case eventTypeSessionPRCIStateChanged:
+	case eventtypes.SessionPRCIStateChanged:
 		payload, err := decodeSessionPRCIStateChangedPayload(evt)
 		if err != nil {
 			return false, err
@@ -196,7 +197,7 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.PRUpdatedAt = payload.ChangedAt.UTC()
 		s.UpdatedAt = evt.OccurredAt.UTC()
 		return true, nil
-	case eventTypeSessionPRClosed:
+	case eventtypes.SessionPRClosed:
 		payload, err := decodeSessionPRStateChangedPayload(evt)
 		if err != nil {
 			return false, err
@@ -206,7 +207,7 @@ func (s *sessionState) Apply(evt eventlog.Envelope) (bool, error) {
 		s.PRUpdatedAt = payload.ChangedAt.UTC()
 		s.UpdatedAt = evt.OccurredAt.UTC()
 		return true, nil
-	case eventTypeSessionPRMerged:
+	case eventtypes.SessionPRMerged:
 		payload, err := decodeSessionPRStateChangedPayload(evt)
 		if err != nil {
 			return false, err

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -31,7 +32,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 		return err
 	}
 
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnrichmentRequested, payload, string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionEnrichmentRequested, payload, string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -79,7 +80,7 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve worktree path: %w", err))
 	}
 
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnrichmentSucceeded, newEnrichmentSucceededPayload(branch, worktreePath), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionEnrichmentSucceeded, newEnrichmentSucceededPayload(branch, worktreePath), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -95,7 +96,7 @@ func (s *System) handleEnrichmentSucceeded(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionEnvironmentProvisioningStarted, provisioningStepPayload(payload.Branch, provisioningModeInitial), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionEnvironmentProvisioningStarted, provisioningStepPayload(payload.Branch, provisioningModeInitial), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -109,25 +110,25 @@ func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Enve
 	var nextPayload any
 	switch state.LifecycleState {
 	case LifecycleStateQueued:
-		nextType = eventTypeSessionEnrichmentRequested
+		nextType = eventtypes.SessionEnrichmentRequested
 		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
 	case LifecycleStateEnrichmentRequested:
-		nextType = eventTypeSessionEnrichmentRequested
+		nextType = eventtypes.SessionEnrichmentRequested
 		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
 	case LifecycleStateEnrichmentSucceeded:
-		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
 	case LifecycleStateEnvironmentProvisioningStarted:
-		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
 	case LifecycleStateReady:
-		nextType = eventTypeSessionEnvironmentProvisioningStarted
+		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeRestart)
 	case LifecycleStateCompletionRequested, LifecycleStateCompletionStarted:
-		nextType = eventTypeSessionCompletionStarted
+		nextType = eventtypes.SessionCompletionStarted
 		nextPayload = requestStepPayload(state.Branch)
 	case LifecycleStateDeletionRequested, LifecycleStateDeletionStarted:
-		nextType = eventTypeSessionDeletionStarted
+		nextType = eventtypes.SessionDeletionStarted
 		nextPayload = requestStepPayload(state.Branch)
 	default:
 		return nil
@@ -221,13 +222,13 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 			if candidate.StreamID == "" || candidate.Branch == "" {
 				continue
 			}
-			if _, err := s.appendEvent(ctx, candidate.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(candidate.Branch), string(evt.ID), string(evt.StreamID)); err != nil {
+			if _, err := s.appendEvent(ctx, candidate.StreamID, eventtypes.SessionDeletionRequested, requestStepPayload(candidate.Branch), string(evt.ID), string(evt.StreamID)); err != nil {
 				return err
 			}
 		}
 	}
 
-	for _, eventType := range []eventlog.EventType{eventTypeSessionEnvironmentProvisioningSuccess, eventTypeSessionReady} {
+	for _, eventType := range []eventlog.EventType{eventtypes.SessionEnvironmentProvisioningSuccess, eventtypes.SessionReady} {
 		if _, err := s.appendEvent(ctx, string(evt.StreamID), eventType, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID)); err != nil {
 			return err
 		}
@@ -236,7 +237,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 }
 
 func (s *System) appendProvisioningFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionEnvironmentProvisioningFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventtypes.SessionEnvironmentProvisioningFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
 
@@ -252,7 +253,7 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionStarted, requestStepPayload(payload.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionCompletionStarted, requestStepPayload(payload.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -271,7 +272,7 @@ func (s *System) handleCompletionStarted(ctx context.Context, evt eventlog.Envel
 	if err := backend.CompleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
 		return s.appendCompletionFailure(ctx, evt, err)
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionCompletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionCompletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -287,7 +288,7 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionStarted, requestStepPayload(payload.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionDeletionStarted, requestStepPayload(payload.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -300,7 +301,7 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 		return nil
 	}
 	if strings.TrimSpace(state.WorktreePath) == "" {
-		_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
+		_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
 		return err
 	}
 	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
@@ -310,21 +311,21 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 	if err := backend.DeleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventTypeSessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
 func (s *System) appendEnrichmentFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionEnrichmentFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventtypes.SessionEnrichmentFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
 
 func (s *System) appendCompletionFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionCompletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventtypes.SessionCompletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }
 
 func (s *System) appendDeletionFailure(ctx context.Context, cause eventlog.Envelope, causeErr error) error {
-	_, err := s.appendEvent(ctx, string(cause.StreamID), eventTypeSessionDeletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
+	_, err := s.appendEvent(ctx, string(cause.StreamID), eventtypes.SessionDeletionFailed, newFailedPayload(causeErr), string(cause.ID), string(cause.StreamID))
 	return err
 }

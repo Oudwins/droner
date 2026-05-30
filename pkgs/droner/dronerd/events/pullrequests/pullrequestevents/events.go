@@ -8,21 +8,6 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
 
-const (
-	eventTypePRObserved = eventlog.EventType("pr.observed")
-	eventTypePRClosed   = eventlog.EventType("pr.closed")
-	eventTypePRMerged   = eventlog.EventType("pr.merged")
-
-	eventTypeSessionReady             = eventlog.EventType("session.ready")
-	eventTypeSessionCompletionSuccess = eventlog.EventType("session.completion.success")
-	eventTypeSessionDeletionSuccess   = eventlog.EventType("session.deletion.success")
-	eventTypeSessionPRLinked          = eventlog.EventType("session.pr.linked")
-	eventTypeSessionPRStateChanged    = eventlog.EventType("session.pr.state_changed")
-	eventTypeSessionPRCIStateChanged  = eventlog.EventType("session.pr.ci_state_changed")
-	eventTypeSessionPRClosed          = eventlog.EventType("session.pr.closed")
-	eventTypeSessionPRMerged          = eventlog.EventType("session.pr.merged")
-)
-
 type prObservedPayload struct {
 	Provider   string                      `json:"provider"`
 	StreamID   string                      `json:"streamId"`

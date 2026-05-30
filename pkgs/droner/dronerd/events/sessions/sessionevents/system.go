@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -113,7 +114,7 @@ func (s *System) Start(ctx context.Context) {
 			ID: eventlog.SubscriberID(consumerCreateProcess),
 			Filter: func(evt eventlog.Envelope) bool {
 				switch evt.Type {
-				case eventTypeSessionQueued, eventTypeSessionEnrichmentRequested, eventTypeSessionEnrichmentSucceeded, eventTypeSessionEnvironmentProvisioningStarted:
+				case eventtypes.SessionQueued, eventtypes.SessionEnrichmentRequested, eventtypes.SessionEnrichmentSucceeded, eventtypes.SessionEnvironmentProvisioningStarted:
 					return true
 				default:
 					return false
@@ -121,11 +122,11 @@ func (s *System) Start(ctx context.Context) {
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
 				switch evt.Type {
-				case eventTypeSessionQueued:
+				case eventtypes.SessionQueued:
 					return s.handleQueuedEvent(ctx, evt)
-				case eventTypeSessionEnrichmentRequested:
+				case eventtypes.SessionEnrichmentRequested:
 					return s.handleEnrichmentRequested(ctx, evt)
-				case eventTypeSessionEnrichmentSucceeded:
+				case eventtypes.SessionEnrichmentSucceeded:
 					return s.handleEnrichmentSucceeded(ctx, evt)
 				default:
 					return s.handleProvisioningStarted(ctx, evt)
@@ -135,7 +136,7 @@ func (s *System) Start(ctx context.Context) {
 		go s.runSubscription(ctx, consumerHydrationProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerHydrationProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionHydrationRequested
+				return evt.Type == eventtypes.SessionHydrationRequested
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
 				return s.handleHydrationRequested(ctx, evt)
@@ -144,10 +145,10 @@ func (s *System) Start(ctx context.Context) {
 		go s.runSubscription(ctx, consumerCompleteProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerCompleteProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionCompletionRequested || evt.Type == eventTypeSessionCompletionStarted
+				return evt.Type == eventtypes.SessionCompletionRequested || evt.Type == eventtypes.SessionCompletionStarted
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				if evt.Type == eventTypeSessionCompletionRequested {
+				if evt.Type == eventtypes.SessionCompletionRequested {
 					return s.handleCompletionRequested(ctx, evt)
 				}
 				return s.handleCompletionStarted(ctx, evt)
@@ -156,10 +157,10 @@ func (s *System) Start(ctx context.Context) {
 		go s.runSubscription(ctx, consumerDeleteProcess, eventlog.Subscription{
 			ID: eventlog.SubscriberID(consumerDeleteProcess),
 			Filter: func(evt eventlog.Envelope) bool {
-				return evt.Type == eventTypeSessionDeletionRequested || evt.Type == eventTypeSessionDeletionStarted
+				return evt.Type == eventtypes.SessionDeletionRequested || evt.Type == eventtypes.SessionDeletionStarted
 			},
 			Handle: func(ctx context.Context, evt eventlog.Envelope) error {
-				if evt.Type == eventTypeSessionDeletionRequested {
+				if evt.Type == eventtypes.SessionDeletionRequested {
 					return s.handleDeletionRequested(ctx, evt)
 				}
 				return s.handleDeletionStarted(ctx, evt)
@@ -175,7 +176,7 @@ func (s *System) enqueueHydrationRequests(ctx context.Context) {
 		return
 	}
 	for _, ref := range refs {
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 			s.logger.Error("failed to append session hydration request", "stream_id", ref.StreamID, "branch", ref.Branch, "error", err)
 		}
 	}
@@ -187,7 +188,7 @@ func (s *System) Hydrate(ctx context.Context) error {
 		return err
 	}
 	for _, ref := range refs {
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionHydrationRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 			return err
 		}
 	}
@@ -195,7 +196,7 @@ func (s *System) Hydrate(ctx context.Context) error {
 }
 
 func (s *System) CreateSession(ctx context.Context, input CreateSessionInput) (CreateSessionResult, error) {
-	if _, err := s.appendEvent(ctx, input.StreamID, eventTypeSessionQueued, newQueuedPayload(input), "", input.StreamID); err != nil {
+	if _, err := s.appendEvent(ctx, input.StreamID, eventtypes.SessionQueued, newQueuedPayload(input), "", input.StreamID); err != nil {
 		return CreateSessionResult{}, err
 	}
 	return CreateSessionResult{TaskID: taskIDPrefixCreate + input.StreamID}, nil
@@ -295,7 +296,7 @@ func (s *System) RequestCompletion(ctx context.Context, branch string) (Operatio
 	if ref.LifecycleState == LifecycleStateCompletionSuccess || ref.LifecycleState == LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
 	}
-	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionCompletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionCompletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 		return OperationResult{}, err
 	}
 	return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
@@ -309,7 +310,7 @@ func (s *System) RequestDeletion(ctx context.Context, branch string) (OperationR
 	if ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
 	}
-	if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+	if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 		return OperationResult{}, err
 	}
 	return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
@@ -325,7 +326,7 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 		if ref.LifecycleState == LifecycleStateDeletionRequested || ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
 			continue
 		}
-		if _, err := s.appendEvent(ctx, ref.StreamID, eventTypeSessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
+		if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
 			return NukeResult{}, err
 		}
 		requested++
@@ -402,10 +403,10 @@ func (s *System) handleAgentEvent(ctx context.Context, evt agentevents.Event) er
 	)
 	switch evt.State {
 	case agentevents.StateBusy:
-		eventType = eventTypeSessionAgentBusy
+		eventType = eventtypes.SessionAgentBusy
 		publicState = PublicStateActiveBusy
 	case agentevents.StateIdle:
-		eventType = eventTypeSessionAgentIdle
+		eventType = eventtypes.SessionAgentIdle
 		publicState = PublicStateActiveIdle
 	default:
 		return nil

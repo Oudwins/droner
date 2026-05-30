@@ -7,6 +7,7 @@ import (
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/hooks"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/pullrequests/pullrequestevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
@@ -23,6 +24,7 @@ type BaseServer struct {
 	Queries      *coredb.Queries
 	EventLogs    *eventlogs.Registry
 	Sessions     *sessionevents.SQLiteProjectionStore
+	Hooks        *hooks.SQLiteSessionLookupStore
 	PRSessions   *pullrequestevents.SQLiteSessionLookupStore
 	PRSnapshots  *pullrequestevents.SQLitePullRequestSnapshotStore
 	BackendStore *backends.Store
@@ -52,6 +54,7 @@ func New() *BaseServer {
 		Queries:     queries,
 		EventLogs:   eventLogs,
 		Sessions:    sessionevents.NewSQLiteProjectionStore(queries),
+		Hooks:       hooks.NewSQLiteSessionLookupStore(queries),
 		PRSessions:  pullrequestevents.NewSQLiteSessionLookupStore(queries),
 		PRSnapshots: pullrequestevents.NewSQLitePullRequestSnapshotStore(queries),
 	}

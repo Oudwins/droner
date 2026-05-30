@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/remote"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
@@ -61,7 +62,7 @@ func (s *System) runSubscription(ctx context.Context) {
 		ID: eventlog.SubscriberID(consumerPullRequestSessionSubscription),
 		Filter: func(evt eventlog.Envelope) bool {
 			switch evt.Type {
-			case eventTypeSessionReady, eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
+			case eventtypes.SessionReady, eventtypes.SessionCompletionSuccess, eventtypes.SessionDeletionSuccess:
 				return true
 			default:
 				return false
@@ -91,9 +92,9 @@ func (s *System) handleSessionEvent(ctx context.Context, evt eventlog.Envelope) 
 	remoteURL := strings.TrimSpace(ref.RemoteURL)
 	branch := strings.TrimSpace(ref.Branch)
 	switch evt.Type {
-	case eventTypeSessionReady:
+	case eventtypes.SessionReady:
 		return s.ensureRemoteSubscription(ctx, string(evt.StreamID), remoteURL, branch)
-	case eventTypeSessionCompletionSuccess, eventTypeSessionDeletionSuccess:
+	case eventtypes.SessionCompletionSuccess, eventtypes.SessionDeletionSuccess:
 		return s.stopRemoteSubscription(ctx, remoteURL, branch)
 	default:
 		return nil
@@ -196,7 +197,7 @@ func (s *System) ingestObserved(ctx context.Context, sessionStreamID string, sna
 	if !found {
 		payload.Snapshot = &snapshot
 	}
-	if err := s.appendPRLog(ctx, streamID, eventTypePRObserved, payload, "", streamID); err != nil {
+	if err := s.appendPRLog(ctx, streamID, eventtypes.PRObserved, payload, "", streamID); err != nil {
 		return err
 	}
 	return s.appendSessionSummaryEvents(ctx, sessionStreamID, streamID, oldSnapshot, snapshot, found, observedAt)
@@ -208,9 +209,9 @@ func (s *System) appendTerminalPREvent(ctx context.Context, event remote.BranchE
 	}
 	streamID := fmt.Sprintf("github:%s#%d", strings.TrimSuffix(strings.TrimPrefix(event.RemoteURL, "git@github.com:"), ".git"), *event.PRNumber)
 	payload := map[string]any{"remoteUrl": event.RemoteURL, "branch": event.Branch, "prNumber": *event.PRNumber, "observedAt": event.Timestamp.UTC()}
-	eventType := eventTypePRClosed
+	eventType := eventtypes.PRClosed
 	if event.Type == remote.PRMerged {
-		eventType = eventTypePRMerged
+		eventType = eventtypes.PRMerged
 	}
 	return s.appendPRLog(ctx, streamID, eventType, payload, "", streamID)
 }
@@ -218,7 +219,7 @@ func (s *System) appendTerminalPREvent(ctx context.Context, event remote.BranchE
 func (s *System) appendSessionSummaryEvents(ctx context.Context, sessionStreamID, prStreamID string, oldSnapshot, newSnapshot remote.PullRequestSnapshot, found bool, observedAt time.Time) error {
 	pending := []eventlog.PendingEvent{}
 	if !found {
-		evt, err := marshalPendingEvent(sessionStreamID, eventTypeSessionPRLinked, sessionPRLinkedPayload{PRStreamID: prStreamID, PRNumber: newSnapshot.Number, State: sessionPRState(newSnapshot), CIState: newSnapshot.CI.State, LinkedAt: observedAt.UTC()}, "", sessionStreamID)
+		evt, err := marshalPendingEvent(sessionStreamID, eventtypes.SessionPRLinked, sessionPRLinkedPayload{PRStreamID: prStreamID, PRNumber: newSnapshot.Number, State: sessionPRState(newSnapshot), CIState: newSnapshot.CI.State, LinkedAt: observedAt.UTC()}, "", sessionStreamID)
 		if err != nil {
 			return err
 		}
@@ -227,12 +228,12 @@ func (s *System) appendSessionSummaryEvents(ctx context.Context, sessionStreamID
 	oldState := sessionPRState(oldSnapshot)
 	newState := sessionPRState(newSnapshot)
 	if !found || oldState != newState {
-		eventType := eventTypeSessionPRStateChanged
+		eventType := eventtypes.SessionPRStateChanged
 		if newState == "closed" {
-			eventType = eventTypeSessionPRClosed
+			eventType = eventtypes.SessionPRClosed
 		}
 		if newState == "merged" {
-			eventType = eventTypeSessionPRMerged
+			eventType = eventtypes.SessionPRMerged
 		}
 		evt, err := marshalPendingEvent(sessionStreamID, eventType, sessionPRStateChangedPayload{PRStreamID: prStreamID, PRNumber: newSnapshot.Number, State: newState, ChangedAt: observedAt.UTC()}, "", sessionStreamID)
 		if err != nil {
@@ -241,7 +242,7 @@ func (s *System) appendSessionSummaryEvents(ctx context.Context, sessionStreamID
 		pending = append(pending, evt)
 	}
 	if !found || oldSnapshot.CI.State != newSnapshot.CI.State {
-		evt, err := marshalPendingEvent(sessionStreamID, eventTypeSessionPRCIStateChanged, sessionPRCIStateChangedPayload{PRStreamID: prStreamID, PRNumber: newSnapshot.Number, CIState: newSnapshot.CI.State, ChangedAt: observedAt.UTC()}, "", sessionStreamID)
+		evt, err := marshalPendingEvent(sessionStreamID, eventtypes.SessionPRCIStateChanged, sessionPRCIStateChangedPayload{PRStreamID: prStreamID, PRNumber: newSnapshot.Number, CIState: newSnapshot.CI.State, ChangedAt: observedAt.UTC()}, "", sessionStreamID)
 		if err != nil {
 			return err
 		}

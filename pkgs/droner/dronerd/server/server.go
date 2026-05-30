@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/hooks"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/pullrequests/pullrequestevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/assert"
@@ -20,6 +21,7 @@ type Server struct {
 	canceler     context.CancelFunc
 	events       *sessionevents.System
 	prs          *pullrequestevents.System
+	hooks        *hooks.System
 	shutdownOnce sync.Once
 }
 
@@ -35,6 +37,7 @@ func New() *Server {
 		canceler: func() {},
 		events:   sessionevents.New(sessionsLog, base.Sessions, base.EventLogs.SessionResetter(), base.Logger, base.Config, base.BackendStore),
 		prs:      pullrequestevents.New(pullRequestsLog, sessionsLog, base.PRSessions, base.PRSnapshots, base.Logger),
+		hooks:    hooks.New(sessionsLog, pullRequestsLog, base.Hooks, base.Logger),
 	}
 }
 
@@ -52,6 +55,7 @@ func (s *Server) Start() error {
 	s.canceler = cancel
 	s.events.Start(ctx)
 	s.prs.Start(ctx)
+	s.hooks.Start(ctx)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -86,6 +90,9 @@ func (s *Server) Shutdown() {
 		}
 		if err := s.prs.Close(); err != nil {
 			s.Base.Logger.Error("[shutdown] pull request event system shutdown failed", "error", err)
+		}
+		if err := s.hooks.Close(); err != nil {
+			s.Base.Logger.Error("[shutdown] hooks event system shutdown failed", "error", err)
 		}
 		if s.Base != nil {
 			s.Base.Close()

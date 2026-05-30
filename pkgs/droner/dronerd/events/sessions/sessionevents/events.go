@@ -20,33 +20,6 @@ const (
 	provisioningModeRestart = "restart"
 )
 
-const (
-	eventTypeSessionQueued                         = eventlog.EventType("session.queued")
-	eventTypeSessionEnrichmentRequested            = eventlog.EventType("session.enrichment.requested")
-	eventTypeSessionEnrichmentSucceeded            = eventlog.EventType("session.enrichment.succeeded")
-	eventTypeSessionEnrichmentFailed               = eventlog.EventType("session.enrichment.failed")
-	eventTypeSessionHydrationRequested             = eventlog.EventType("session.hydration.requested")
-	eventTypeSessionEnvironmentProvisioningStarted = eventlog.EventType("session.environment_provisioning.started")
-	eventTypeSessionEnvironmentProvisioningSuccess = eventlog.EventType("session.environment_provisioning.success")
-	eventTypeSessionEnvironmentProvisioningFailed  = eventlog.EventType("session.environment_provisioning.failed")
-	eventTypeSessionReady                          = eventlog.EventType("session.ready")
-	eventTypeSessionAgentBusy                      = eventlog.EventType("session.agent.busy")
-	eventTypeSessionAgentIdle                      = eventlog.EventType("session.agent.idle")
-	eventTypeSessionCompletionRequested            = eventlog.EventType("session.completion.requested")
-	eventTypeSessionCompletionStarted              = eventlog.EventType("session.completion.started")
-	eventTypeSessionCompletionSuccess              = eventlog.EventType("session.completion.success")
-	eventTypeSessionCompletionFailed               = eventlog.EventType("session.completion.failed")
-	eventTypeSessionDeletionRequested              = eventlog.EventType("session.deletion.requested")
-	eventTypeSessionDeletionStarted                = eventlog.EventType("session.deletion.started")
-	eventTypeSessionDeletionSuccess                = eventlog.EventType("session.deletion.success")
-	eventTypeSessionDeletionFailed                 = eventlog.EventType("session.deletion.failed")
-	eventTypeSessionPRLinked                       = eventlog.EventType("session.pr.linked")
-	eventTypeSessionPRStateChanged                 = eventlog.EventType("session.pr.state_changed")
-	eventTypeSessionPRCIStateChanged               = eventlog.EventType("session.pr.ci_state_changed")
-	eventTypeSessionPRClosed                       = eventlog.EventType("session.pr.closed")
-	eventTypeSessionPRMerged                       = eventlog.EventType("session.pr.merged")
-)
-
 type queuedPayload struct {
 	StreamID        string `json:"streamId"`
 	Harness         string `json:"harness"`

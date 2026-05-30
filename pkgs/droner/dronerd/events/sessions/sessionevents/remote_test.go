@@ -12,6 +12,7 @@ import (
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -247,12 +248,12 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 		eventTypes := loadEventTypes(t, dataDir, streamID)
 		pos := 0
 		want := []eventlog.EventType{
-			eventTypeSessionQueued,
-			eventTypeSessionReady,
-			eventTypeSessionHydrationRequested,
-			eventTypeSessionEnvironmentProvisioningStarted,
-			eventTypeSessionEnvironmentProvisioningSuccess,
-			eventTypeSessionReady,
+			eventtypes.SessionQueued,
+			eventtypes.SessionReady,
+			eventtypes.SessionHydrationRequested,
+			eventtypes.SessionEnvironmentProvisioningStarted,
+			eventtypes.SessionEnvironmentProvisioningSuccess,
+			eventtypes.SessionReady,
 		}
 		for _, eventType := range eventTypes {
 			if pos < len(want) && eventType == want[pos] {
@@ -304,8 +305,8 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 
 	eventTypes := loadEventTypes(t, dataDir, "old-stream")
 	assertEventOrder(t, eventTypes,
-		eventTypeSessionDeletionRequested,
-		eventTypeSessionDeletionStarted,
-		eventTypeSessionDeletionSuccess,
+		eventtypes.SessionDeletionRequested,
+		eventtypes.SessionDeletionStarted,
+		eventtypes.SessionDeletionSuccess,
 	)
 }

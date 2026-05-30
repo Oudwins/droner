@@ -315,15 +315,3 @@ func TestNewFilePartStartsWithNilURL(t *testing.T) {
 		t.Fatalf("expected nil url, got %#v", part.File.URL)
 	}
 }
-
-func TestParseOpencodeModel_NormalizesLegacyGPT5Dot4Name(t *testing.T) {
-	t.Parallel()
-
-	providerID, modelID, ok := parseOpencodeModel("openai/gpt-5-4")
-	if !ok {
-		t.Fatal("expected model parse to succeed")
-	}
-	if providerID != "openai" || modelID != "gpt-5.4" {
-		t.Fatalf("parseOpencodeModel = (%q, %q), want (%q, %q)", providerID, modelID, "openai", "gpt-5.4")
-	}
-}

@@ -1,5 +1,7 @@
 package sessionevents
 
+import "github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+
 type PublicState string
 
 const (
@@ -38,23 +40,23 @@ func (s PublicState) IsTerminal() bool {
 type LifecycleState string
 
 const (
-	LifecycleStateQueued                         LifecycleState = LifecycleState(eventTypeSessionQueued)
-	LifecycleStateEnrichmentRequested            LifecycleState = LifecycleState(eventTypeSessionEnrichmentRequested)
-	LifecycleStateEnrichmentSucceeded            LifecycleState = LifecycleState(eventTypeSessionEnrichmentSucceeded)
-	LifecycleStateEnrichmentFailed               LifecycleState = LifecycleState(eventTypeSessionEnrichmentFailed)
-	LifecycleStateHydrationRequested             LifecycleState = LifecycleState(eventTypeSessionHydrationRequested)
-	LifecycleStateEnvironmentProvisioningStarted LifecycleState = LifecycleState(eventTypeSessionEnvironmentProvisioningStarted)
-	LifecycleStateEnvironmentProvisioningSuccess LifecycleState = LifecycleState(eventTypeSessionEnvironmentProvisioningSuccess)
-	LifecycleStateEnvironmentProvisioningFailed  LifecycleState = LifecycleState(eventTypeSessionEnvironmentProvisioningFailed)
-	LifecycleStateReady                          LifecycleState = LifecycleState(eventTypeSessionReady)
-	LifecycleStateCompletionRequested            LifecycleState = LifecycleState(eventTypeSessionCompletionRequested)
-	LifecycleStateCompletionStarted              LifecycleState = LifecycleState(eventTypeSessionCompletionStarted)
-	LifecycleStateCompletionSuccess              LifecycleState = LifecycleState(eventTypeSessionCompletionSuccess)
-	LifecycleStateCompletionFailed               LifecycleState = LifecycleState(eventTypeSessionCompletionFailed)
-	LifecycleStateDeletionRequested              LifecycleState = LifecycleState(eventTypeSessionDeletionRequested)
-	LifecycleStateDeletionStarted                LifecycleState = LifecycleState(eventTypeSessionDeletionStarted)
-	LifecycleStateDeletionSuccess                LifecycleState = LifecycleState(eventTypeSessionDeletionSuccess)
-	LifecycleStateDeletionFailed                 LifecycleState = LifecycleState(eventTypeSessionDeletionFailed)
+	LifecycleStateQueued                         LifecycleState = LifecycleState(eventtypes.SessionQueued)
+	LifecycleStateEnrichmentRequested            LifecycleState = LifecycleState(eventtypes.SessionEnrichmentRequested)
+	LifecycleStateEnrichmentSucceeded            LifecycleState = LifecycleState(eventtypes.SessionEnrichmentSucceeded)
+	LifecycleStateEnrichmentFailed               LifecycleState = LifecycleState(eventtypes.SessionEnrichmentFailed)
+	LifecycleStateHydrationRequested             LifecycleState = LifecycleState(eventtypes.SessionHydrationRequested)
+	LifecycleStateEnvironmentProvisioningStarted LifecycleState = LifecycleState(eventtypes.SessionEnvironmentProvisioningStarted)
+	LifecycleStateEnvironmentProvisioningSuccess LifecycleState = LifecycleState(eventtypes.SessionEnvironmentProvisioningSuccess)
+	LifecycleStateEnvironmentProvisioningFailed  LifecycleState = LifecycleState(eventtypes.SessionEnvironmentProvisioningFailed)
+	LifecycleStateReady                          LifecycleState = LifecycleState(eventtypes.SessionReady)
+	LifecycleStateCompletionRequested            LifecycleState = LifecycleState(eventtypes.SessionCompletionRequested)
+	LifecycleStateCompletionStarted              LifecycleState = LifecycleState(eventtypes.SessionCompletionStarted)
+	LifecycleStateCompletionSuccess              LifecycleState = LifecycleState(eventtypes.SessionCompletionSuccess)
+	LifecycleStateCompletionFailed               LifecycleState = LifecycleState(eventtypes.SessionCompletionFailed)
+	LifecycleStateDeletionRequested              LifecycleState = LifecycleState(eventtypes.SessionDeletionRequested)
+	LifecycleStateDeletionStarted                LifecycleState = LifecycleState(eventtypes.SessionDeletionStarted)
+	LifecycleStateDeletionSuccess                LifecycleState = LifecycleState(eventtypes.SessionDeletionSuccess)
+	LifecycleStateDeletionFailed                 LifecycleState = LifecycleState(eventtypes.SessionDeletionFailed)
 )
 
 func (s LifecycleState) String() string {
