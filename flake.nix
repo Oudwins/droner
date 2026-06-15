@@ -27,10 +27,11 @@
             gopls
             git
             gnumake
-            psmisc
             sqlc
             just
             dronerDev
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            psmisc
           ];
         };
       }

@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -25,34 +22,6 @@ type opencodeClient struct {
 	sdk     *opencode.Client
 	http    *http.Client
 	baseURL string
-}
-
-type opencodeCommandRequest struct {
-	Command   string                    `json:"command"`
-	Arguments string                    `json:"arguments,omitempty"`
-	Agent     string                    `json:"agent,omitempty"`
-	Model     string                    `json:"model,omitempty"`
-	Parts     []opencodeCommandFilePart `json:"parts,omitempty"`
-}
-
-type opencodeCommandFilePart struct {
-	Type     string                     `json:"type"`
-	URL      string                     `json:"url,omitempty"`
-	Mime     string                     `json:"mime,omitempty"`
-	Filename string                     `json:"filename,omitempty"`
-	Source   *opencodeCommandFileSource `json:"source,omitempty"`
-}
-
-type opencodeCommandFileSource struct {
-	Type string                       `json:"type"`
-	Path string                       `json:"path"`
-	Text opencodeCommandFileSourceRef `json:"text"`
-}
-
-type opencodeCommandFileSourceRef struct {
-	Start int64  `json:"start"`
-	End   int64  `json:"end"`
-	Value string `json:"value"`
 }
 
 func newOpencodeClient(config conf.OpenCodeConfig) *opencodeClient {
@@ -169,122 +138,27 @@ func (c *opencodeClient) SendCommand(ctx context.Context, sessionID string, dire
 		}
 		sessionID = id
 	}
-	parts, err := opencodeCommandPartsFromCommand(command, directory)
-	if err != nil {
-		return err
+	if len(command.Parts) > 0 {
+		parts := make([]messages.MessagePart, 0, len(command.Parts)+1)
+		if text := command.InvocationText(); strings.TrimSpace(text) != "" {
+			parts = append(parts, messages.NewTextPart(text))
+		}
+		parts = append(parts, command.Parts...)
+		return c.SendPrompt(ctx, sessionID, directory, model, agentName, &messages.Message{Parts: parts}, false)
 	}
-	body := opencodeCommandRequest{
-		Command:   strings.TrimSpace(command.Name),
-		Arguments: command.Arguments,
-		Agent:     strings.TrimSpace(agentName),
-		Parts:     parts,
+	params := opencode.SessionCommandParams{
+		Command:   opencode.F(strings.TrimSpace(command.Name)),
+		Arguments: opencode.F(command.Arguments),
+	}
+	if strings.TrimSpace(directory) != "" {
+		params.Directory = opencode.F(directory)
+	}
+	if strings.TrimSpace(agentName) != "" {
+		params.Agent = opencode.F(strings.TrimSpace(agentName))
 	}
 	if strings.TrimSpace(model) != "" {
-		body.Model = strings.TrimSpace(model)
+		params.Model = opencode.F(strings.TrimSpace(model))
 	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	endpoint := fmt.Sprintf("%s/session/%s/command", c.baseURL, sessionID)
-	if strings.TrimSpace(directory) != "" {
-		query := url.Values{}
-		query.Set("directory", strings.TrimSpace(directory))
-		endpoint += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		if len(bodyBytes) == 0 {
-			return fmt.Errorf("opencode command request failed: %s", resp.Status)
-		}
-		return fmt.Errorf("opencode command request failed: %s: %s", resp.Status, strings.TrimSpace(string(bodyBytes)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
-}
-
-func opencodeCommandPartsFromCommand(command *messages.CommandInvocation, worktreePath string) ([]opencodeCommandFilePart, error) {
-	if command == nil || len(command.Parts) == 0 {
-		return nil, nil
-	}
-	parts := make([]opencodeCommandFilePart, 0, len(command.Parts))
-	for _, part := range command.Parts {
-		if part.Type != messages.PartTypeFile {
-			continue
-		}
-		filePart, err := opencodeCommandFilePartFromMessagePart(part, worktreePath)
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, filePart)
-	}
-	return parts, nil
-}
-
-func opencodeCommandFilePartFromMessagePart(part messages.MessagePart, worktreePath string) (opencodeCommandFilePart, error) {
-	if part.File == nil {
-		return opencodeCommandFilePart{}, errors.New("file message part is missing file payload")
-	}
-	filePart := opencodeCommandFilePart{
-		Type:     "file",
-		Mime:     strings.TrimSpace(part.File.Mime),
-		Filename: strings.TrimSpace(part.File.Filename),
-	}
-	inlineURL := ""
-	if part.File.URL != nil {
-		inlineURL = strings.TrimSpace(*part.File.URL)
-	}
-	if inlineURL != "" {
-		if filePart.Mime == "" {
-			return opencodeCommandFilePart{}, errors.New("inline file message part is missing mime type")
-		}
-		if filePart.Filename == "" {
-			return opencodeCommandFilePart{}, errors.New("inline file message part is missing filename")
-		}
-		filePart.URL = inlineURL
-		return filePart, nil
-	}
-	if part.File.Source == nil {
-		return opencodeCommandFilePart{}, errors.New("file message part is missing file source")
-	}
-	if strings.TrimSpace(worktreePath) == "" {
-		return opencodeCommandFilePart{}, errors.New("worktree path is required for file message parts")
-	}
-	relativePath := part.File.Source.Path
-	absolutePath := filepath.Join(worktreePath, relativePath)
-	if _, err := os.Stat(absolutePath); err != nil {
-		return opencodeCommandFilePart{}, fmt.Errorf("resolve file part %q: %w", relativePath, err)
-	}
-	fileURL, err := localFileURL(absolutePath)
-	if err != nil {
-		return opencodeCommandFilePart{}, fmt.Errorf("resolve file part %q url: %w", relativePath, err)
-	}
-	if filePart.Filename == "" {
-		filePart.Filename = filepath.Base(relativePath)
-	}
-	filePart.Mime = "text/plain"
-	filePart.URL = fileURL
-	filePart.Source = &opencodeCommandFileSource{
-		Type: "file",
-		Path: relativePath,
-		Text: opencodeCommandFileSourceRef{},
-	}
-	if part.File.Source.Text != nil {
-		filePart.Source.Text = opencodeCommandFileSourceRef{
-			Start: part.File.Source.Text.Start,
-			End:   part.File.Source.Text.End,
-			Value: part.File.Source.Text.Value,
-		}
-	}
-	return filePart, nil
+	_, err := c.sdk.Session.Command(ctx, sessionID, params, option.WithRequestTimeout(timeouts.SecondLong))
+	return err
 }

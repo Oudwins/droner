@@ -206,7 +206,44 @@ func TestSendOpencodeMessage_ForwardsInlineImagePartsUnchanged(t *testing.T) {
 	}
 }
 
-func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
+func TestSendOpencodeCommand_CallsCommandEndpoint(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/session/abc/command", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["command"] != "review" {
+			t.Fatalf("command = %v, want review", body["command"])
+		}
+		if body["arguments"] != "README.md" {
+			t.Fatalf("arguments = %v", body["arguments"])
+		}
+		if body["agent"] != "plan" {
+			t.Fatalf("agent = %v, want plan", body["agent"])
+		}
+		if body["model"] != "openai/gpt-5-mini" {
+			t.Fatalf("model = %v, want openai/gpt-5-mini", body["model"])
+		}
+		if _, exists := body["parts"]; exists {
+			t.Fatalf("expected parts to be omitted from command body, got %#v", body["parts"])
+		}
+		writeCommandOK(w)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	backend := LocalBackend{}
+	command := &messages.CommandInvocation{Name: "review", Arguments: "README.md"}
+	if err := backend.sendOpencodeCommand(context.Background(), opencodeConfigFromServer(t, srv), "abc", "", "openai/gpt-5-mini", "plan", command); err != nil {
+		t.Fatalf("sendOpencodeCommand: %v", err)
+	}
+}
+
+func TestSendOpencodeCommandWithAttachments_CallsPromptAsyncEndpoint(t *testing.T) {
 	worktreeDir := t.TempDir()
 	readmePath := filepath.Join(worktreeDir, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# droner\n"), 0o644); err != nil {
@@ -214,7 +251,7 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 	}
 	inlinePart := messages.NewDataURLFilePart("image/png", "shot.png", "data:image/png;base64,ZmFrZQ==")
 	mux := http.NewServeMux()
-	mux.HandleFunc("/session/abc/command", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session/abc/prompt_async", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
 		}
@@ -225,28 +262,30 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body["command"] != "review" {
-			t.Fatalf("command = %v, want review", body["command"])
-		}
-		if body["arguments"] != "README.md [Image 1]" {
-			t.Fatalf("arguments = %v", body["arguments"])
-		}
 		if body["agent"] != "plan" {
 			t.Fatalf("agent = %v, want plan", body["agent"])
 		}
-		if body["model"] != "openai/gpt-5-mini" {
-			t.Fatalf("model = %v, want openai/gpt-5-mini", body["model"])
+		model, ok := body["model"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing model")
 		}
-		if _, exists := body["directory"]; exists {
-			t.Fatalf("expected directory to be omitted from body, got %#v", body["directory"])
+		if model["providerID"] != "openai" || model["modelID"] != "gpt-5-mini" {
+			t.Fatalf("model = %#v, want openai/gpt-5-mini", model)
+		}
+		if _, exists := body["command"]; exists {
+			t.Fatalf("expected command to be omitted from prompt body, got %#v", body["command"])
 		}
 		parts, ok := body["parts"].([]any)
-		if !ok || len(parts) != 2 {
-			t.Fatalf("parts = %#v, want two parts", body["parts"])
+		if !ok || len(parts) != 3 {
+			t.Fatalf("parts = %#v, want three parts", body["parts"])
 		}
-		filePart, ok := parts[0].(map[string]any)
+		textPart, ok := parts[0].(map[string]any)
+		if !ok || textPart["type"] != "text" || textPart["text"] != "/review README.md [Image 1]" {
+			t.Fatalf("text part = %#v", parts[0])
+		}
+		filePart, ok := parts[1].(map[string]any)
 		if !ok {
-			t.Fatalf("file part = %#v", parts[0])
+			t.Fatalf("file part = %#v", parts[1])
 		}
 		if filePart["type"] != "file" || filePart["filename"] != "README.md" {
 			t.Fatalf("file part = %#v", filePart)
@@ -262,9 +301,9 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if !ok || text["start"] != float64(11) || text["end"] != float64(21) || text["value"] != "@README.md" {
 			t.Fatalf("source.text = %#v", source["text"])
 		}
-		imagePart, ok := parts[1].(map[string]any)
+		imagePart, ok := parts[2].(map[string]any)
 		if !ok {
-			t.Fatalf("image part = %#v", parts[1])
+			t.Fatalf("image part = %#v", parts[2])
 		}
 		if imagePart["url"] != *inlinePart.File.URL {
 			t.Fatalf("image url = %v, want %v", imagePart["url"], *inlinePart.File.URL)
@@ -272,7 +311,7 @@ func TestSendOpencodeCommand_CallsCommandEndpointWithAttachments(t *testing.T) {
 		if _, exists := imagePart["source"]; exists {
 			t.Fatalf("expected inline image source to be omitted, got %#v", imagePart["source"])
 		}
-		writeCommandOK(w)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
