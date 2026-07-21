@@ -496,6 +496,22 @@ func TestSessionComposerViewShowsSelectedAgent(t *testing.T) {
 	}
 }
 
+func TestSessionComposerViewShowsDefaultModel(t *testing.T) {
+	model := newSessionComposerModelWithCommands("", nil, nil, []string{"build", "plan"}, "openai/gpt-5.5")
+	model.ready = true
+	model.width = 80
+	model.height = 24
+	model.input.SetWidth(60)
+
+	view := model.View()
+	if !strings.Contains(view, "openai/gpt-5.5") {
+		t.Fatalf("view = %q, want default model", view)
+	}
+	if strings.Contains(view, "GPT-5.4 OpenAI") {
+		t.Fatalf("view = %q, contains stale hardcoded model label", view)
+	}
+}
+
 func TestSessionComposerCtrlVPastesImageMarker(t *testing.T) {
 	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.readClipboardImage = func() (clipboardImage, bool, error) {

@@ -119,6 +119,7 @@ type sessionComposerModel struct {
 	fileCandidates      []string
 	slashCommands       []slashCommand
 	agentNames          []string
+	defaultModel        string
 	selectedAgentIndex  int
 	autocompleteActive  bool
 	autocompleteQuery   autocompleteQuery
@@ -145,8 +146,10 @@ func Run(client *sdk.Client, repoPath string, branch string) error {
 	if err != nil {
 		return err
 	}
-	agentNames := conf.GetConfig().TUI.AgentNames
-	prompt, rawInput, agentName, submitted, err := runSessionComposer(repoPath, fileCandidates, slashCommands, agentNames)
+	config := conf.GetConfig()
+	agentNames := config.TUI.AgentNames
+	defaultModel := config.Sessions.Harness.DefaultModel()
+	prompt, rawInput, agentName, submitted, err := runSessionComposer(repoPath, fileCandidates, slashCommands, agentNames, defaultModel)
 	if err != nil {
 		return err
 	}
@@ -167,8 +170,8 @@ func Run(client *sdk.Client, repoPath string, branch string) error {
 	return nil
 }
 
-func runSessionComposer(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string) (*messages.Message, string, string, bool, error) {
-	model := newSessionComposerModelWithCommands(repoRoot, fileCandidates, slashCommands, agentNames)
+func runSessionComposer(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string, defaultModel string) (*messages.Message, string, string, bool, error) {
+	model := newSessionComposerModelWithCommands(repoRoot, fileCandidates, slashCommands, agentNames, defaultModel)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	result, err := program.Run()
 	if err != nil {
@@ -212,7 +215,7 @@ func newSessionComposerModel(repoRoot string, fileCandidates []string, agentName
 	return newSessionComposerModelWithCommands(repoRoot, fileCandidates, nil, agentNames)
 }
 
-func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string) sessionComposerModel {
+func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []string, slashCommands []slashCommand, agentNames []string, defaultModel ...string) sessionComposerModel {
 	focusedStyle, blurredStyle := textarea.DefaultStyles()
 	focusedStyle.Base = lipgloss.NewStyle().Foreground(textColor)
 	focusedStyle.Text = lipgloss.NewStyle().Foreground(textColor)
@@ -241,6 +244,11 @@ func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []strin
 	input.BlurredStyle = blurredStyle
 	input.Focus()
 
+	modelDefaultModel := ""
+	if len(defaultModel) > 0 {
+		modelDefaultModel = strings.TrimSpace(defaultModel[0])
+	}
+
 	model := sessionComposerModel{
 		input:              input,
 		prompt:             newComposerPrompt(),
@@ -248,6 +256,7 @@ func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []strin
 		fileCandidates:     append([]string(nil), fileCandidates...),
 		slashCommands:      append([]slashCommand(nil), slashCommands...),
 		agentNames:         append([]string(nil), agentNames...),
+		defaultModel:       modelDefaultModel,
 		width:              defaultPanelWidth,
 		height:             composerTextareaRows + 8,
 		readClipboardImage: defaultReadClipboardImage,
@@ -574,7 +583,10 @@ func (m sessionComposerModel) renderInputSection(width int) string {
 		Render(m.renderInputView())
 	content := inputShellStyle.Width(width).Render(inputBody)
 	agentSummary := inputMetaStyle.Width(width).Render(metaLabelStyle.Render(fmt.Sprintf("Agent: %s", m.selectedAgentName())))
-	metaLine := lipgloss.JoinHorizontal(lipgloss.Left, m.agentTabsView(), "   ", subtitleStyle.Render("GPT-5.4 OpenAI"))
+	metaLine := m.agentTabsView()
+	if m.defaultModel != "" {
+		metaLine = lipgloss.JoinHorizontal(lipgloss.Left, metaLine, "   ", subtitleStyle.Render(m.defaultModel))
+	}
 	meta := inputMetaStyle.Width(width).Render(metaLine)
 	return inputCardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, content, agentSummary, meta))
 }
