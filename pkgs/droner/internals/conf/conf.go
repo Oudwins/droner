@@ -18,18 +18,18 @@ import (
 type Config struct {
 	Version   string          `json:"-"`
 	Projects  ProjectsConfig  `json:"projects" zog:"projects"`
-	Providers ProvidersConfig `json:"providers"`
-	Sessions  SessionsConfig  `json:"sessions"`
+	Providers ProvidersConfig `json:"providers" zog:"providers"`
+	Sessions  SessionsConfig  `json:"sessions" zog:"sessions"`
 	TUI       TUIConfig       `json:"tui" zog:"tui"`
 }
 
 type ProvidersConfig struct {
-	Github GitHubConfig `json:"github"`
+	Github GitHubConfig `json:"github" zog:"github"`
 }
 
 type GitHubConfig struct {
 	// Seconds
-	PollInterval int `json:"pollInterval"`
+	PollInterval int `json:"pollInterval" zog:"pollInterval"`
 }
 
 var gitHubSchema = z.Struct(z.Shape{

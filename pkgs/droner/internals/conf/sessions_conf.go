@@ -37,9 +37,9 @@ func (h HarnessID) String() string {
 }
 
 type OpenCodeConfig struct {
-	DefaultModel string
-	Hostname     string
-	Port         int
+	DefaultModel string `json:"defaultModel" zog:"defaultModel"`
+	Hostname     string `json:"hostname" zog:"hostname"`
+	Port         int    `json:"port" zog:"port"`
 }
 
 type SessionNamingStrategy string
@@ -50,25 +50,25 @@ const (
 )
 
 type SessionNamingConfig struct {
-	Strategy SessionNamingStrategy
-	Model    string
+	Strategy SessionNamingStrategy `json:"strategy" zog:"strategy"`
+	Model    string                `json:"model" zog:"model"`
 }
 
 type LocalBackendConfig struct {
-	WorktreeDir string
+	WorktreeDir string `json:"worktreeDir" zog:"worktreeDir"`
 }
 
 type SessionHarnessProvidersConfig struct {
-	OpenCode OpenCodeConfig
+	OpenCode OpenCodeConfig `json:"openCode" zog:"openCode"`
 }
 
 type SessionHarnessDefaultsConfig struct {
-	Selected HarnessID
+	Selected HarnessID `json:"selected" zog:"selected"`
 }
 
 type SessionHarnessConfig struct {
-	Defaults  SessionHarnessDefaultsConfig
-	Providers SessionHarnessProvidersConfig
+	Defaults  SessionHarnessDefaultsConfig  `json:"defaults" zog:"defaults"`
+	Providers SessionHarnessProvidersConfig `json:"providers" zog:"providers"`
 }
 
 func (c SessionHarnessConfig) DefaultModel() string {
@@ -81,14 +81,14 @@ func (c SessionHarnessConfig) DefaultModel() string {
 }
 
 type BackendsConfig struct {
-	Default BackendID
-	Local   LocalBackendConfig
+	Default BackendID          `json:"default" zog:"default"`
+	Local   LocalBackendConfig `json:"local" zog:"local"`
 }
 
 type SessionsConfig struct {
-	Backends BackendsConfig
-	Harness  SessionHarnessConfig
-	Naming   SessionNamingConfig
+	Backends BackendsConfig       `json:"backends" zog:"backends"`
+	Harness  SessionHarnessConfig `json:"harness" zog:"harness"`
+	Naming   SessionNamingConfig  `json:"naming" zog:"naming"`
 }
 
 var SessionsConfigSchema = z.Struct(z.Shape{
