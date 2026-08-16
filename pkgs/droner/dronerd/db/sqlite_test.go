@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -56,5 +57,61 @@ func TestOpenSQLiteDBMigratesLegacyDronerNewDB(t *testing.T) {
 	}
 	if sessionProjectionCount != 1 {
 		t.Fatalf("session_projection table count = %d, want 1", sessionProjectionCount)
+	}
+}
+
+func TestSessionProjectionTmuxSessionNameMigrationBackfillsInPlace(t *testing.T) {
+	ctx := context.Background()
+	conn, err := OpenSQLiteDBWithoutMigrations(filepath.Join(t.TempDir(), "droner.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLiteDBWithoutMigrations: %v", err)
+	}
+	defer conn.Close()
+
+	provider, err := NewMigrationProvider(conn)
+	if err != nil {
+		t.Fatalf("NewMigrationProvider: %v", err)
+	}
+	if _, err := provider.UpTo(ctx, 4); err != nil {
+		t.Fatalf("migrate to version 4: %v", err)
+	}
+
+	_, err = conn.Exec(`
+		INSERT INTO session_projection (
+			stream_id, harness, branch, backend_id, repo_path, worktree_path,
+			lifecycle_state, public_state, created_at, updated_at
+		) VALUES
+			('active', 'opencode', 'feature/foo', 'local', '/tmp/work/repo', '/tmp/worktrees/repo..feature/foo', 'session.ready', 'active.idle', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('queued', 'opencode', NULL, 'local', '/tmp/work/repo', NULL, 'session.queued', 'queued', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		t.Fatalf("seed session projections: %v", err)
+	}
+
+	if _, err := provider.UpTo(ctx, 5); err != nil {
+		t.Fatalf("migrate to version 5: %v", err)
+	}
+
+	var tmuxSessionName sql.NullString
+	if err := conn.QueryRow(`SELECT tmux_session_name FROM session_projection WHERE stream_id = 'active'`).Scan(&tmuxSessionName); err != nil {
+		t.Fatalf("read active tmux session name: %v", err)
+	}
+	if !tmuxSessionName.Valid || tmuxSessionName.String != "repo#feature/foo" {
+		t.Fatalf("active tmux session name = %#v, want repo#feature/foo", tmuxSessionName)
+	}
+
+	if err := conn.QueryRow(`SELECT tmux_session_name FROM session_projection WHERE stream_id = 'queued'`).Scan(&tmuxSessionName); err != nil {
+		t.Fatalf("read queued tmux session name: %v", err)
+	}
+	if tmuxSessionName.Valid {
+		t.Fatalf("queued tmux session name = %#v, want NULL", tmuxSessionName)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT count(*) FROM session_projection`).Scan(&count); err != nil {
+		t.Fatalf("count session projections: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("session projection count = %d, want 2", count)
 	}
 }

@@ -24,6 +24,8 @@ type opencodeClient struct {
 	baseURL string
 }
 
+var opencodeSessionCreateTimeout = timeouts.MinutesDefault
+
 func newOpencodeClient(config conf.OpenCodeConfig) *opencodeClient {
 	baseURL := fmt.Sprintf("http://%s:%d", config.Hostname, config.Port)
 	return &opencodeClient{
@@ -39,9 +41,9 @@ func (c *opencodeClient) CreateSession(ctx context.Context, worktreePath string)
 	if strings.TrimSpace(worktreePath) != "" {
 		params.Directory = opencode.F(worktreePath)
 	}
-	session, err := c.sdk.Session.New(ctx, params, option.WithRequestTimeout(timeouts.SecondLong))
+	session, err := c.sdk.Session.New(ctx, params, option.WithRequestTimeout(opencodeSessionCreateTimeout))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("opencode create session request: %w", err)
 	}
 	if session == nil || strings.TrimSpace(session.ID) == "" {
 		return "", errors.New("opencode session id missing from response")

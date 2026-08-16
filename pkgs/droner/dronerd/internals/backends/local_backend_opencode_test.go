@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -36,6 +39,32 @@ func opencodeConfigFromServer(t *testing.T, srv *httptest.Server) conf.OpenCodeC
 		t.Fatalf("parse port: %v", err)
 	}
 	return conf.OpenCodeConfig{Hostname: host, Port: port}
+}
+
+func TestCreateOpencodeSession_DescribesTimeout(t *testing.T) {
+	originalTimeout := opencodeSessionCreateTimeout
+	opencodeSessionCreateTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { opencodeSessionCreateTimeout = originalTimeout })
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/session", func(http.ResponseWriter, *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	worktreePath := "/tmp/worktree"
+	_, err := newOpencodeClient(opencodeConfigFromServer(t, srv)).CreateSession(context.Background(), worktreePath)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	want := "opencode create session request: context deadline exceeded"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err, want)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %q, want it to wrap context deadline exceeded", err)
+	}
 }
 
 func TestSendOpencodeMessage_CallsPromptAsyncEndpoint(t *testing.T) {

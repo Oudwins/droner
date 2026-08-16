@@ -27,7 +27,7 @@ type commandFunc func(name string, args ...string) *exec.Cmd
 
 var execCommand commandFunc = exec.Command
 
-var opencodeAutorunTimeout = timeouts.DefaultMinutes
+var opencodeAutorunTimeout = timeouts.MinutesDefault
 
 func shellQuote(raw string) string {
 	return "'" + strings.ReplaceAll(raw, "'", `'"'"'`) + "'"
@@ -148,7 +148,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, session sessions.State,
 		var err error
 		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, session.WorktreePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("Create agent session from worktree %q: %w", session.WorktreePath, err)
 		}
 	}
 	agentConfig.Opencode = opencodeConfig
