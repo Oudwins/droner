@@ -22,7 +22,7 @@ func (q *Queries) DeleteSessionProjection(ctx context.Context, streamID string) 
 }
 
 const getBlockedSessionProjectionByRepoPathAndBranch = `-- name: GetBlockedSessionProjectionByRepoPathAndBranch :one
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE repo_path = ?
   AND branch = ?
@@ -57,12 +57,13 @@ func (q *Queries) GetBlockedSessionProjectionByRepoPathAndBranch(ctx context.Con
 		&i.PrState,
 		&i.PrCiState,
 		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
 	)
 	return i, err
 }
 
 const getCurrentSessionProjectionByBranch = `-- name: GetCurrentSessionProjectionByBranch :one
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE branch = ?
 ORDER BY created_at DESC
@@ -90,12 +91,13 @@ func (q *Queries) GetCurrentSessionProjectionByBranch(ctx context.Context, branc
 		&i.PrState,
 		&i.PrCiState,
 		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
 	)
 	return i, err
 }
 
 const getLatestNavigationSessionProjectionByBranch = `-- name: GetLatestNavigationSessionProjectionByBranch :one
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE branch = ?
   AND public_state IN ('active.idle', 'active.busy', 'completed')
@@ -124,12 +126,13 @@ func (q *Queries) GetLatestNavigationSessionProjectionByBranch(ctx context.Conte
 		&i.PrState,
 		&i.PrCiState,
 		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
 	)
 	return i, err
 }
 
 const getSessionProjectionByStreamID = `-- name: GetSessionProjectionByStreamID :one
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE stream_id = ?
 `
@@ -155,12 +158,47 @@ func (q *Queries) GetSessionProjectionByStreamID(ctx context.Context, streamID s
 		&i.PrState,
 		&i.PrCiState,
 		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
+	)
+	return i, err
+}
+
+const getSessionProjectionByTmuxSessionName = `-- name: GetSessionProjectionByTmuxSessionName :one
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
+FROM session_projection
+WHERE tmux_session_name = ?
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetSessionProjectionByTmuxSessionName(ctx context.Context, tmuxSessionName sql.NullString) (SessionProjection, error) {
+	row := q.db.QueryRowContext(ctx, getSessionProjectionByTmuxSessionName, tmuxSessionName)
+	var i SessionProjection
+	err := row.Scan(
+		&i.StreamID,
+		&i.Harness,
+		&i.Branch,
+		&i.BackendID,
+		&i.RepoPath,
+		&i.WorktreePath,
+		&i.RemoteUrl,
+		&i.AgentConfig,
+		&i.LifecycleState,
+		&i.PublicState,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PrNumber,
+		&i.PrState,
+		&i.PrCiState,
+		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
 	)
 	return i, err
 }
 
 const getSessionProjectionByWorktreePath = `-- name: GetSessionProjectionByWorktreePath :one
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE worktree_path = ?
 ORDER BY created_at DESC
@@ -188,12 +226,13 @@ func (q *Queries) GetSessionProjectionByWorktreePath(ctx context.Context, worktr
 		&i.PrState,
 		&i.PrCiState,
 		&i.PrUpdatedAt,
+		&i.TmuxSessionName,
 	)
 	return i, err
 }
 
 const listActiveSessionProjectionRefs = `-- name: ListActiveSessionProjectionRefs :many
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE public_state IN ('queued', 'active.idle', 'active.busy')
 ORDER BY updated_at DESC
@@ -226,6 +265,7 @@ func (q *Queries) ListActiveSessionProjectionRefs(ctx context.Context) ([]Sessio
 			&i.PrState,
 			&i.PrCiState,
 			&i.PrUpdatedAt,
+			&i.TmuxSessionName,
 		); err != nil {
 			return nil, err
 		}
@@ -241,18 +281,19 @@ func (q *Queries) ListActiveSessionProjectionRefs(ctx context.Context) ([]Sessio
 }
 
 const listAllSessionProjectionItems = `-- name: ListAllSessionProjectionItems :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 ORDER BY updated_at DESC
 LIMIT 100
 `
 
 type ListAllSessionProjectionItemsRow struct {
-	StreamID    string
-	RepoPath    string
-	RemoteUrl   string
-	Branch      sql.NullString
-	PublicState string
+	StreamID        string
+	RepoPath        string
+	RemoteUrl       string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	PublicState     string
 }
 
 func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllSessionProjectionItemsRow, error) {
@@ -269,6 +310,7 @@ func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllS
 			&i.RepoPath,
 			&i.RemoteUrl,
 			&i.Branch,
+			&i.TmuxSessionName,
 			&i.PublicState,
 		); err != nil {
 			return nil, err
@@ -285,7 +327,7 @@ func (q *Queries) ListAllSessionProjectionItems(ctx context.Context) ([]ListAllS
 }
 
 const listHydratableSessionProjectionRefs = `-- name: ListHydratableSessionProjectionRefs :many
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing', 'deleting')
 ORDER BY updated_at DESC
@@ -318,6 +360,7 @@ func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]Se
 			&i.PrState,
 			&i.PrCiState,
 			&i.PrUpdatedAt,
+			&i.TmuxSessionName,
 		); err != nil {
 			return nil, err
 		}
@@ -333,7 +376,7 @@ func (q *Queries) ListHydratableSessionProjectionRefs(ctx context.Context) ([]Se
 }
 
 const listReusableSessionProjectionRefs = `-- name: ListReusableSessionProjectionRefs :many
-SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at
+SELECT stream_id, harness, branch, backend_id, repo_path, worktree_path, remote_url, agent_config, lifecycle_state, public_state, last_error, created_at, updated_at, pr_number, pr_state, pr_ci_state, pr_updated_at, tmux_session_name
 FROM session_projection
 WHERE public_state = 'completed'
   AND repo_path = ?
@@ -373,6 +416,7 @@ func (q *Queries) ListReusableSessionProjectionRefs(ctx context.Context, arg Lis
 			&i.PrState,
 			&i.PrCiState,
 			&i.PrUpdatedAt,
+			&i.TmuxSessionName,
 		); err != nil {
 			return nil, err
 		}
@@ -388,7 +432,7 @@ func (q *Queries) ListReusableSessionProjectionRefs(ctx context.Context, arg Lis
 }
 
 const listSessionProjectionItemsAfterCursorByStatuses = `-- name: ListSessionProjectionItemsAfterCursorByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
   AND (? = '' OR stream_id < ?)
@@ -405,11 +449,12 @@ type ListSessionProjectionItemsAfterCursorByStatusesParams struct {
 }
 
 type ListSessionProjectionItemsAfterCursorByStatusesRow struct {
-	StreamID    string
-	RepoPath    string
-	RemoteUrl   string
-	Branch      sql.NullString
-	PublicState string
+	StreamID        string
+	RepoPath        string
+	RemoteUrl       string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	PublicState     string
 }
 
 func (q *Queries) ListSessionProjectionItemsAfterCursorByStatuses(ctx context.Context, arg ListSessionProjectionItemsAfterCursorByStatusesParams) ([]ListSessionProjectionItemsAfterCursorByStatusesRow, error) {
@@ -432,6 +477,7 @@ func (q *Queries) ListSessionProjectionItemsAfterCursorByStatuses(ctx context.Co
 			&i.RepoPath,
 			&i.RemoteUrl,
 			&i.Branch,
+			&i.TmuxSessionName,
 			&i.PublicState,
 		); err != nil {
 			return nil, err
@@ -448,7 +494,7 @@ func (q *Queries) ListSessionProjectionItemsAfterCursorByStatuses(ctx context.Co
 }
 
 const listSessionProjectionItemsBeforeCursorByStatuses = `-- name: ListSessionProjectionItemsBeforeCursorByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
   AND (? = '' OR stream_id > ?)
@@ -465,11 +511,12 @@ type ListSessionProjectionItemsBeforeCursorByStatusesParams struct {
 }
 
 type ListSessionProjectionItemsBeforeCursorByStatusesRow struct {
-	StreamID    string
-	RepoPath    string
-	RemoteUrl   string
-	Branch      sql.NullString
-	PublicState string
+	StreamID        string
+	RepoPath        string
+	RemoteUrl       string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	PublicState     string
 }
 
 func (q *Queries) ListSessionProjectionItemsBeforeCursorByStatuses(ctx context.Context, arg ListSessionProjectionItemsBeforeCursorByStatusesParams) ([]ListSessionProjectionItemsBeforeCursorByStatusesRow, error) {
@@ -492,6 +539,7 @@ func (q *Queries) ListSessionProjectionItemsBeforeCursorByStatuses(ctx context.C
 			&i.RepoPath,
 			&i.RemoteUrl,
 			&i.Branch,
+			&i.TmuxSessionName,
 			&i.PublicState,
 		); err != nil {
 			return nil, err
@@ -508,7 +556,7 @@ func (q *Queries) ListSessionProjectionItemsBeforeCursorByStatuses(ctx context.C
 }
 
 const listSessionProjectionItemsOldestByStatuses = `-- name: ListSessionProjectionItemsOldestByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
 ORDER BY stream_id ASC
@@ -522,11 +570,12 @@ type ListSessionProjectionItemsOldestByStatusesParams struct {
 }
 
 type ListSessionProjectionItemsOldestByStatusesRow struct {
-	StreamID    string
-	RepoPath    string
-	RemoteUrl   string
-	Branch      sql.NullString
-	PublicState string
+	StreamID        string
+	RepoPath        string
+	RemoteUrl       string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	PublicState     string
 }
 
 func (q *Queries) ListSessionProjectionItemsOldestByStatuses(ctx context.Context, arg ListSessionProjectionItemsOldestByStatusesParams) ([]ListSessionProjectionItemsOldestByStatusesRow, error) {
@@ -543,6 +592,7 @@ func (q *Queries) ListSessionProjectionItemsOldestByStatuses(ctx context.Context
 			&i.RepoPath,
 			&i.RemoteUrl,
 			&i.Branch,
+			&i.TmuxSessionName,
 			&i.PublicState,
 		); err != nil {
 			return nil, err
@@ -559,7 +609,7 @@ func (q *Queries) ListSessionProjectionItemsOldestByStatuses(ctx context.Context
 }
 
 const listVisibleSessionProjectionItems = `-- name: ListVisibleSessionProjectionItems :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing')
 ORDER BY updated_at DESC
@@ -567,11 +617,12 @@ LIMIT 100
 `
 
 type ListVisibleSessionProjectionItemsRow struct {
-	StreamID    string
-	RepoPath    string
-	RemoteUrl   string
-	Branch      sql.NullString
-	PublicState string
+	StreamID        string
+	RepoPath        string
+	RemoteUrl       string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	PublicState     string
 }
 
 func (q *Queries) ListVisibleSessionProjectionItems(ctx context.Context) ([]ListVisibleSessionProjectionItemsRow, error) {
@@ -588,6 +639,7 @@ func (q *Queries) ListVisibleSessionProjectionItems(ctx context.Context) ([]List
 			&i.RepoPath,
 			&i.RemoteUrl,
 			&i.Branch,
+			&i.TmuxSessionName,
 			&i.PublicState,
 		); err != nil {
 			return nil, err
@@ -636,6 +688,7 @@ INSERT INTO session_projection (
   stream_id,
   harness,
   branch,
+  tmux_session_name,
   backend_id,
   repo_path,
   worktree_path,
@@ -667,11 +720,13 @@ INSERT INTO session_projection (
   ?,
   ?,
   ?,
+  ?,
   ?
 )
 ON CONFLICT(stream_id) DO UPDATE SET
   harness = excluded.harness,
   branch = excluded.branch,
+  tmux_session_name = excluded.tmux_session_name,
   backend_id = excluded.backend_id,
   repo_path = excluded.repo_path,
   worktree_path = excluded.worktree_path,
@@ -688,23 +743,24 @@ ON CONFLICT(stream_id) DO UPDATE SET
 `
 
 type UpsertSessionProjectionParams struct {
-	StreamID       string
-	Harness        string
-	Branch         sql.NullString
-	BackendID      string
-	RepoPath       string
-	WorktreePath   sql.NullString
-	RemoteUrl      string
-	AgentConfig    string
-	LifecycleState string
-	PublicState    string
-	LastError      string
-	PrNumber       sql.NullInt64
-	PrState        sql.NullString
-	PrCiState      sql.NullString
-	PrUpdatedAt    sql.NullTime
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	StreamID        string
+	Harness         string
+	Branch          sql.NullString
+	TmuxSessionName sql.NullString
+	BackendID       string
+	RepoPath        string
+	WorktreePath    sql.NullString
+	RemoteUrl       string
+	AgentConfig     string
+	LifecycleState  string
+	PublicState     string
+	LastError       string
+	PrNumber        sql.NullInt64
+	PrState         sql.NullString
+	PrCiState       sql.NullString
+	PrUpdatedAt     sql.NullTime
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (q *Queries) UpsertSessionProjection(ctx context.Context, arg UpsertSessionProjectionParams) error {
@@ -712,6 +768,7 @@ func (q *Queries) UpsertSessionProjection(ctx context.Context, arg UpsertSession
 		arg.StreamID,
 		arg.Harness,
 		arg.Branch,
+		arg.TmuxSessionName,
 		arg.BackendID,
 		arg.RepoPath,
 		arg.WorktreePath,

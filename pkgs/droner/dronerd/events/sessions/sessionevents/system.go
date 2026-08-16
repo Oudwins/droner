@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/agentevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -67,26 +68,12 @@ type NukeResult struct {
 }
 
 type ListItem struct {
-	ID        string
-	Repo      string
-	RemoteURL string
-	Branch    string
-	State     PublicState
-}
-
-type SessionRef struct {
-	StreamID       string
-	Harness        string
-	Branch         string
-	BackendID      string
-	RepoPath       string
-	WorktreePath   string
-	RemoteURL      string
-	LifecycleState LifecycleState
-	PublicState    PublicState
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              string
+	Repo            string
+	RemoteURL       string
+	Branch          string
+	TmuxSessionName string
+	State           sessions.PublicState
 }
 
 func New(log eventlog.EventLog, projections ProjectionStore, resetter SessionResetter, logger *slog.Logger, config *conf.Config, backendStore *backends.Store) *System {
@@ -268,23 +255,27 @@ func reverseListItems(items []ListItem) {
 	}
 }
 
-func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+func (s *System) LookupSessionByBranch(ctx context.Context, branch string) (sessions.State, error) {
 	return s.loadCurrentProjectionByBranch(ctx, branch)
 }
 
-func (s *System) LookupBlockedSessionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (SessionRef, error) {
+func (s *System) LookupBlockedSessionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (sessions.State, error) {
 	return s.loadBlockedProjectionByRepoAndBranch(ctx, repoPath, branch)
 }
 
-func (s *System) LookupSessionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
+func (s *System) LookupSessionByWorktreePath(ctx context.Context, worktreePath string) (sessions.State, error) {
 	return s.loadProjectionByWorktreePath(ctx, worktreePath)
 }
 
-func (s *System) LookupLatestNavigationSessionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+func (s *System) LookupSessionByTmuxSessionName(ctx context.Context, tmuxSessionName string) (sessions.State, error) {
+	return s.loadProjectionByTmuxSessionName(ctx, tmuxSessionName)
+}
+
+func (s *System) LookupLatestNavigationSessionByBranch(ctx context.Context, branch string) (sessions.State, error) {
 	return s.loadLatestNavigationProjectionByBranch(ctx, branch)
 }
 
-func (s *System) ListActiveSessionRefs(ctx context.Context) ([]SessionRef, error) {
+func (s *System) ListActiveSessionRefs(ctx context.Context) ([]sessions.State, error) {
 	return s.listActiveProjectionRefs(ctx)
 }
 
@@ -293,7 +284,7 @@ func (s *System) RequestCompletion(ctx context.Context, branch string) (Operatio
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if ref.LifecycleState == LifecycleStateCompletionSuccess || ref.LifecycleState == LifecycleStateDeletionSuccess {
+	if ref.LifecycleState == sessions.LifecycleStateCompletionSuccess || ref.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixComplete + ref.StreamID}, nil
 	}
 	if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionCompletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -307,7 +298,7 @@ func (s *System) RequestDeletion(ctx context.Context, branch string) (OperationR
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
+	if ref.LifecycleState == sessions.LifecycleStateDeletionStarted || ref.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return OperationResult{TaskID: taskIDPrefixDelete + ref.StreamID}, nil
 	}
 	if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -323,7 +314,7 @@ func (s *System) NukeSessions(ctx context.Context) (NukeResult, error) {
 	}
 	requested := 0
 	for _, ref := range refs {
-		if ref.LifecycleState == LifecycleStateDeletionRequested || ref.LifecycleState == LifecycleStateDeletionStarted || ref.LifecycleState == LifecycleStateDeletionSuccess {
+		if ref.LifecycleState == sessions.LifecycleStateDeletionRequested || ref.LifecycleState == sessions.LifecycleStateDeletionStarted || ref.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 			continue
 		}
 		if _, err := s.appendEvent(ctx, ref.StreamID, eventtypes.SessionDeletionRequested, requestStepPayload(ref.Branch), "", ref.StreamID); err != nil {
@@ -357,12 +348,12 @@ func (s *System) ResetToEvent(ctx context.Context, streamID string, eventID stri
 	return OperationResult{TaskID: taskIDPrefixReset + streamID}, nil
 }
 
-func newListItem(id, repoPath, remoteURL, branch string, state PublicState) ListItem {
+func newListItem(id, repoPath, remoteURL, branch, tmuxSessionName string, state sessions.PublicState) ListItem {
 	repo := filepath.Base(filepath.Clean(repoPath))
 	if repo == "." || repo == string(filepath.Separator) {
 		repo = ""
 	}
-	return ListItem{ID: id, Repo: repo, RemoteURL: remoteURL, Branch: branch, State: state}
+	return ListItem{ID: id, Repo: repo, RemoteURL: remoteURL, Branch: branch, TmuxSessionName: tmuxSessionName, State: state}
 }
 
 func (s *System) rebuildProjection(ctx context.Context, streamID string) error {
@@ -373,7 +364,7 @@ func (s *System) rebuildProjection(ctx context.Context, streamID string) error {
 	if err != nil {
 		return err
 	}
-	return s.upsertProjection(ctx, state.projectionMutation())
+	return s.upsertProjection(ctx, state)
 }
 
 func (s *System) runAgentEventBridge(ctx context.Context) {
@@ -399,15 +390,15 @@ func (s *System) handleAgentEvent(ctx context.Context, evt agentevents.Event) er
 
 	var (
 		eventType   eventlog.EventType
-		publicState PublicState
+		publicState sessions.PublicState
 	)
 	switch evt.State {
 	case agentevents.StateBusy:
 		eventType = eventtypes.SessionAgentBusy
-		publicState = PublicStateActiveBusy
+		publicState = sessions.PublicStateActiveBusy
 	case agentevents.StateIdle:
 		eventType = eventtypes.SessionAgentIdle
-		publicState = PublicStateActiveIdle
+		publicState = sessions.PublicStateActiveIdle
 	default:
 		return nil
 	}

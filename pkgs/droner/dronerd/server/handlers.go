@@ -13,6 +13,7 @@ import (
 
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/repo"
 	"github.com/Oudwins/droner/pkgs/droner/internals/schemas"
@@ -208,7 +209,7 @@ func (s *Server) HandlerCompleteSession(logger *slog.Logger, w http.ResponseWrit
 		return
 	}
 
-	if !ref.PublicState.IsActive() && ref.PublicState != sessionevents.PublicStateCompleted && ref.PublicState != sessionevents.PublicStateDeleted {
+	if !ref.PublicState.IsActive() && ref.PublicState != sessions.PublicStateCompleted && ref.PublicState != sessions.PublicStateDeleted {
 		logger.Error("Complete requested for non-active session", slog.String("status", ref.PublicState.String()), slog.String("branch", payload.Branch.String()))
 		RenderJSON(w, r, JsonResponseError(JsonResponseErrorCodeValidationFailed, fmt.Sprintf("Session is not active (status=%s)", ref.PublicState), nil), Render.Status(http.StatusConflict))
 		return
@@ -333,13 +334,13 @@ func (s *Server) handleSessionNavigation(logger *slog.Logger, w http.ResponseWri
 
 	cursor := strings.TrimSpace(q.ID)
 	if cursor == "" {
-		branch := navigationBranchFromTmuxSession(q.TmuxSession)
-		if branch != "" {
-			ref, err := s.events.LookupLatestNavigationSessionByBranch(r.Context(), branch)
+		tmuxSessionName := strings.TrimSpace(q.TmuxSession)
+		if tmuxSessionName != "" {
+			ref, err := s.events.LookupSessionByTmuxSessionName(r.Context(), tmuxSessionName)
 			if err != nil {
 				if !errors.Is(err, sql.ErrNoRows) {
-					logger.Error("Failed to resolve navigation branch", slog.String("branch", branch), slog.String("error", err.Error()))
-					RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve session branch", nil), Render.Status(http.StatusInternalServerError))
+					logger.Error("Failed to resolve navigation tmux session", slog.String("tmuxSessionName", tmuxSessionName), slog.String("error", err.Error()))
+					RenderJSON(w, r, JsonResponseError(JsonResponseErroCodeInternal, "Failed to resolve tmux session", nil), Render.Status(http.StatusInternalServerError))
 					return
 				}
 			} else {
@@ -374,27 +375,14 @@ func (s *Server) wrapSessionNavigation(ctx context.Context, direction string) ([
 	return s.events.ListSessionProjections(ctx, statuses, 1, "", direction)
 }
 
-func navigationBranchFromTmuxSession(tmuxSession string) string {
-	parts := strings.Split(strings.TrimSpace(tmuxSession), "#")
-	if len(parts) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(parts[1])
-}
-
 func renderSessionListResponse(w http.ResponseWriter, r *http.Request, items []sessionevents.ListItem) {
 	responseItems := make([]schemas.SessionListItem, 0, len(items))
 	for _, item := range items {
-		tmuxSession := ""
-		if item.Repo != "" && item.Branch != "" {
-			tmuxSession = item.Repo + "#" + item.Branch
-		}
-
 		responseItems = append(responseItems, schemas.SessionListItem{
 			ID:          item.ID,
 			Repo:        item.Repo,
 			RemoteURL:   item.RemoteURL,
-			TmuxSession: tmuxSession,
+			TmuxSession: item.TmuxSessionName,
 			Branch:      optionalBranch(item.Branch),
 			State:       schemas.SessionPublicState(item.State),
 		})

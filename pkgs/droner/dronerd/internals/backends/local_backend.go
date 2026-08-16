@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 	"github.com/Oudwins/droner/pkgs/droner/internals/timeouts"
@@ -27,29 +28,6 @@ type commandFunc func(name string, args ...string) *exec.Cmd
 var execCommand commandFunc = exec.Command
 
 var opencodeAutorunTimeout = timeouts.DefaultMinutes
-
-func (l LocalBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		return "", errors.New("session id is required")
-	}
-	repoName := filepath.Base(repoPath)
-	worktreeName := fmt.Sprintf("%s..%s", repoName, sessionID)
-	return filepath.Join(l.config.WorktreeDir, worktreeName), nil
-}
-
-func tmuxSessionName(repoPath string, sessionID string) string {
-	repoName := filepath.Base(repoPath)
-	return fmt.Sprintf("%s#%s", repoName, sessionID)
-}
-
-func tmuxSessionNameFromWorktreePath(worktreePath string) string {
-	worktreeName := filepath.Base(worktreePath)
-	parts := strings.Split(worktreeName, "..")
-	if len(parts) != 2 {
-		return worktreeName
-	}
-	return fmt.Sprintf("%s#%s", parts[0], parts[1])
-}
 
 func shellQuote(raw string) string {
 	return "'" + strings.ReplaceAll(raw, "'", `'"'"'`) + "'"
@@ -69,10 +47,10 @@ func tmuxOpencodeAttachCommand(opencodeURL string, opencodeSessionID string, wor
 	return command.String()
 }
 
-func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error) {
-	sessionName := tmuxSessionName(session.RepoPath, session.Branch)
-	if strings.TrimSpace(session.RepoPath) == "" || strings.TrimSpace(session.Branch) == "" {
-		sessionName = tmuxSessionNameFromWorktreePath(session.WorktreePath)
+func (l LocalBackend) HydrateSession(ctx context.Context, session sessions.State, agentConfig AgentConfig) (HydrationResult, error) {
+	sessionName, err := requireTmuxSessionName(session)
+	if err != nil {
+		return HydrationResult{Status: db.SessionStatusFailed, Error: err.Error()}, nil
 	}
 
 	exists, err := l.tmuxSessionExists(sessionName)
@@ -101,17 +79,20 @@ func (l LocalBackend) HydrateSession(ctx context.Context, session db.Session, ag
 	return HydrationResult{Status: db.SessionStatusActiveIdle}, nil
 }
 
-func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig, opts ...CreateSessionOptions) (retErr error) {
-	sessionName := tmuxSessionName(repoPath, sessionID)
+func (l LocalBackend) CreateSession(ctx context.Context, session sessions.State, agentConfig AgentConfig, opts ...CreateSessionOptions) (retErr error) {
+	sessionName, err := requireTmuxSessionName(session)
+	if err != nil {
+		return err
+	}
 	createOpts := CreateSessionOptions{}
 	if len(opts) > 0 {
 		createOpts = opts[0]
 	}
-	branchState, branchStateErr := l.resolveBranchState(repoPath, sessionID)
+	branchState, branchStateErr := l.resolveBranchState(session.RepoPath, session.Branch)
 	if branchStateErr != nil {
 		return branchStateErr
 	}
-	targetWorktreeExisted, worktreeExistsErr := worktreeDirExists(worktreePath)
+	targetWorktreeExisted, worktreeExistsErr := worktreeDirExists(session.WorktreePath)
 	if worktreeExistsErr != nil {
 		return worktreeExistsErr
 	}
@@ -125,17 +106,17 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		_ = l.killTmuxSession(sessionName)
 
 		cleanRoot := filepath.Clean(l.config.WorktreeDir)
-		cleanWorktree := filepath.Clean(worktreePath)
+		cleanWorktree := filepath.Clean(session.WorktreePath)
 		if !targetWorktreeExisted && cleanRoot != "" && cleanWorktree != "" {
 			if rel, err := filepath.Rel(cleanRoot, cleanWorktree); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-				_ = l.removeGitWorktreeFromRepo(repoPath, cleanWorktree)
+				_ = l.removeGitWorktreeFromRepo(session.RepoPath, cleanWorktree)
 				_ = os.RemoveAll(cleanWorktree)
 			}
 		}
 
 		if !targetWorktreeExisted && !branchState.localExists {
-			if commonGitDir, err := l.gitCommonDirFromRepo(repoPath); err == nil {
-				_ = l.deleteGitBranch(commonGitDir, sessionID)
+			if commonGitDir, err := l.gitCommonDirFromRepo(session.RepoPath); err == nil {
+				_ = l.deleteGitBranch(commonGitDir, session.Branch)
 			}
 		}
 	}()
@@ -143,7 +124,7 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 	if err := os.MkdirAll(l.config.WorktreeDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create worktree root: %w", err)
 	}
-	reused, cleanupCandidate, prepareErr := l.prepareSessionWorktree(ctx, repoPath, worktreePath, sessionID, createOpts, branchState, targetWorktreeExisted)
+	reused, cleanupCandidate, prepareErr := l.prepareSessionWorktree(ctx, session, createOpts, branchState, targetWorktreeExisted)
 	if prepareErr != nil {
 		return prepareErr
 	}
@@ -151,33 +132,33 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		createOpts.MarkReusableWorktreeDeletion(*cleanupCandidate)
 	}
 	if !reused {
-		if err := l.createGitWorktree(repoPath, worktreePath, sessionID, branchState); err != nil {
+		if err := l.createGitWorktree(session.RepoPath, session.WorktreePath, session.Branch, branchState); err != nil {
 			return err
 		}
 	}
-	if err := l.runCursorWorktreeSetup(repoPath, worktreePath, sessionID); err != nil {
+	if err := l.runCursorWorktreeSetup(session.RepoPath, session.WorktreePath, session.Branch); err != nil {
 		return err
 	}
 	opencodeConfig := agentConfig.Opencode
-	if err := l.ensureOpencodeServer(ctx, worktreePath, opencodeConfig); err != nil {
+	if err := l.ensureOpencodeServer(ctx, session.WorktreePath, opencodeConfig); err != nil {
 		return err
 	}
 	opencodeSessionID := ""
-	var err error
 	if opencodeInputHasContent(agentConfig) {
-		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, worktreePath)
+		var err error
+		opencodeSessionID, err = l.createOpencodeSession(ctx, opencodeConfig, session.WorktreePath)
 		if err != nil {
 			return err
 		}
 	}
 	agentConfig.Opencode = opencodeConfig
-	if err := l.createTmuxOpencodeSession(sessionName, worktreePath, agentConfig, opencodeSessionID); err != nil {
+	if err := l.createTmuxOpencodeSession(sessionName, session.WorktreePath, agentConfig, opencodeSessionID); err != nil {
 		return err
 	}
 	if opencodeInputHasContent(agentConfig) {
 		cfg := opencodeConfig
-		session := opencodeSessionID
-		dir := worktreePath
+		opencodeSession := opencodeSessionID
+		dir := session.WorktreePath
 		model := agentConfig.Model
 		agentName := agentConfig.AgentName
 		message := agentConfig.Message
@@ -185,20 +166,20 @@ func (l LocalBackend) CreateSession(ctx context.Context, repoPath string, worktr
 		go func() {
 			promptCtx, cancel := context.WithTimeout(context.Background(), opencodeAutorunTimeout)
 			defer cancel()
-			if err := l.sendOpencodeInitialInput(promptCtx, cfg, session, dir, model, agentName, message, command); err != nil {
+			if err := l.sendOpencodeInitialInput(promptCtx, cfg, opencodeSession, dir, model, agentName, message, command); err != nil {
 				slog.Warn(
 					"failed to autorun opencode prompt",
-					slog.String("sessionID", sessionID),
-					slog.String("opencodeSessionID", session),
+					slog.String("sessionID", session.Branch),
+					slog.String("opencodeSessionID", opencodeSession),
 					slog.String("error", err.Error()),
 				)
 			}
 		}()
 	}
-	if err := l.createTmuxTerminalWindow(sessionName, worktreePath); err != nil {
+	if err := l.createTmuxTerminalWindow(sessionName, session.WorktreePath); err != nil {
 		return err
 	}
-	if err := l.createTmuxTerminalSplitWindow(sessionName, worktreePath); err != nil {
+	if err := l.createTmuxTerminalSplitWindow(sessionName, session.WorktreePath); err != nil {
 		return err
 	}
 	if err := l.selectTmuxWindow(sessionName, "^"); err != nil {
@@ -212,18 +193,18 @@ type localBranchState struct {
 	remoteRef   string
 }
 
-func (l LocalBackend) prepareSessionWorktree(ctx context.Context, repoPath string, worktreePath string, sessionID string, createOpts CreateSessionOptions, branchState localBranchState, targetWorktreeExisted bool) (bool, *ReusableWorktreeCandidate, error) {
+func (l LocalBackend) prepareSessionWorktree(ctx context.Context, session sessions.State, createOpts CreateSessionOptions, branchState localBranchState, targetWorktreeExisted bool) (bool, *sessions.State, error) {
 	if targetWorktreeExisted {
 		if createOpts.LookupWorktreeSession != nil {
-			ref, err := createOpts.LookupWorktreeSession(ctx, worktreePath)
+			ref, err := createOpts.LookupWorktreeSession(ctx, session.WorktreePath)
 			if err != nil {
 				return false, nil, err
 			}
-			if ref != nil && ref.StreamID != "" && ref.StreamID != createOpts.CurrentStreamID && isBlockedWorktreeState(ref.PublicState) {
+			if ref != nil && ref.StreamID != "" && ref.StreamID != createOpts.CurrentStreamID && isBlockedWorktreeState(ref.PublicState.String()) {
 				return false, nil, fmt.Errorf("session already exists for worktree (status=%s streamID=%s)", ref.PublicState, ref.StreamID)
 			}
 		}
-		if err := l.reuseExistingWorktreeInPlace(repoPath, worktreePath, sessionID, branchState); err != nil {
+		if err := l.reuseExistingWorktreeInPlace(session, branchState); err != nil {
 			return false, nil, err
 		}
 		return true, nil, nil
@@ -238,7 +219,7 @@ func (l LocalBackend) prepareSessionWorktree(ctx context.Context, repoPath strin
 			if candidate == nil {
 				break
 			}
-			reuseCandidate, ok, err := l.tryReuseProvidedWorktree(repoPath, worktreePath, sessionID, *candidate, branchState)
+			reuseCandidate, ok, err := l.tryReuseProvidedWorktree(session, *candidate, branchState)
 			if err != nil {
 				return false, nil, err
 			}
@@ -251,9 +232,9 @@ func (l LocalBackend) prepareSessionWorktree(ctx context.Context, repoPath strin
 	return false, nil, nil
 }
 
-func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath string, sessionID string, candidate ReusableWorktreeCandidate, branchState localBranchState) (ReusableWorktreeCandidate, bool, error) {
-	cleanRepoPath := filepath.Clean(repoPath)
-	cleanTarget := filepath.Clean(worktreePath)
+func (l LocalBackend) tryReuseProvidedWorktree(session sessions.State, candidate sessions.State, branchState localBranchState) (sessions.State, bool, error) {
+	cleanRepoPath := filepath.Clean(session.RepoPath)
+	cleanTarget := filepath.Clean(session.WorktreePath)
 	cleanRoot := filepath.Clean(l.config.WorktreeDir)
 	oldWorktreePath := filepath.Clean(candidate.WorktreePath)
 
@@ -272,14 +253,14 @@ func (l LocalBackend) tryReuseProvidedWorktree(repoPath string, worktreePath str
 		return candidate, false, nil
 	}
 
-	_ = l.killTmuxSession(candidate.Branch)
+	_ = l.killTmuxSession(candidate.TmuxSessionName)
 	if err := l.resetAndCleanWorktree(oldWorktreePath); err != nil {
 		return candidate, false, nil
 	}
 	if err := l.moveGitWorktree(cleanRepoPath, oldWorktreePath, cleanTarget); err != nil {
 		return candidate, false, nil
 	}
-	if err := l.prepareWorktreeForBranch(cleanRepoPath, cleanTarget, sessionID, branchState); err != nil {
+	if err := l.prepareWorktreeForBranch(cleanRepoPath, cleanTarget, session.Branch, branchState); err != nil {
 		return candidate, false, err
 	}
 
@@ -317,11 +298,15 @@ func (l LocalBackend) removeGitWorktreeFromRepo(repoPath string, worktreePath st
 	return nil
 }
 
-func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sessionID string) error {
-	sessionName := tmuxSessionNameFromWorktreePath(worktreePath)
+func (l LocalBackend) DeleteSession(_ context.Context, session sessions.State) error {
+	sessionName, err := requireTmuxSessionName(session)
+	if err != nil {
+		return err
+	}
 	if err := l.killTmuxSession(sessionName); err != nil {
 		return err
 	}
+	worktreePath := session.WorktreePath
 	if strings.TrimSpace(worktreePath) == "" {
 		return nil
 	}
@@ -338,24 +323,26 @@ func (l LocalBackend) DeleteSession(_ context.Context, worktreePath string, sess
 	if err := l.removeGitWorktree(worktreePath); err != nil {
 		return err
 	}
-	if err := l.deleteGitBranch(commonGitDir, sessionID); err != nil {
+	if err := l.deleteGitBranch(commonGitDir, session.Branch); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (l LocalBackend) CompleteSession(_ context.Context, worktreePath string, sessionID string) error {
-	sessionName := ""
-	if strings.TrimSpace(worktreePath) != "" {
-		sessionName = tmuxSessionNameFromWorktreePath(worktreePath)
-	}
-	if strings.TrimSpace(sessionName) == "" {
-		sessionName = strings.TrimSpace(sessionID)
-	}
-	if sessionName == "" {
-		return nil
+func (l LocalBackend) CompleteSession(_ context.Context, session sessions.State) error {
+	sessionName, err := requireTmuxSessionName(session)
+	if err != nil {
+		return err
 	}
 	return l.killTmuxSession(sessionName)
+}
+
+func requireTmuxSessionName(session sessions.State) (string, error) {
+	sessionName := strings.TrimSpace(session.TmuxSessionName)
+	if sessionName == "" {
+		return "", errors.New("tmux session name is required")
+	}
+	return sessionName, nil
 }
 
 func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {
@@ -393,12 +380,12 @@ func (l LocalBackend) createGitWorktree(repoPath string, worktreePath string, br
 	return nil
 }
 
-func (l LocalBackend) reuseExistingWorktreeInPlace(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {
-	_ = l.killTmuxSession(tmuxSessionNameFromWorktreePath(worktreePath))
-	if err := l.resetAndCleanWorktree(worktreePath); err != nil {
+func (l LocalBackend) reuseExistingWorktreeInPlace(session sessions.State, branchState localBranchState) error {
+	_ = l.killTmuxSession(session.TmuxSessionName)
+	if err := l.resetAndCleanWorktree(session.WorktreePath); err != nil {
 		return err
 	}
-	return l.prepareWorktreeForBranch(repoPath, worktreePath, branchName, branchState)
+	return l.prepareWorktreeForBranch(session.RepoPath, session.WorktreePath, session.Branch, branchState)
 }
 
 func (l LocalBackend) prepareWorktreeForBranch(repoPath string, worktreePath string, branchName string, branchState localBranchState) error {

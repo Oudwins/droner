@@ -1,6 +1,53 @@
-package sessionevents
+package sessions
 
-import "github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/naming"
+)
+
+type State struct {
+	StreamID        string
+	Harness         string
+	RequestedBranch string
+	Branch          string
+	TmuxSessionName string
+	BackendID       string
+	RepoPath        string
+	WorktreePath    string
+	RemoteURL       string
+	AgentConfig     string
+	LifecycleState  LifecycleState
+	PublicState     PublicState
+	LastError       string
+	PRNumber        int64
+	PRState         string
+	PRCIState       string
+	PRUpdatedAt     time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func DeriveNames(repoPath string, worktreeDir string, branch string) (string, string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", "", errors.New("branch is required")
+	}
+	repoName := filepath.Base(repoPath)
+	if strings.TrimSpace(repoName) == "" || repoName == "." || repoName == string(filepath.Separator) {
+		return "", "", errors.New("repo path is required")
+	}
+	repoName = delimiterSafeRepoName(repoName)
+	physicalName := physicalSessionName(branch)
+	return fmt.Sprintf("%s#%s", repoName, physicalName), filepath.Join(worktreeDir, fmt.Sprintf("%s..%s", repoName, physicalName)), nil
+}
 
 type PublicState string
 
@@ -74,4 +121,29 @@ func (s LifecycleState) IsTerminal() bool {
 	default:
 		return false
 	}
+}
+
+func delimiterSafeRepoName(repoName string) string {
+	repoName = strings.TrimSpace(repoName)
+	repoName = strings.ReplaceAll(repoName, "#", "-")
+	for strings.Contains(repoName, "..") {
+		repoName = strings.ReplaceAll(repoName, "..", ".")
+	}
+	repoName = strings.Trim(repoName, ".")
+	if repoName == "" {
+		return "repo"
+	}
+	return repoName
+}
+
+func physicalSessionName(branch string) string {
+	name := naming.SanitizeSessionNamePrefix(branch)
+	if name == "" {
+		name = "session"
+	}
+	if name == branch {
+		return name
+	}
+	hash := sha1.Sum([]byte(branch))
+	return fmt.Sprintf("%s-%s", name, hex.EncodeToString(hash[:])[:6])
 }

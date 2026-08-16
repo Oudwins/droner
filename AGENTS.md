@@ -14,6 +14,7 @@
 - CLI entry point: `pkgs/droner/droner/cli.go`.
 - Shared cross-package helpers live under `pkgs/droner/internals/...`; dronerd-only helpers now live under `pkgs/droner/dronerd/internals/...`.
 - Shared event log abstraction lives in `pkgs/droner/internals/eventlog`; dronerd's SQLite backend and queries live under `pkgs/droner/dronerd/events/backend/sqlite3`.
+- The canonical hydrated session state and its naming derivation live in `pkgs/droner/dronerd/events/sessions`: enrichment preserves the git branch and derives the persisted tmux session name and worktree path once, and backends receive that state directly.
 - SDK package lives under `pkgs/droner/sdk`.
 - HTTP server code lives in `pkgs/droner/dronerd/server`.
 - Dronerd-owned helper packages such as backends, remote integration, repo/session id helpers, and assertions live under `pkgs/droner/dronerd/internals`.

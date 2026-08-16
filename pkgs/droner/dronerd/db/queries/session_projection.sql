@@ -3,6 +3,7 @@ INSERT INTO session_projection (
   stream_id,
   harness,
   branch,
+  tmux_session_name,
   backend_id,
   repo_path,
   worktree_path,
@@ -34,11 +35,13 @@ INSERT INTO session_projection (
   ?,
   ?,
   ?,
+  ?,
   ?
 )
 ON CONFLICT(stream_id) DO UPDATE SET
   harness = excluded.harness,
   branch = excluded.branch,
+  tmux_session_name = excluded.tmux_session_name,
   backend_id = excluded.backend_id,
   repo_path = excluded.repo_path,
   worktree_path = excluded.worktree_path,
@@ -84,6 +87,13 @@ WHERE worktree_path = ?
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: GetSessionProjectionByTmuxSessionName :one
+SELECT *
+FROM session_projection
+WHERE tmux_session_name = ?
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: GetBlockedSessionProjectionByRepoPathAndBranch :one
 SELECT *
 FROM session_projection
@@ -102,20 +112,20 @@ ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: ListVisibleSessionProjectionItems :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE public_state IN ('queued', 'active.idle', 'active.busy', 'completing')
 ORDER BY updated_at DESC
 LIMIT 100;
 
 -- name: ListAllSessionProjectionItems :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 ORDER BY updated_at DESC
 LIMIT 100;
 
 -- name: ListSessionProjectionItemsAfterCursorByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
   AND (? = '' OR stream_id < ?)
@@ -123,7 +133,7 @@ ORDER BY stream_id DESC
 LIMIT ?;
 
 -- name: ListSessionProjectionItemsBeforeCursorByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
   AND (? = '' OR stream_id > ?)
@@ -131,7 +141,7 @@ ORDER BY stream_id ASC
 LIMIT ?;
 
 -- name: ListSessionProjectionItemsOldestByStatuses :many
-SELECT stream_id, repo_path, remote_url, branch, public_state
+SELECT stream_id, repo_path, remote_url, branch, tmux_session_name, public_state
 FROM session_projection
 WHERE ((? = '') OR (',' || ? || ',') LIKE '%,' || public_state || ',%')
 ORDER BY stream_id ASC

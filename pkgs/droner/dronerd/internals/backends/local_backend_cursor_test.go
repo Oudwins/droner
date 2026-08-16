@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
@@ -145,7 +146,7 @@ func TestLocalBackendCreateSession_RunsCursorWorktreeSetup(t *testing.T) {
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: filepath.Dir(worktreePath)}}
 	agentCfg := AgentConfig{Opencode: conf.OpenCodeConfig{Hostname: opencodeCfg.Hostname, Port: opencodeCfg.Port}}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

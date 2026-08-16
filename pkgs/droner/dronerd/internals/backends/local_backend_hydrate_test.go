@@ -2,7 +2,6 @@ package backends
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
@@ -32,10 +32,11 @@ func TestLocalBackendHydrateSessionReturnsRunningWhenTmuxSessionAlreadyExists(t 
 	}
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: t.TempDir()}}
-	result, err := backend.HydrateSession(context.Background(), db.Session{
-		Branch:       "sid",
-		RepoPath:     filepath.Join(t.TempDir(), "repo"),
-		WorktreePath: filepath.Join(t.TempDir(), "worktree"),
+	result, err := backend.HydrateSession(context.Background(), sessions.State{
+		Branch:          "sid",
+		TmuxSessionName: "repo#sid",
+		RepoPath:        filepath.Join(t.TempDir(), "repo"),
+		WorktreePath:    filepath.Join(t.TempDir(), "worktree"),
 	}, AgentConfig{})
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
@@ -60,10 +61,11 @@ func TestLocalBackendHydrateSessionReturnsDeletedWhenWorktreeMissing(t *testing.
 	}
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: t.TempDir()}}
-	result, err := backend.HydrateSession(context.Background(), db.Session{
-		Branch:       "sid",
-		RepoPath:     filepath.Join(t.TempDir(), "repo"),
-		WorktreePath: filepath.Join(t.TempDir(), "missing"),
+	result, err := backend.HydrateSession(context.Background(), sessions.State{
+		Branch:          "sid",
+		TmuxSessionName: "repo#sid",
+		RepoPath:        filepath.Join(t.TempDir(), "repo"),
+		WorktreePath:    filepath.Join(t.TempDir(), "missing"),
 	}, AgentConfig{})
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
@@ -97,10 +99,11 @@ func TestLocalBackendHydrateSessionReturnsFailedWhenRuntimeRecreationFails(t *te
 	}
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: t.TempDir()}}
-	result, err := backend.HydrateSession(context.Background(), db.Session{
-		Branch:       "sid",
-		RepoPath:     filepath.Join(t.TempDir(), "repo"),
-		WorktreePath: worktreePath,
+	result, err := backend.HydrateSession(context.Background(), sessions.State{
+		Branch:          "sid",
+		TmuxSessionName: "repo#sid",
+		RepoPath:        filepath.Join(t.TempDir(), "repo"),
+		WorktreePath:    worktreePath,
 	}, AgentConfig{})
 	if err != nil {
 		t.Fatalf("HydrateSession: %v", err)
@@ -162,11 +165,11 @@ func TestLocalBackendHydrateSessionReusesLatestSessionForDirectory(t *testing.T)
 	opencodeCfg := opencodeConfigFromServer(t, srv)
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: t.TempDir()}}
-	result, err := backend.HydrateSession(context.Background(), db.Session{
-		Branch:       "sid",
-		RepoPath:     filepath.Join(t.TempDir(), "repo"),
-		WorktreePath: worktreePath,
-		AgentConfig:  sql.NullString{String: `{"model":"openai/gpt-5-mini"}`, Valid: true},
+	result, err := backend.HydrateSession(context.Background(), sessions.State{
+		Branch:          "sid",
+		TmuxSessionName: "repo#sid",
+		RepoPath:        filepath.Join(t.TempDir(), "repo"),
+		WorktreePath:    worktreePath,
 	}, AgentConfig{
 		Model:    "openai/gpt-5-mini",
 		Message:  &messages.Message{Parts: []messages.MessagePart{messages.NewTextPart("hello")}},
@@ -278,11 +281,11 @@ func TestLocalBackendHydrateSessionCreatesAndAutorunsWhenDirectoryHasNoSessions(
 	opencodeCfg := opencodeConfigFromServer(t, srv)
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: t.TempDir()}}
-	result, err := backend.HydrateSession(context.Background(), db.Session{
-		Branch:       "sid",
-		RepoPath:     filepath.Join(t.TempDir(), "repo"),
-		WorktreePath: worktreePath,
-		AgentConfig:  sql.NullString{String: `{"model":"openai/gpt-5-mini"}`, Valid: true},
+	result, err := backend.HydrateSession(context.Background(), sessions.State{
+		Branch:          "sid",
+		TmuxSessionName: "repo#sid",
+		RepoPath:        filepath.Join(t.TempDir(), "repo"),
+		WorktreePath:    worktreePath,
 	}, AgentConfig{
 		Model:     "openai/gpt-5-mini",
 		AgentName: "plan",

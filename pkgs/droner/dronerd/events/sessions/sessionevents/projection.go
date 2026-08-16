@@ -6,46 +6,27 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/eventlog"
 )
-
-type projectionMutation struct {
-	StreamID       string
-	Harness        string
-	Branch         string
-	BackendID      string
-	RepoPath       string
-	WorktreePath   string
-	RemoteURL      string
-	AgentConfig    string
-	LifecycleState string
-	PublicState    string
-	LastError      string
-	PRNumber       int64
-	PRState        string
-	PRCIState      string
-	PRUpdatedAt    time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
 
 func (s *System) applyProjectionEvent(ctx context.Context, evt eventlog.Envelope) error {
 	state, err := s.loadProjectionStateForUpdate(ctx, evt)
 	if err != nil {
 		return err
 	}
-	changed, err := state.Apply(evt)
+	changed, err := applySessionEvent(&state, evt)
 	if err != nil {
 		return err
 	}
 	if !changed {
 		return nil
 	}
-	return s.upsertProjection(ctx, state.projectionMutation())
+	return s.upsertProjection(ctx, state)
 }
 
-func (s *System) upsertProjection(ctx context.Context, m projectionMutation) error {
-	return s.projections.Upsert(ctx, m)
+func (s *System) upsertProjection(ctx context.Context, state sessions.State) error {
+	return s.projections.Upsert(ctx, state)
 }
 
 func nullableInt64(value int64) sql.NullInt64 {
@@ -76,43 +57,47 @@ func nullTimeValue(value sql.NullTime) time.Time {
 	return value.Time
 }
 
-func (s *System) loadProjectionStateForUpdate(ctx context.Context, evt eventlog.Envelope) (sessionState, error) {
+func (s *System) loadProjectionStateForUpdate(ctx context.Context, evt eventlog.Envelope) (sessions.State, error) {
 	state, err := s.projections.LoadStateByStreamID(ctx, string(evt.StreamID))
 	if err == nil {
 		return state, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return sessionState{}, err
+		return sessions.State{}, err
 	}
 	state, _, err = s.loadSessionStateBeforeVersion(ctx, string(evt.StreamID), evt.StreamVersion)
 	return state, err
 }
 
-func (s *System) loadCurrentProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+func (s *System) loadCurrentProjectionByBranch(ctx context.Context, branch string) (sessions.State, error) {
 	return s.projections.LoadCurrentByBranch(ctx, branch)
 }
 
-func (s *System) loadBlockedProjectionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (SessionRef, error) {
+func (s *System) loadBlockedProjectionByRepoAndBranch(ctx context.Context, repoPath string, branch string) (sessions.State, error) {
 	return s.projections.LoadBlockedByRepoAndBranch(ctx, repoPath, branch)
 }
 
-func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (SessionRef, error) {
+func (s *System) loadProjectionByWorktreePath(ctx context.Context, worktreePath string) (sessions.State, error) {
 	return s.projections.LoadByWorktreePath(ctx, worktreePath)
 }
 
-func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (SessionRef, error) {
+func (s *System) loadProjectionByTmuxSessionName(ctx context.Context, tmuxSessionName string) (sessions.State, error) {
+	return s.projections.LoadByTmuxSessionName(ctx, tmuxSessionName)
+}
+
+func (s *System) loadLatestNavigationProjectionByBranch(ctx context.Context, branch string) (sessions.State, error) {
 	return s.projections.LoadLatestNavigationByBranch(ctx, branch)
 }
 
-func (s *System) listActiveProjectionRefs(ctx context.Context) ([]SessionRef, error) {
+func (s *System) listActiveProjectionRefs(ctx context.Context) ([]sessions.State, error) {
 	return s.projections.ListActiveRefs(ctx)
 }
 
-func (s *System) listHydratableProjectionRefs(ctx context.Context) ([]SessionRef, error) {
+func (s *System) listHydratableProjectionRefs(ctx context.Context) ([]sessions.State, error) {
 	return s.projections.ListHydratableRefs(ctx)
 }
 
-func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string, backendID string) ([]SessionRef, error) {
+func (s *System) listReusableProjectionRefs(ctx context.Context, repoPath string, backendID string) ([]sessions.State, error) {
 	return s.projections.ListReusableRefs(ctx, repoPath, backendID)
 }
 

@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
@@ -17,7 +16,7 @@ const (
 )
 
 func NewSBranch(s string) SBranch {
-	return SBranch(strings.ReplaceAll(s, ".", "/"))
+	return SBranch(s)
 }
 
 type SBranch string

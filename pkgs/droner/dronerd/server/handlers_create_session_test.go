@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/core"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionevents"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -37,23 +39,19 @@ func (b *createSessionBackend) ID() conf.BackendID {
 	return conf.BackendLocal
 }
 
-func (b *createSessionBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
-	return filepath.Join(b.worktreeRoot, filepath.Base(repoPath)+".."+sessionID), nil
-}
-
-func (b *createSessionBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
+func (b *createSessionBackend) CreateSession(ctx context.Context, session sessions.State, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	return nil
 }
 
-func (b *createSessionBackend) HydrateSession(ctx context.Context, session db.Session, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
+func (b *createSessionBackend) HydrateSession(ctx context.Context, session sessions.State, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
 	return backends.HydrationResult{Status: db.SessionStatusActiveIdle}, nil
 }
 
-func (b *createSessionBackend) CompleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+func (b *createSessionBackend) CompleteSession(ctx context.Context, session sessions.State) error {
 	return nil
 }
 
-func (b *createSessionBackend) DeleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+func (b *createSessionBackend) DeleteSession(ctx context.Context, session sessions.State) error {
 	return nil
 }
 
@@ -286,8 +284,8 @@ func TestHandlerCreateSessionConflictsForBlockedRepoBranch(t *testing.T) {
 		WorktreePath:   sql.NullString{String: filepath.Join(filepath.Dir(repoDir), "worktrees", "repo..blocked-branch"), Valid: true},
 		RemoteUrl:      "",
 		AgentConfig:    "",
-		LifecycleState: string(sessionevents.LifecycleStateEnvironmentProvisioningStarted),
-		PublicState:    string(sessionevents.PublicStateCompleting),
+		LifecycleState: string(sessions.LifecycleStateEnvironmentProvisioningStarted),
+		PublicState:    string(sessions.PublicStateCompleting),
 		LastError:      "",
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -324,8 +322,8 @@ func TestHandlerCreateSessionAllowsCompletedRepoBranchReuse(t *testing.T) {
 		WorktreePath:   sql.NullString{String: filepath.Join(filepath.Dir(repoDir), "worktrees", "repo..completed-branch"), Valid: true},
 		RemoteUrl:      "",
 		AgentConfig:    "",
-		LifecycleState: string(sessionevents.LifecycleStateCompletionSuccess),
-		PublicState:    string(sessionevents.PublicStateCompleted),
+		LifecycleState: string(sessions.LifecycleStateCompletionSuccess),
+		PublicState:    string(sessions.PublicStateCompleted),
 		LastError:      "",
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -404,14 +402,30 @@ func TestHandlerCreateSessionUsesUnifiedDronerDB(t *testing.T) {
 	if sessionsTableCount != 0 {
 		t.Fatalf("sessions table count = %d, want 0", sessionsTableCount)
 	}
-	waitForSessionState(t, server, "evented-session", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "evented-session", sessions.PublicStateActiveIdle)
+}
+
+func TestHandlerCreateSessionAcceptsSlashBranch(t *testing.T) {
+	server, projectionQueries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
+
+	createEventSourcedSession(t, server, repoDir, "feature/foo")
+	projection := waitForProjection(t, projectionQueries, "feature/foo")
+	if !projection.Branch.Valid || projection.Branch.String != "feature/foo" {
+		t.Fatalf("projection branch = %#v, want feature/foo", projection.Branch)
+	}
+	if !projection.TmuxSessionName.Valid || strings.Contains(projection.TmuxSessionName.String, "/") {
+		t.Fatalf("tmux session name = %#v, want valid name without slash", projection.TmuxSessionName)
+	}
+	if !projection.WorktreePath.Valid || strings.Contains(filepath.Base(projection.WorktreePath.String), "/") {
+		t.Fatalf("worktree path = %#v, want valid leaf without slash", projection.WorktreePath)
+	}
 }
 
 func TestHandlerCompleteSessionEventSourcedPathCompletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "complete-me")
-	ref := waitForSessionState(t, server, "complete-me", sessionevents.PublicStateActiveIdle)
+	ref := waitForSessionState(t, server, "complete-me", sessions.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("complete-me")})
 	if err != nil {
@@ -450,7 +464,7 @@ func TestHandlerListSessionsWithoutStatusFilterIncludesCompleted(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "completed-visible")
-	waitForSessionState(t, server, "completed-visible", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "completed-visible", sessions.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionCompleteRequest{Branch: schemas.NewSBranch("completed-visible")})
 	if err != nil {
@@ -485,7 +499,7 @@ func TestHandlerDeleteSessionEventSourcedPathDeletesSession(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "delete-me")
-	ref := waitForSessionState(t, server, "delete-me", sessionevents.PublicStateActiveIdle)
+	ref := waitForSessionState(t, server, "delete-me", sessions.PublicStateActiveIdle)
 
 	payload, err := json.Marshal(schemas.SessionDeleteRequest{Branch: schemas.NewSBranch("delete-me")})
 	if err != nil {
@@ -525,8 +539,8 @@ func TestHandlerNukeSessionsEventSourcedPathDeletesActiveSessions(t *testing.T) 
 
 	createEventSourcedSession(t, server, repoDir, "nuke-a")
 	createEventSourcedSession(t, server, repoDir, "nuke-b")
-	waitForSessionState(t, server, "nuke-a", sessionevents.PublicStateActiveIdle)
-	waitForSessionState(t, server, "nuke-b", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "nuke-a", sessions.PublicStateActiveIdle)
+	waitForSessionState(t, server, "nuke-b", sessions.PublicStateActiveIdle)
 
 	req := httptest.NewRequest(http.MethodPost, "/sessions/nuke", bytes.NewReader([]byte("{}")))
 	rec := httptest.NewRecorder()
@@ -569,7 +583,7 @@ func TestHandlerResetSessionResetsStreamToSelectedEvent(t *testing.T) {
 	server, queries, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	created := createEventSourcedSession(t, server, repoDir, "reset-me")
-	waitForSessionState(t, server, "reset-me", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "reset-me", sessions.PublicStateActiveIdle)
 
 	log, err := server.Base.EventLogs.Sessions()
 	if err != nil {
@@ -608,7 +622,7 @@ func TestHandlerResetSessionResetsStreamToSelectedEvent(t *testing.T) {
 		t.Fatalf("task type = %q, want session_reset", response.Type)
 	}
 
-	waitForSessionState(t, server, "reset-me", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "reset-me", sessions.PublicStateActiveIdle)
 	projection := waitForProjection(t, queries, "reset-me")
 	if got, want := projection.StreamID, created.ID; got != want {
 		t.Fatalf("projection stream = %q, want %q", got, want)
@@ -643,7 +657,7 @@ func TestHandlerListSessionsSupportsCursorDirections(t *testing.T) {
 	branches := []string{"cursor-a", "cursor-b", "cursor-c", "cursor-d"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		waitForSessionState(t, server, branch, sessions.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -685,7 +699,7 @@ func TestHandlerSessionNavigationWithoutParamsReturnsFirstRunningSession(t *test
 	branches := []string{"nav-a", "nav-b", "nav-c"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		waitForSessionState(t, server, branch, sessions.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -717,7 +731,7 @@ func TestHandlerSessionNavigationByIDMatchesSessionListing(t *testing.T) {
 	branches := []string{"nav-id-a", "nav-id-b", "nav-id-c", "nav-id-d"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		waitForSessionState(t, server, branch, sessions.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -743,7 +757,7 @@ func TestHandlerSessionNavigationIDTakesPrecedenceOverTmuxSession(t *testing.T) 
 	branches := []string{"nav-priority-a", "nav-priority-b", "nav-priority-c"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		waitForSessionState(t, server, branch, sessions.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -763,15 +777,16 @@ func TestHandlerSessionNavigationByTmuxSessionResolvesCompletedSessionID(t *test
 	createEventSourcedSession(t, server, repoDir, "branch-nav-a")
 	createEventSourcedSession(t, server, repoDir, "branch-nav-b")
 	createEventSourcedSession(t, server, repoDir, "branch-nav-c")
-	waitForSessionState(t, server, "branch-nav-a", sessionevents.PublicStateActiveIdle)
-	completedRef := waitForSessionState(t, server, "branch-nav-b", sessionevents.PublicStateActiveIdle)
-	waitForSessionState(t, server, "branch-nav-c", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "branch-nav-a", sessions.PublicStateActiveIdle)
+	completedRef := waitForSessionState(t, server, "branch-nav-b", sessions.PublicStateActiveIdle)
+	waitForSessionState(t, server, "branch-nav-c", sessions.PublicStateActiveIdle)
 	time.Sleep(2 * time.Millisecond)
 
 	completeSession(t, server, "branch-nav-b")
 	completedRef = waitForSessionState(t, server, "branch-nav-b", "completed")
 
-	response := navigateSession(t, server, "/_session/next?tmuxsession=workspace#branch-nav-b")
+	completedSession := listSessions(t, server, "/sessions?status=completed&limit=10").Sessions[0]
+	response := navigateSession(t, server, "/_session/next?tmuxsession="+url.QueryEscape(completedSession.TmuxSession))
 	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1&cursor="+completedRef.StreamID+"&direction=after")
 	if len(expected.Sessions) == 0 {
 		t.Fatalf("expected navigation target for completed branch")
@@ -787,7 +802,7 @@ func TestHandlerSessionNavigationWrapsAtEdgesWhenCursorPresent(t *testing.T) {
 	branches := []string{"nav-wrap-a", "nav-wrap-b", "nav-wrap-c"}
 	for _, branch := range branches {
 		createEventSourcedSession(t, server, repoDir, branch)
-		waitForSessionState(t, server, branch, sessionevents.PublicStateActiveIdle)
+		waitForSessionState(t, server, branch, sessions.PublicStateActiveIdle)
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -820,7 +835,7 @@ func TestHandlerSessionNavigationSingleSessionWrapsToSelf(t *testing.T) {
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nav-single")
-	ref := waitForSessionState(t, server, "nav-single", sessionevents.PublicStateActiveIdle)
+	ref := waitForSessionState(t, server, "nav-single", sessions.PublicStateActiveIdle)
 
 	response := navigateSession(t, server, "/_session/next?id="+ref.StreamID)
 	if got, want := len(response.Sessions), 1; got != want {
@@ -843,7 +858,7 @@ func TestHandlerSessionNavigationUnknownTmuxSessionFallsBackToNewest(t *testing.
 	server, _, repoDir, _ := newEventSourcedCreateSessionTestServer(t)
 
 	createEventSourcedSession(t, server, repoDir, "nav-empty")
-	waitForSessionState(t, server, "nav-empty", sessionevents.PublicStateActiveIdle)
+	waitForSessionState(t, server, "nav-empty", sessions.PublicStateActiveIdle)
 
 	expected := listSessions(t, server, "/sessions?status=active.idle&limit=1")
 	if len(expected.Sessions) != 1 {
@@ -964,7 +979,7 @@ func completeSession(t *testing.T, server *Server, branch string) {
 	}
 }
 
-func waitForSessionState(t *testing.T, server *Server, branch string, wantState sessionevents.PublicState) sessionevents.SessionRef {
+func waitForSessionState(t *testing.T, server *Server, branch string, wantState sessions.PublicState) sessions.State {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -979,7 +994,7 @@ func waitForSessionState(t *testing.T, server *Server, branch string, wantState 
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for session %q state %q", branch, wantState)
-	return sessionevents.SessionRef{}
+	return sessions.State{}
 }
 
 func waitForProjection(t *testing.T, queries *db.Queries, branch string) db.SessionProjection {

@@ -6,18 +6,18 @@ import (
 	"sync"
 
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/db"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
 
 type Backend interface {
 	ID() conf.BackendID
-	WorktreePath(repoPath string, sessionID string) (string, error)
-	CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig AgentConfig, opts ...CreateSessionOptions) error
-	HydrateSession(ctx context.Context, session db.Session, agentConfig AgentConfig) (HydrationResult, error)
+	CreateSession(ctx context.Context, session sessions.State, agentConfig AgentConfig, opts ...CreateSessionOptions) error
+	HydrateSession(ctx context.Context, session sessions.State, agentConfig AgentConfig) (HydrationResult, error)
 	// CompleteSession stops the active session runtime (e.g. tmux/opencode) but keeps the worktree/branch for reuse.
-	CompleteSession(ctx context.Context, worktreePath string, sessionID string) error
-	DeleteSession(ctx context.Context, worktreePath string, sessionID string) error
+	CompleteSession(ctx context.Context, session sessions.State) error
+	DeleteSession(ctx context.Context, session sessions.State) error
 }
 
 var ErrUnknownBackend = errors.New("unknown backend")
@@ -43,24 +43,11 @@ func (c AgentConfig) ToDescription() string {
 	return messages.ToRawText(c.Message)
 }
 
-type ReusableWorktreeCandidate struct {
-	StreamID     string
-	Branch       string
-	RepoPath     string
-	WorktreePath string
-}
-
-type WorktreeSessionRef struct {
-	StreamID    string
-	Branch      string
-	PublicState string
-}
-
 type CreateSessionOptions struct {
-	NextReusableWorktree         func(ctx context.Context) (*ReusableWorktreeCandidate, error)
-	LookupWorktreeSession        func(ctx context.Context, worktreePath string) (*WorktreeSessionRef, error)
+	NextReusableWorktree         func(ctx context.Context) (*sessions.State, error)
+	LookupWorktreeSession        func(ctx context.Context, worktreePath string) (*sessions.State, error)
 	CurrentStreamID              string
-	MarkReusableWorktreeDeletion func(candidate ReusableWorktreeCandidate)
+	MarkReusableWorktreeDeletion func(session sessions.State)
 }
 
 type HydrationResult struct {

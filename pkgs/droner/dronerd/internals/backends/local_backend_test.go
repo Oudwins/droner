@@ -9,16 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 )
 
-func TestLocalBackendCompleteSessionKillsTmuxSessionNameFromWorktreePath(t *testing.T) {
-	// This test ensures CompleteSession kills the same tmux session name that
-	// CreateSession/DeleteSession use: `<repo>#<sessionID>` derived from the
-	// worktree folder name `<repo>..<sessionID>`.
-	//
-	// Regression: CompleteSession used to call killTmuxSession(sessionID), which
-	// doesn't match the real tmux session name and leaves tmux sessions running.
+func TestLocalBackendCompleteSessionKillsPersistedTmuxSessionName(t *testing.T) {
 	worktreePath := "/home/tmx/.droner/worktrees/droner..readme-local-dev-ljd-17"
 	sessionID := "readme-local-dev-ljd-17"
 	expected := "droner#readme-local-dev-ljd-17"
@@ -39,7 +34,7 @@ func TestLocalBackendCompleteSessionKillsTmuxSessionNameFromWorktreePath(t *test
 	t.Cleanup(func() { execCommand = origExec })
 
 	backend := LocalBackend{}
-	if err := backend.CompleteSession(context.Background(), worktreePath, sessionID); err != nil {
+	if err := backend.CompleteSession(context.Background(), sessions.State{Branch: sessionID, TmuxSessionName: expected, WorktreePath: worktreePath}); err != nil {
 		t.Fatalf("CompleteSession returned error: %v", err)
 	}
 
@@ -143,9 +138,10 @@ func TestLocalBackendPrepareSessionWorktreeReusesExistingTargetPath(t *testing.T
 	useBackendHelperProcess(t, logPath, nil)
 
 	backend := LocalBackend{}
-	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
-		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
-			return &WorktreeSessionRef{StreamID: "old", Branch: "feature", PublicState: "completed"}, nil
+	session := sessions.State{StreamID: "current", Branch: "feature", TmuxSessionName: "repo#feature", RepoPath: "/repo", WorktreePath: worktreePath}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), session, CreateSessionOptions{
+		LookupWorktreeSession: func(context.Context, string) (*sessions.State, error) {
+			return &sessions.State{StreamID: "old", Branch: "feature", PublicState: sessions.PublicStateCompleted}, nil
 		},
 	}, localBranchState{localExists: true}, true)
 	if err != nil {
@@ -178,9 +174,10 @@ func TestLocalBackendPrepareSessionWorktreeBlocksLiveExistingTargetPath(t *testi
 	}
 
 	backend := LocalBackend{}
-	_, _, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
-		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
-			return &WorktreeSessionRef{StreamID: "live-stream", Branch: "feature", PublicState: "active.idle"}, nil
+	session := sessions.State{StreamID: "current", Branch: "feature", TmuxSessionName: "repo#feature", RepoPath: "/repo", WorktreePath: worktreePath}
+	_, _, err := backend.prepareSessionWorktree(context.Background(), session, CreateSessionOptions{
+		LookupWorktreeSession: func(context.Context, string) (*sessions.State, error) {
+			return &sessions.State{StreamID: "live-stream", Branch: "feature", PublicState: sessions.PublicStateActiveIdle}, nil
 		},
 	}, localBranchState{localExists: true}, true)
 	if err == nil || !strings.Contains(err.Error(), "status=active.idle") || !strings.Contains(err.Error(), "streamID=live-stream") {
@@ -197,10 +194,11 @@ func TestLocalBackendPrepareSessionWorktreeIgnoresCurrentStreamCollision(t *test
 	useBackendHelperProcess(t, logPath, nil)
 
 	backend := LocalBackend{}
-	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", worktreePath, "feature", CreateSessionOptions{
+	session := sessions.State{StreamID: "current-stream", Branch: "feature", TmuxSessionName: "repo#feature", RepoPath: "/repo", WorktreePath: worktreePath}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), session, CreateSessionOptions{
 		CurrentStreamID: "current-stream",
-		LookupWorktreeSession: func(context.Context, string) (*WorktreeSessionRef, error) {
-			return &WorktreeSessionRef{StreamID: "current-stream", Branch: "feature", PublicState: "queued"}, nil
+		LookupWorktreeSession: func(context.Context, string) (*sessions.State, error) {
+			return &sessions.State{StreamID: "current-stream", Branch: "feature", PublicState: sessions.PublicStateQueued}, nil
 		},
 	}, localBranchState{localExists: true}, true)
 	if err != nil {
@@ -226,9 +224,10 @@ func TestLocalBackendPrepareSessionWorktreeReusesRepoCandidateBeforeCreatingFres
 	useBackendHelperProcess(t, logPath, nil)
 
 	backend := LocalBackend{config: &conf.LocalBackendConfig{WorktreeDir: worktreeRoot}}
-	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), "/repo", targetWorktreePath, "feature", CreateSessionOptions{
-		NextReusableWorktree: func(context.Context) (*ReusableWorktreeCandidate, error) {
-			candidate := &ReusableWorktreeCandidate{StreamID: "old-stream", Branch: "old", RepoPath: "/repo", WorktreePath: oldWorktreePath}
+	session := sessions.State{StreamID: "current-stream", Branch: "feature", TmuxSessionName: "repo#feature", RepoPath: "/repo", WorktreePath: targetWorktreePath}
+	reused, cleanupCandidate, err := backend.prepareSessionWorktree(context.Background(), session, CreateSessionOptions{
+		NextReusableWorktree: func(context.Context) (*sessions.State, error) {
+			candidate := &sessions.State{StreamID: "old-stream", Branch: "old", RepoPath: "/repo", WorktreePath: oldWorktreePath}
 			return candidate, nil
 		},
 	}, localBranchState{localExists: true}, false)

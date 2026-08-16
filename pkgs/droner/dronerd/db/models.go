@@ -23,21 +23,22 @@ type PrLatestSnapshot struct {
 }
 
 type SessionProjection struct {
-	StreamID       string
-	Harness        string
-	Branch         sql.NullString
-	BackendID      string
-	RepoPath       string
-	WorktreePath   sql.NullString
-	RemoteUrl      string
-	AgentConfig    string
-	LifecycleState string
-	PublicState    string
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	PrNumber       sql.NullInt64
-	PrState        sql.NullString
-	PrCiState      sql.NullString
-	PrUpdatedAt    sql.NullTime
+	StreamID        string
+	Harness         string
+	Branch          sql.NullString
+	BackendID       string
+	RepoPath        string
+	WorktreePath    sql.NullString
+	RemoteUrl       string
+	AgentConfig     string
+	LifecycleState  string
+	PublicState     string
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	PrNumber        sql.NullInt64
+	PrState         sql.NullString
+	PrCiState       sql.NullString
+	PrUpdatedAt     sql.NullTime
+	TmuxSessionName sql.NullString
 }

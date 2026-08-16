@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
@@ -110,7 +111,7 @@ func TestLocalBackend_CreateSession_AutorunsPromptViaPromptAsyncEndpoint(t *test
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	select {
@@ -185,7 +186,7 @@ func TestLocalBackend_CreateSession_DoesNotFailWhenAutorunTimesOut(t *testing.T)
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	select {
@@ -237,7 +238,7 @@ func TestLocalBackend_CreateSession_DoesNotCreateOpencodeSessionWithoutPrompt(t 
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if sessionCalled {

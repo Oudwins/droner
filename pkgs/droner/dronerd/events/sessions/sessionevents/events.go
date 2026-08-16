@@ -40,8 +40,9 @@ type branchPayload struct {
 }
 
 type enrichmentSucceededPayload struct {
-	Branch       string `json:"branch"`
-	WorktreePath string `json:"worktreePath"`
+	Branch          string `json:"branch"`
+	TmuxSessionName string `json:"tmuxSessionName"`
+	WorktreePath    string `json:"worktreePath"`
 }
 
 type provisioningPayload struct {
@@ -92,8 +93,8 @@ func newBranchPayload(branch string) branchPayload {
 	return branchPayload{Branch: branch}
 }
 
-func newEnrichmentSucceededPayload(branch string, worktreePath string) enrichmentSucceededPayload {
-	return enrichmentSucceededPayload{Branch: branch, WorktreePath: worktreePath}
+func newEnrichmentSucceededPayload(branch string, tmuxSessionName string, worktreePath string) enrichmentSucceededPayload {
+	return enrichmentSucceededPayload{Branch: branch, TmuxSessionName: tmuxSessionName, WorktreePath: worktreePath}
 }
 
 func decodeQueuedPayload(evt eventlog.Envelope) (queuedPayload, error) {

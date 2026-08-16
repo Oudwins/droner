@@ -13,6 +13,7 @@ import (
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventlogs"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions/sessionslog"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -34,11 +35,7 @@ func (b *remoteTestBackend) ID() conf.BackendID {
 	return conf.BackendLocal
 }
 
-func (b *remoteTestBackend) WorktreePath(repoPath string, sessionID string) (string, error) {
-	return filepath.Join(b.worktreeRoot, filepath.Base(repoPath)+".."+sessionID), nil
-}
-
-func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, worktreePath string, sessionID string, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
+func (b *remoteTestBackend) CreateSession(ctx context.Context, session sessions.State, agentConfig backends.AgentConfig, opts ...backends.CreateSessionOptions) error {
 	b.mu.Lock()
 	b.createCalls++
 	b.mu.Unlock()
@@ -54,7 +51,7 @@ func (b *remoteTestBackend) CreateSession(ctx context.Context, repoPath string, 
 	return nil
 }
 
-func (b *remoteTestBackend) HydrateSession(ctx context.Context, session coredb.Session, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
+func (b *remoteTestBackend) HydrateSession(ctx context.Context, session sessions.State, agentConfig backends.AgentConfig) (backends.HydrationResult, error) {
 	b.mu.Lock()
 	b.hydrateCalls++
 	status := b.createHydrateStatus
@@ -65,14 +62,14 @@ func (b *remoteTestBackend) HydrateSession(ctx context.Context, session coredb.S
 	return backends.HydrationResult{Status: status}, nil
 }
 
-func (b *remoteTestBackend) CompleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+func (b *remoteTestBackend) CompleteSession(ctx context.Context, session sessions.State) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.completeCalls++
 	return nil
 }
 
-func (b *remoteTestBackend) DeleteSession(ctx context.Context, worktreePath string, sessionID string) error {
+func (b *remoteTestBackend) DeleteSession(ctx context.Context, session sessions.State) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.deleteCalls++
@@ -155,7 +152,7 @@ func newRemoteTestSystem(t *testing.T) (*System, *remoteTestBackend, string, con
 	return system, backend, dataDir, cancel
 }
 
-func waitForPublicState(t *testing.T, system *System, branch string, want PublicState) SessionRef {
+func waitForPublicState(t *testing.T, system *System, branch string, want sessions.PublicState) sessions.State {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -166,7 +163,7 @@ func waitForPublicState(t *testing.T, system *System, branch string, want Public
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("session %s did not reach state %s", branch, want)
-	return SessionRef{}
+	return sessions.State{}
 }
 
 func loadEventTypes(t *testing.T, dataDir string, streamID string) []eventlog.EventType {
@@ -219,7 +216,7 @@ func TestHydrateRequestsRestartProvisioningForReadySession(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	waitForPublicState(t, system, branch, PublicStateActiveIdle)
+	waitForPublicState(t, system, branch, sessions.PublicStateActiveIdle)
 	beforeCreateCalls := backend.CreateCalls()
 	if beforeCreateCalls == 0 {
 		t.Fatal("expected initial create provisioning to run")
@@ -280,11 +277,11 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("CreateSession old: %v", err)
 	}
-	waitForPublicState(t, system, "old-branch", PublicStateActiveIdle)
+	waitForPublicState(t, system, "old-branch", sessions.PublicStateActiveIdle)
 	if _, err := system.RequestCompletion(context.Background(), "old-branch"); err != nil {
 		t.Fatalf("RequestCompletion old: %v", err)
 	}
-	waitForPublicState(t, system, "old-branch", PublicStateCompleted)
+	waitForPublicState(t, system, "old-branch", sessions.PublicStateCompleted)
 
 	if _, err := system.CreateSession(context.Background(), CreateSessionInput{
 		StreamID:        "new-stream",
@@ -296,8 +293,8 @@ func TestCreateSessionRequestsDeletionForReusedCompletedCandidate(t *testing.T) 
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	waitForPublicState(t, system, "new-branch", PublicStateActiveIdle)
-	waitForPublicState(t, system, "old-branch", PublicStateDeleted)
+	waitForPublicState(t, system, "new-branch", sessions.PublicStateActiveIdle)
+	waitForPublicState(t, system, "old-branch", sessions.PublicStateDeleted)
 
 	if backend.deleteCalls != 1 {
 		t.Fatalf("expected old reused session delete to run once, got %d", backend.deleteCalls)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
 	"github.com/Oudwins/droner/pkgs/droner/internals/messages"
 )
@@ -64,7 +65,7 @@ func TestLocalBackend_CreateSession_StartsOpencodeInWorktreeDir(t *testing.T) {
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if len(tmuxOpencodeArgs) == 0 {
@@ -139,7 +140,7 @@ func TestLocalBackend_CreateSession_OpensOpencodeWithoutSessionWhenPromptMissing
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if len(tmuxOpencodeArgs) == 0 {
@@ -203,7 +204,7 @@ func TestLocalBackend_CreateSession_OpensSplitTerminalWindow(t *testing.T) {
 		},
 	}
 
-	if err := backend.CreateSession(context.Background(), repoPath, worktreePath, "sid", agentCfg); err != nil {
+	if err := backend.CreateSession(context.Background(), sessions.State{Branch: "sid", TmuxSessionName: "repo#sid", RepoPath: repoPath, WorktreePath: worktreePath}, agentCfg); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

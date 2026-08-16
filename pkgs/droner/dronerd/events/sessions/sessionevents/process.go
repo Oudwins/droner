@@ -9,6 +9,7 @@ import (
 
 	coredb "github.com/Oudwins/droner/pkgs/droner/dronerd/db"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/eventtypes"
+	"github.com/Oudwins/droner/pkgs/droner/dronerd/events/sessions"
 	"github.com/Oudwins/droner/pkgs/droner/dronerd/internals/backends"
 	sessionids "github.com/Oudwins/droner/pkgs/droner/dronerd/internals/sessionIds"
 	"github.com/Oudwins/droner/pkgs/droner/internals/conf"
@@ -22,7 +23,7 @@ func (s *System) handleQueuedEvent(ctx context.Context, evt eventlog.Envelope) e
 	}
 	if err == nil {
 		switch state.LifecycleState {
-		case LifecycleStateEnrichmentRequested, LifecycleStateEnrichmentSucceeded, LifecycleStateReady, LifecycleStateEnvironmentProvisioningStarted, LifecycleStateEnvironmentProvisioningSuccess:
+		case sessions.LifecycleStateEnrichmentRequested, sessions.LifecycleStateEnrichmentSucceeded, sessions.LifecycleStateReady, sessions.LifecycleStateEnvironmentProvisioningStarted, sessions.LifecycleStateEnvironmentProvisioningSuccess:
 			return nil
 		}
 	}
@@ -70,17 +71,16 @@ func (s *System) handleEnrichmentRequested(ctx context.Context, evt eventlog.Env
 		}
 	}
 
-	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
-	if err != nil {
+	if _, err := s.backends.Get(conf.BackendID(state.BackendID)); err != nil {
 		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve backend: %w", err))
 	}
 
-	worktreePath, err := backend.WorktreePath(state.RepoPath, branch)
+	tmuxSessionName, worktreePath, err := sessions.DeriveNames(state.RepoPath, s.config.Sessions.Backends.Local.WorktreeDir, branch)
 	if err != nil {
-		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to resolve worktree path: %w", err))
+		return s.appendEnrichmentFailure(ctx, evt, fmt.Errorf("failed to derive session identity: %w", err))
 	}
 
-	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionEnrichmentSucceeded, newEnrichmentSucceededPayload(branch, worktreePath), string(evt.ID), string(evt.StreamID))
+	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionEnrichmentSucceeded, newEnrichmentSucceededPayload(branch, tmuxSessionName, worktreePath), string(evt.ID), string(evt.StreamID))
 	return err
 }
 
@@ -89,7 +89,7 @@ func (s *System) handleEnrichmentSucceeded(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == LifecycleStateEnvironmentProvisioningStarted || state.LifecycleState == LifecycleStateEnvironmentProvisioningSuccess || state.LifecycleState == LifecycleStateReady {
+	if state.LifecycleState == sessions.LifecycleStateEnvironmentProvisioningStarted || state.LifecycleState == sessions.LifecycleStateEnvironmentProvisioningSuccess || state.LifecycleState == sessions.LifecycleStateReady {
 		return nil
 	}
 	payload, err := decodeEnrichmentSucceededPayload(evt)
@@ -109,25 +109,25 @@ func (s *System) handleHydrationRequested(ctx context.Context, evt eventlog.Enve
 	var nextType eventlog.EventType
 	var nextPayload any
 	switch state.LifecycleState {
-	case LifecycleStateQueued:
+	case sessions.LifecycleStateQueued:
 		nextType = eventtypes.SessionEnrichmentRequested
 		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
-	case LifecycleStateEnrichmentRequested:
+	case sessions.LifecycleStateEnrichmentRequested:
 		nextType = eventtypes.SessionEnrichmentRequested
 		nextPayload = queuedPayload{RequestedBranch: state.RequestedBranch}
-	case LifecycleStateEnrichmentSucceeded:
+	case sessions.LifecycleStateEnrichmentSucceeded:
 		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
-	case LifecycleStateEnvironmentProvisioningStarted:
+	case sessions.LifecycleStateEnvironmentProvisioningStarted:
 		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeInitial)
-	case LifecycleStateReady:
+	case sessions.LifecycleStateReady:
 		nextType = eventtypes.SessionEnvironmentProvisioningStarted
 		nextPayload = provisioningStepPayload(state.Branch, provisioningModeRestart)
-	case LifecycleStateCompletionRequested, LifecycleStateCompletionStarted:
+	case sessions.LifecycleStateCompletionRequested, sessions.LifecycleStateCompletionStarted:
 		nextType = eventtypes.SessionCompletionStarted
 		nextPayload = requestStepPayload(state.Branch)
-	case LifecycleStateDeletionRequested, LifecycleStateDeletionStarted:
+	case sessions.LifecycleStateDeletionRequested, sessions.LifecycleStateDeletionStarted:
 		nextType = eventtypes.SessionDeletionStarted
 		nextPayload = requestStepPayload(state.Branch)
 	default:
@@ -159,17 +159,7 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 	}
 
 	if payload.Mode == provisioningModeRestart {
-		result, hydrateErr := backend.HydrateSession(ctx, coredb.Session{
-			ID:           state.StreamID,
-			Harness:      state.Harness,
-			Branch:       state.Branch,
-			Status:       coredb.SessionStatusActiveIdle,
-			BackendID:    state.BackendID,
-			RepoPath:     state.RepoPath,
-			RemoteUrl:    sql.NullString{String: state.RemoteURL, Valid: state.RemoteURL != ""},
-			WorktreePath: state.WorktreePath,
-			AgentConfig:  sql.NullString{String: state.AgentConfig, Valid: state.AgentConfig != ""},
-		}, agentConfig)
+		result, hydrateErr := backend.HydrateSession(ctx, state, agentConfig)
 		if hydrateErr != nil {
 			return s.appendProvisioningFailure(ctx, evt, hydrateErr)
 		}
@@ -185,23 +175,18 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 		if err != nil {
 			return s.appendProvisioningFailure(ctx, evt, err)
 		}
-		cleanupCandidates := make([]backends.ReusableWorktreeCandidate, 0)
+		cleanupCandidates := make([]sessions.State, 0)
 		nextIndex := 0
-		if createErr := backend.CreateSession(ctx, state.RepoPath, state.WorktreePath, state.Branch, agentConfig, backends.CreateSessionOptions{
-			NextReusableWorktree: func(context.Context) (*backends.ReusableWorktreeCandidate, error) {
+		if createErr := backend.CreateSession(ctx, state, agentConfig, backends.CreateSessionOptions{
+			NextReusableWorktree: func(context.Context) (*sessions.State, error) {
 				if nextIndex >= len(reusableRefs) {
 					return nil, nil
 				}
 				ref := reusableRefs[nextIndex]
 				nextIndex++
-				return &backends.ReusableWorktreeCandidate{
-					StreamID:     ref.StreamID,
-					Branch:       ref.Branch,
-					RepoPath:     ref.RepoPath,
-					WorktreePath: ref.WorktreePath,
-				}, nil
+				return &ref, nil
 			},
-			LookupWorktreeSession: func(ctx context.Context, worktreePath string) (*backends.WorktreeSessionRef, error) {
+			LookupWorktreeSession: func(ctx context.Context, worktreePath string) (*sessions.State, error) {
 				ref, err := s.LookupSessionByWorktreePath(ctx, worktreePath)
 				if err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
@@ -209,10 +194,10 @@ func (s *System) handleProvisioningStarted(ctx context.Context, evt eventlog.Env
 					}
 					return nil, err
 				}
-				return &backends.WorktreeSessionRef{StreamID: ref.StreamID, Branch: ref.Branch, PublicState: ref.PublicState.String()}, nil
+				return &ref, nil
 			},
 			CurrentStreamID: string(evt.StreamID),
-			MarkReusableWorktreeDeletion: func(candidate backends.ReusableWorktreeCandidate) {
+			MarkReusableWorktreeDeletion: func(candidate sessions.State) {
 				cleanupCandidates = append(cleanupCandidates, candidate)
 			},
 		}); createErr != nil {
@@ -246,7 +231,7 @@ func (s *System) handleCompletionRequested(ctx context.Context, evt eventlog.Env
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == LifecycleStateCompletionStarted || state.LifecycleState == LifecycleStateCompletionSuccess || state.LifecycleState == LifecycleStateDeletionSuccess {
+	if state.LifecycleState == sessions.LifecycleStateCompletionStarted || state.LifecycleState == sessions.LifecycleStateCompletionSuccess || state.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -262,14 +247,14 @@ func (s *System) handleCompletionStarted(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == LifecycleStateCompletionSuccess || state.LifecycleState == LifecycleStateDeletionSuccess {
+	if state.LifecycleState == sessions.LifecycleStateCompletionSuccess || state.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return nil
 	}
 	backend, err := s.backends.Get(conf.BackendID(state.BackendID))
 	if err != nil {
 		return s.appendCompletionFailure(ctx, evt, err)
 	}
-	if err := backend.CompleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
+	if err := backend.CompleteSession(ctx, state); err != nil {
 		return s.appendCompletionFailure(ctx, evt, err)
 	}
 	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionCompletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
@@ -281,7 +266,7 @@ func (s *System) handleDeletionRequested(ctx context.Context, evt eventlog.Envel
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == LifecycleStateDeletionStarted || state.LifecycleState == LifecycleStateDeletionSuccess {
+	if state.LifecycleState == sessions.LifecycleStateDeletionStarted || state.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return nil
 	}
 	payload, err := decodeBranchPayload(evt)
@@ -297,7 +282,7 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 	if err != nil {
 		return err
 	}
-	if state.LifecycleState == LifecycleStateDeletionSuccess {
+	if state.LifecycleState == sessions.LifecycleStateDeletionSuccess {
 		return nil
 	}
 	if strings.TrimSpace(state.WorktreePath) == "" {
@@ -308,7 +293,7 @@ func (s *System) handleDeletionStarted(ctx context.Context, evt eventlog.Envelop
 	if err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
-	if err := backend.DeleteSession(ctx, state.WorktreePath, state.Branch); err != nil {
+	if err := backend.DeleteSession(ctx, state); err != nil {
 		return s.appendDeletionFailure(ctx, evt, err)
 	}
 	_, err = s.appendEvent(ctx, string(evt.StreamID), eventtypes.SessionDeletionSuccess, requestStepPayload(state.Branch), string(evt.ID), string(evt.StreamID))
