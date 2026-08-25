@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	systemclipboard "golang.design/x/clipboard"
 )
 
 const maxClipboardImageBytes = 5 << 20
@@ -40,17 +42,10 @@ func defaultReadClipboardImage() (clipboardImage, bool, error) {
 }
 
 func readClipboardImageDarwin() (clipboardImage, bool, error) {
-	if _, err := exec.LookPath("pngpaste"); err != nil {
-		return clipboardImage{}, false, nil
+	if err := systemclipboard.Init(); err != nil {
+		return clipboardImage{}, false, fmt.Errorf("initialize clipboard: %w", err)
 	}
-	output, err := exec.Command("pngpaste", "-").Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return clipboardImage{}, false, nil
-		}
-		return clipboardImage{}, false, err
-	}
+	output := systemclipboard.Read(systemclipboard.FmtImage)
 	if len(output) == 0 {
 		return clipboardImage{}, false, nil
 	}
