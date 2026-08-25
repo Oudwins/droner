@@ -146,6 +146,16 @@ func TestSessionComposerEnterSubmitsStructuredMessage(t *testing.T) {
 	}
 }
 
+func TestSessionComposerPreservesPromptsOverDefaultTextareaHeight(t *testing.T) {
+	model := newSessionComposerModel("", nil, []string{"build", "plan"})
+	prompt := strings.Repeat("plan step\n", 150)
+	model.input.SetValue(prompt)
+
+	if got := model.input.Value(); got != prompt {
+		t.Fatalf("input length = %d, want %d", len(got), len(prompt))
+	}
+}
+
 func TestSessionComposerAltEnterInsertsNewline(t *testing.T) {
 	model := newSessionComposerModel("", nil, []string{"build", "plan"})
 	model.input.SetValue("alpha")

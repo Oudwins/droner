@@ -238,6 +238,7 @@ func newSessionComposerModelWithCommands(repoRoot string, fileCandidates []strin
 	input.Placeholder = "Ask anything... \"Fix broken tests\""
 	input.ShowLineNumbers = false
 	input.CharLimit = 0
+	input.MaxHeight = 0
 	input.EndOfBufferCharacter = ' '
 	input.SetHeight(composerTextareaRows)
 	input.FocusedStyle = focusedStyle
